@@ -3,736 +3,752 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DMC Signal Engine — BTC/USD</title>
+<title>DMC Signal Engine · BTC/USD</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;600&family=Sora:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
-:root {
-  --bg: #080b0f;
-  --panel: #0d1117;
-  --card: #111820;
-  --border: #1c2535;
-  --border2: #243040;
-  --green: #00ff88;
-  --green-dim: rgba(0,255,136,0.12);
-  --red: #ff4466;
-  --red-dim: rgba(255,68,102,0.12);
-  --amber: #ffcc00;
-  --amber-dim: rgba(255,204,0,0.1);
-  --muted: #4a5a72;
-  --muted2: #6b7e99;
-  --white: #e8edf5;
-  --font-mono: 'IBM Plex Mono', monospace;
-  --font-body: 'Sora', sans-serif;
-  --font-display: 'Bebas Neue', sans-serif;
+:root{
+  --bg:#07090d;--panel:#0c0f14;--card:#10151c;
+  --border:#1a2230;--border2:#243040;
+  --green:#00e676;--gdim:rgba(0,230,118,.1);--gbrd:rgba(0,230,118,.25);
+  --red:#ff3d5a;--rdim:rgba(255,61,90,.1);--rbrd:rgba(255,61,90,.25);
+  --amber:#ffc107;--adim:rgba(255,193,7,.1);--abrd:rgba(255,193,7,.22);
+  --muted:#3d5068;--muted2:#5d7a99;--white:#dce8f5;
+  --mono:'IBM Plex Mono',monospace;
+  --display:'Bebas Neue',sans-serif;
+  --body:'Sora',system-ui,sans-serif;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--white);font-family:var(--font-body);min-height:100vh;overflow-x:hidden}
-body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,255,136,.015) 1px,transparent 1px),linear-gradient(90deg,rgba(0,255,136,.015) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0}
+body{background:var(--bg);color:var(--white);font-family:var(--body);min-height:100vh;overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;
+  background-image:linear-gradient(rgba(0,230,118,.012) 1px,transparent 1px),linear-gradient(90deg,rgba(0,230,118,.012) 1px,transparent 1px);
+  background-size:36px 36px;pointer-events:none;z-index:0}
 
-/* TOPBAR */
-.topbar{position:sticky;top:0;z-index:100;background:rgba(8,11,15,.96);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);padding:0 20px;height:54px;display:flex;align-items:center;gap:16px}
-.topbar-brand{font-family:var(--font-display);font-size:22px;letter-spacing:.12em;color:var(--green);white-space:nowrap}
-.topbar-pair{font-family:var(--font-mono);font-size:11px;color:var(--muted2);background:var(--card);border:1px solid var(--border);padding:3px 10px;border-radius:3px}
-.topbar-right{margin-left:auto;display:flex;align-items:center;gap:12px}
-.pulse-dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
-.pulse-dot.error{background:var(--red);animation:none}
-.pulse-dot.loading{background:var(--amber);animation:pulse 1s infinite}
-@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(0,255,136,.4)}50%{opacity:.7;box-shadow:0 0 0 5px rgba(0,255,136,0)}}
-.status-text{font-family:var(--font-mono);font-size:10px;color:var(--muted)}
-.refresh-btn{font-family:var(--font-mono);font-size:10px;padding:5px 14px;border:1px solid var(--border2);background:var(--card);color:var(--muted2);border-radius:3px;cursor:pointer;transition:all .15s;letter-spacing:.05em}
-.refresh-btn:hover{border-color:var(--green);color:var(--green)}
-.refresh-btn:disabled{opacity:.4;cursor:not-allowed}
+.topbar{position:sticky;top:0;z-index:100;background:rgba(7,9,13,.96);backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--border);padding:0 16px;height:52px;
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.brand{font-family:var(--display);font-size:21px;letter-spacing:.12em;color:var(--green)}
+.pair-tag{font-family:var(--mono);font-size:10px;color:var(--muted2);background:var(--card);
+  border:1px solid var(--border);padding:2px 9px;border-radius:3px}
+#tb-price{font-family:var(--mono);font-size:15px;font-weight:600}
+#tb-chg{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:3px;display:none}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.dot.ok{background:var(--green);animation:pulse 2s infinite}
+.dot.loading{background:var(--amber);animation:pulse .9s infinite}
+.dot.err{background:var(--red)}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(0,230,118,.4)}50%{box-shadow:0 0 0 5px rgba(0,230,118,0)}}
+#status-txt{font-family:var(--mono);font-size:10px;color:var(--muted)}
+.btn{font-family:var(--mono);font-size:10px;padding:5px 12px;border:1px solid var(--border2);
+  background:var(--card);color:var(--muted2);border-radius:3px;cursor:pointer;letter-spacing:.05em;transition:all .15s}
+.btn:hover{border-color:var(--green);color:var(--green)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
 
 /* LAYOUT */
-.main{position:relative;z-index:1;display:grid;grid-template-columns:1fr 360px;height:calc(100vh - 54px)}
-.chart-side{display:flex;flex-direction:column;border-right:1px solid var(--border);overflow:hidden}
-.chart-header{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--panel);flex-shrink:0}
-.chart-header-label{font-family:var(--font-mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.15em;margin-right:4px}
+.main{position:relative;z-index:1;display:grid;grid-template-columns:1fr 380px;height:calc(100vh - 52px)}
+.chart-col{display:flex;flex-direction:column;border-right:1px solid var(--border);overflow:hidden}
+.chart-head{display:flex;align-items:center;gap:8px;padding:9px 14px;border-bottom:1px solid var(--border);background:var(--panel);flex-shrink:0}
+.chart-lbl{font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.15em;margin-right:4px}
 .tf-tabs{display:flex;gap:4px}
-.tf-tab{font-family:var(--font-mono);font-size:11px;padding:4px 12px;border-radius:3px;border:1px solid var(--border);background:transparent;color:var(--muted2);cursor:pointer;transition:all .15s}
+.tf-tab{font-family:var(--mono);font-size:11px;padding:4px 11px;border-radius:3px;border:1px solid var(--border);
+  background:transparent;color:var(--muted2);cursor:pointer;transition:all .15s}
 .tf-tab:hover{border-color:var(--border2);color:var(--white)}
 .tf-tab.active{background:var(--green);color:var(--bg);border-color:var(--green);font-weight:600}
-.tv-wrapper{flex:1;min-height:0;position:relative}
-.tv-wrapper iframe{width:100%;height:100%;border:none;display:block}
+.tv-wrap{flex:1;min-height:0}
+.tv-wrap>div{width:100%;height:100%}
 
-/* SIGNAL SIDE */
-.signal-side{display:flex;flex-direction:column;overflow-y:auto;background:var(--panel)}
-.signal-side::-webkit-scrollbar{width:4px}
-.signal-side::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+/* SIGNAL PANEL */
+.sig-col{display:flex;flex-direction:column;overflow-y:auto;background:var(--panel)}
+.sig-col::-webkit-scrollbar{width:3px}
+.sig-col::-webkit-scrollbar-thumb{background:var(--border2)}
+.sec{padding:12px 14px;border-bottom:1px solid var(--border)}
+.sec-lbl{font-family:var(--mono);font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);margin-bottom:9px}
 
 /* OVERALL */
-.overall-signal{padding:18px 16px 14px;border-bottom:1px solid var(--border)}
-.section-label{font-family:var(--font-mono);font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
-.overall-box{border-radius:6px;padding:16px 18px;display:flex;align-items:center;justify-content:space-between;border:1px solid;transition:all .4s}
-.overall-box.long{background:var(--green-dim);border-color:rgba(0,255,136,.3)}
-.overall-box.short{background:var(--red-dim);border-color:rgba(255,68,102,.3)}
-.overall-box.neutral{background:var(--amber-dim);border-color:rgba(255,204,0,.25)}
-.overall-box.loading{background:rgba(28,37,53,.4);border-color:var(--border)}
-.overall-direction{font-family:var(--font-display);font-size:42px;letter-spacing:.1em;line-height:1}
-.overall-box.long .overall-direction{color:var(--green)}
-.overall-box.short .overall-direction{color:var(--red)}
-.overall-box.neutral .overall-direction{color:var(--amber)}
-.overall-box.loading .overall-direction{color:var(--muted)}
-.overall-meta{text-align:right}
-.overall-score{font-family:var(--font-mono);font-size:20px;font-weight:600;line-height:1}
-.overall-box.long .overall-score{color:var(--green)}
-.overall-box.short .overall-score{color:var(--red)}
-.overall-box.neutral .overall-score{color:var(--amber)}
-.overall-box.loading .overall-score{color:var(--muted)}
-.overall-sub{font-family:var(--font-mono);font-size:9px;color:var(--muted2);margin-top:5px;letter-spacing:.08em;max-width:160px;text-align:right;line-height:1.4}
+.ov-box{border-radius:6px;padding:14px 16px;border:1px solid;transition:all .5s}
+.ov-box.long{background:var(--gdim);border-color:var(--gbrd)}
+.ov-box.short{background:var(--rdim);border-color:var(--rbrd)}
+.ov-box.neutral{background:var(--adim);border-color:var(--abrd)}
+.ov-box.wait{background:rgba(28,34,48,.4);border-color:var(--border)}
+.ov-dir{font-family:var(--display);font-size:44px;letter-spacing:.08em;line-height:1}
+.ov-box.long .ov-dir{color:var(--green)}
+.ov-box.short .ov-dir{color:var(--red)}
+.ov-box.neutral .ov-dir{color:var(--amber)}
+.ov-box.wait .ov-dir{color:var(--muted2)}
+.ov-row{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.ov-right{text-align:right;flex-shrink:0}
+.ov-tfs{font-family:var(--mono);font-size:11px;color:var(--muted2);margin-top:4px}
+.ov-reason{font-family:var(--mono);font-size:9px;color:var(--muted2);margin-top:8px;line-height:1.55}
 
-/* TF BREAKDOWN */
-.tf-section{padding:12px 16px;border-bottom:1px solid var(--border)}
-.tf-rows{display:flex;flex-direction:column;gap:5px}
-.tf-row{display:grid;grid-template-columns:32px 1fr 68px 12px;align-items:center;gap:8px;background:var(--card);border:1px solid var(--border);border-radius:4px;padding:9px 12px;cursor:pointer;transition:border-color .15s}
-.tf-row:hover{border-color:var(--border2)}
-.tf-row.active-tf{border-color:rgba(0,255,136,.5)}
-.tf-name{font-family:var(--font-mono);font-size:11px;font-weight:600;color:var(--muted2)}
-.tf-row.active-tf .tf-name{color:var(--green)}
-.tf-bars{display:flex;flex-direction:column;gap:3px}
-.bar-row{display:flex;align-items:center;gap:5px}
-.bar-lbl{font-family:var(--font-mono);font-size:9px;color:var(--muted);width:10px;flex-shrink:0}
-.bar-track{flex:1;height:3px;background:var(--border);border-radius:2px;overflow:hidden}
-.bar-fill{height:100%;border-radius:2px;transition:width .7s ease}
-.bar-fill.g{background:var(--green)}
-.bar-fill.r{background:var(--red)}
-.tf-badge{font-family:var(--font-mono);font-size:9px;font-weight:700;padding:3px 5px;border-radius:3px;text-align:center;white-space:nowrap}
-.tf-badge.LONG{background:var(--green-dim);color:var(--green);border:1px solid rgba(0,255,136,.25)}
-.tf-badge.SHORT{background:var(--red-dim);color:var(--red);border:1px solid rgba(255,68,102,.25)}
-.tf-badge.NEUTRAL{background:var(--amber-dim);color:var(--amber);border:1px solid rgba(255,204,0,.2)}
-.tf-badge.WAIT{background:var(--border);color:var(--muted);border:1px solid var(--border)}
-.str-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
-.str-dot.high{background:var(--green);box-shadow:0 0 4px var(--green)}
-.str-dot.med{background:var(--amber)}
-.str-dot.low{background:var(--muted)}
-
-/* CONDITIONS */
-.cond-section{padding:12px 16px;border-bottom:1px solid var(--border)}
-.cond-list{display:flex;flex-direction:column;gap:4px}
-.cond-row{display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:var(--card);border:1px solid var(--border);border-radius:3px}
-.cond-name{font-family:var(--font-mono);font-size:10px;color:var(--muted2);display:flex;align-items:center;gap:6px}
-.cond-val{font-family:var(--font-mono);font-size:10px;font-weight:600;text-align:right;max-width:130px}
-.bull{color:var(--green)}.bear{color:var(--red)}.neut{color:var(--amber)}.dim{color:var(--muted2)}
+/* DMC SIGNAL TYPES */
+.signal-card{background:var(--card);border:1px solid var(--border);border-radius:5px;padding:11px 13px;margin-bottom:5px;position:relative;overflow:hidden}
+.signal-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+.signal-card.long::before{background:var(--green)}
+.signal-card.short::before{background:var(--red)}
+.signal-card.neutral::before{background:var(--amber)}
+.signal-card.none::before{background:var(--muted)}
+.sc-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:5px}
+.sc-tf{font-family:var(--mono);font-size:10px;font-weight:600;color:var(--muted2)}
+.sc-type{font-family:var(--mono);font-size:9px;padding:2px 7px;border-radius:3px;font-weight:700;letter-spacing:.06em}
+.sc-type.FAIL_GAIN{background:var(--rdim);color:var(--red);border:1px solid var(--rbrd)}
+.sc-type.FAIL_LOSE{background:var(--gdim);color:var(--green);border:1px solid var(--gbrd)}
+.sc-type.AT_LEVEL{background:var(--adim);color:var(--amber);border:1px solid var(--abrd)}
+.sc-type.NONE{background:var(--border);color:var(--muted2);border:1px solid var(--border)}
+.sc-badge{font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.05em}
+.sc-badge.LONG{color:var(--green)}
+.sc-badge.SHORT{color:var(--red)}
+.sc-badge.NEUTRAL{color:var(--amber)}
+.sc-badge.WAIT{color:var(--muted)}
+.sc-reason{font-family:var(--mono);font-size:9px;color:var(--muted2);line-height:1.5;margin-top:3px}
+.sc-bars{display:flex;gap:3px;margin-top:7px}
+.sc-bar{flex:1;height:3px;border-radius:1px}
+.bars-row{display:flex;align-items:center;gap:6px;margin-top:5px}
+.bar-lbl{font-family:var(--mono);font-size:8px;color:var(--muted);width:8px}
+.bar-track{flex:1;height:2px;background:var(--border);border-radius:1px;overflow:hidden}
+.bar-fill-g{height:100%;background:var(--green);border-radius:1px;transition:width .7s}
+.bar-fill-r{height:100%;background:var(--red);border-radius:1px;transition:width .7s}
 
 /* LEVELS */
-.levels-section{padding:12px 16px;border-bottom:1px solid var(--border)}
-.levels-list{display:flex;flex-direction:column;gap:4px}
-.lvl-row{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--card);border:1px solid var(--border);border-radius:3px}
-.lvl-tag{font-family:var(--font-mono);font-size:9px;font-weight:700;width:26px;flex-shrink:0}
-.lvl-tag.r{color:var(--red)}.lvl-tag.s{color:var(--green)}
-.lvl-info{flex:1;font-family:var(--font-mono);font-size:9px;color:var(--muted)}
-.lvl-price{font-family:var(--font-mono);font-size:11px;font-weight:600}
-.lvl-price.r{color:var(--red)}.lvl-price.s{color:var(--green)}
-.lvl-dist{font-family:var(--font-mono);font-size:9px;color:var(--muted);width:40px;text-align:right}
+.lvl-list{display:flex;flex-direction:column;gap:4px}
+.lvl-row{display:grid;grid-template-columns:32px 1fr auto auto;align-items:center;gap:8px;
+  padding:8px 10px;background:var(--card);border:1px solid var(--border);border-radius:3px}
+.lvl-tag{font-family:var(--mono);font-size:9px;font-weight:700}
+.lvl-tag.R{color:var(--red)}.lvl-tag.S{color:var(--green)}
+.lvl-meta{font-family:var(--mono);font-size:9px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lvl-price{font-family:var(--mono);font-size:11px;font-weight:600}
+.lvl-price.R{color:var(--red)}.lvl-price.S{color:var(--green)}
+.lvl-dist{font-family:var(--mono);font-size:9px;color:var(--muted);text-align:right}
+.lvl-row.untested{border-color:rgba(255,193,7,.3);background:rgba(255,193,7,.04)}
+.untested-dot{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--amber);margin-left:4px;vertical-align:middle}
+
+/* NEXT MOVE */
+.nm-box{background:var(--card);border-radius:5px;padding:11px 13px;border:1px solid var(--border)}
+.nm-label{font-family:var(--mono);font-size:9px;color:var(--muted);margin-bottom:4px}
+.nm-val{font-family:var(--display);font-size:26px;letter-spacing:.08em}
+.nm-val.UP{color:var(--green)}.nm-val.DOWN{color:var(--red)}.nm-val.UNCLEAR{color:var(--amber)}
+.nm-reason{font-family:var(--mono);font-size:9px;color:var(--muted2);margin-top:5px;line-height:1.5}
 
 /* LOG */
-.log-section{padding:12px 16px}
-.log-list{display:flex;flex-direction:column;gap:4px;max-height:280px;overflow-y:auto}
-.log-list::-webkit-scrollbar{width:3px}
-.log-list::-webkit-scrollbar-thumb{background:var(--border2)}
-.log-entry{display:flex;gap:8px;padding:7px 10px;background:var(--card);border-left:2px solid;border-top:1px solid var(--border);border-right:1px solid var(--border);border-bottom:1px solid var(--border);border-radius:0 3px 3px 0}
+.log-list{display:flex;flex-direction:column;gap:4px;max-height:180px;overflow-y:auto}
+.log-entry{display:flex;gap:8px;padding:7px 10px;background:var(--card);
+  border-left:2px solid;border-top:1px solid var(--border);border-right:1px solid var(--border);border-bottom:1px solid var(--border);
+  border-radius:0 3px 3px 0}
 .log-entry.long{border-left-color:var(--green)}
 .log-entry.short{border-left-color:var(--red)}
 .log-entry.neutral{border-left-color:var(--amber)}
-.log-time{font-family:var(--font-mono);font-size:9px;color:var(--muted);width:40px;flex-shrink:0;padding-top:1px}
-.log-text{font-family:var(--font-mono);font-size:10px;color:var(--muted2);line-height:1.45}
-.log-text strong{font-weight:600}
-.log-entry.long .log-text strong{color:var(--green)}
-.log-entry.short .log-text strong{color:var(--red)}
-.log-entry.neutral .log-text strong{color:var(--amber)}
+.log-time{font-family:var(--mono);font-size:9px;color:var(--muted);width:38px;flex-shrink:0;padding-top:1px}
+.log-text{font-family:var(--mono);font-size:9px;color:var(--muted2);line-height:1.45}
 
-/* AI REASONING */
-.reasoning-section{padding:12px 16px;border-bottom:1px solid var(--border)}
-.reasoning-box{background:var(--card);border:1px solid var(--border);border-radius:4px;padding:12px;font-family:var(--font-mono);font-size:10px;color:var(--muted2);line-height:1.6;min-height:60px;white-space:pre-wrap;word-break:break-word}
-.reasoning-box.streaming{border-color:rgba(0,255,136,.2)}
+.skel{background:linear-gradient(90deg,var(--border) 25%,var(--border2) 50%,var(--border) 75%);
+  background-size:200% 100%;animation:skel 1.5s infinite;border-radius:2px;display:inline-block}
+@keyframes skel{0%{background-position:200% center}100%{background-position:-200% center}}
 
-/* SKELETON */
-.skel{background:linear-gradient(90deg,var(--border) 25%,var(--border2) 50%,var(--border) 75%);background-size:200% 100%;animation:sk 1.5s infinite;border-radius:2px}
-@keyframes sk{0%{background-position:200% center}100%{background-position:-200% center}}
-
-/* RESPONSIVE */
-@media(max-width:860px){
-  .main{grid-template-columns:1fr;grid-template-rows:420px 1fr;height:auto}
-  .chart-side{border-right:none;border-bottom:1px solid var(--border)}
-  .signal-side{max-height:none}
+@media(max-width:820px){
+  .main{grid-template-columns:1fr;grid-template-rows:340px 1fr;height:auto}
+  .chart-col{border-right:none;border-bottom:1px solid var(--border)}
 }
 </style>
 </head>
 <body>
 
 <div class="topbar">
-  <div class="topbar-brand">DMC ⚡ SIGNAL</div>
-  <div class="topbar-pair">BTCUSDT</div>
+  <span class="brand">DMC ⚡ SIGNAL</span>
+  <span class="pair-tag">BTCUSDT</span>
+  <span id="tb-price">—</span>
+  <span id="tb-chg"></span>
   <div class="topbar-right">
-    <div class="pulse-dot loading" id="pulse"></div>
-    <div class="status-text" id="status-text">Connecting...</div>
-    <button class="refresh-btn" id="refresh-btn" onclick="manualRefresh()">↻ REFRESH</button>
+    <span class="dot loading" id="dot"></span>
+    <span id="status-txt">Connecting...</span>
+    <button class="btn" id="refresh-btn" onclick="manualRefresh()">↻ REFRESH</button>
   </div>
 </div>
 
 <div class="main">
-
-  <!-- LEFT: TradingView chart -->
-  <div class="chart-side">
-    <div class="chart-header">
-      <span class="chart-header-label">TradingView · Live</span>
+  <div class="chart-col">
+    <div class="chart-head">
+      <span class="chart-lbl">TradingView · Live</span>
       <div class="tf-tabs" id="tf-tabs">
-        <button class="tf-tab" data-interval="15">15m</button>
-        <button class="tf-tab active" data-interval="60">1H</button>
-        <button class="tf-tab" data-interval="240">4H</button>
-        <button class="tf-tab" data-interval="D">1D</button>
-        <button class="tf-tab" data-interval="W">1W</button>
+        <button class="tf-tab" data-iv="W">1W</button>
+        <button class="tf-tab" data-iv="D">1D</button>
+        <button class="tf-tab active" data-iv="240">4H</button>
+        <button class="tf-tab" data-iv="60">1H</button>
+        <button class="tf-tab" data-iv="15">15m</button>
       </div>
     </div>
-    <div class="tv-wrapper" id="tv-wrapper"></div>
+    <div class="tv-wrap" id="tv-wrap"></div>
   </div>
 
-  <!-- RIGHT: Signal panel -->
-  <div class="signal-side">
+  <div class="sig-col">
 
-    <div class="overall-signal">
-      <div class="section-label">▸ Overall DMC Signal</div>
-      <div class="overall-box loading" id="overall-box">
-        <div class="overall-direction" id="overall-dir">—</div>
-        <div class="overall-meta">
-          <div class="overall-score" id="overall-score">—</div>
-          <div class="overall-sub" id="overall-sub">Fetching market data...</div>
+    <!-- NEXT MOVE -->
+    <div class="sec">
+      <div class="sec-lbl">▸ Next Major Move (HTF)</div>
+      <div class="nm-box">
+        <div class="nm-label">DIRECTION</div>
+        <div class="nm-val UNCLEAR" id="nm-val">—</div>
+        <div class="nm-reason" id="nm-reason">Analysing higher timeframe levels...</div>
+      </div>
+    </div>
+
+    <!-- OVERALL -->
+    <div class="sec">
+      <div class="sec-lbl">▸ Overall DMC Signal</div>
+      <div class="ov-box wait" id="ov-box">
+        <div class="ov-row">
+          <div class="ov-dir" id="ov-dir">—</div>
+          <div class="ov-right">
+            <div class="ov-tfs" id="ov-tfs">0 / 5 TFs</div>
+          </div>
         </div>
+        <div class="ov-reason" id="ov-reason">Fetching Binance candle data...</div>
       </div>
     </div>
 
-    <div class="tf-section">
-      <div class="section-label">▸ Timeframe Breakdown</div>
-      <div class="tf-rows" id="tf-rows">
-        <!-- populated by JS -->
-        <div class="tf-row"><span class="tf-name">15m</span><div class="tf-bars"><div class="skel" style="width:120px;height:7px"></div></div><span class="tf-badge WAIT">···</span><span></span></div>
-        <div class="tf-row"><span class="tf-name">1H</span><div class="tf-bars"><div class="skel" style="width:100px;height:7px"></div></div><span class="tf-badge WAIT">···</span><span></span></div>
-        <div class="tf-row"><span class="tf-name">4H</span><div class="tf-bars"><div class="skel" style="width:110px;height:7px"></div></div><span class="tf-badge WAIT">···</span><span></span></div>
-        <div class="tf-row"><span class="tf-name">1D</span><div class="tf-bars"><div class="skel" style="width:90px;height:7px"></div></div><span class="tf-badge WAIT">···</span><span></span></div>
-        <div class="tf-row"><span class="tf-name">1W</span><div class="tf-bars"><div class="skel" style="width:130px;height:7px"></div></div><span class="tf-badge WAIT">···</span><span></span></div>
+    <!-- TF BREAKDOWN -->
+    <div class="sec">
+      <div class="sec-lbl">▸ Timeframe Analysis</div>
+      <div id="tf-cards"></div>
+    </div>
+
+    <!-- KEY LEVELS (untested candle bodies) -->
+    <div class="sec">
+      <div class="sec-lbl">▸ Key Levels · Untested Bodies <span style="font-family:var(--mono);font-size:8px;color:var(--amber)">● = untested</span></div>
+      <div class="lvl-list" id="lvl-list">
+        <div class="lvl-row"><span class="lvl-meta">Detecting untested candle bodies...</span></div>
       </div>
     </div>
 
-    <div class="cond-section">
-      <div class="section-label">▸ DMC Conditions (1H)</div>
-      <div class="cond-list" id="cond-list">
-        <div class="cond-row"><span class="cond-name">📈 Trend</span><span class="skel" style="width:80px;height:10px;display:inline-block"></span></div>
-        <div class="cond-row"><span class="cond-name">🎯 At Key Level</span><span class="skel" style="width:80px;height:10px;display:inline-block"></span></div>
-        <div class="cond-row"><span class="cond-name">🔄 Failed Break</span><span class="skel" style="width:80px;height:10px;display:inline-block"></span></div>
-        <div class="cond-row"><span class="cond-name">⚡ Momentum</span><span class="skel" style="width:80px;height:10px;display:inline-block"></span></div>
-        <div class="cond-row"><span class="cond-name">📊 Volume</span><span class="skel" style="width:80px;height:10px;display:inline-block"></span></div>
-        <div class="cond-row"><span class="cond-name">🕯 Candle</span><span class="skel" style="width:80px;height:10px;display:inline-block"></span></div>
-      </div>
-    </div>
-
-    <div class="levels-section">
-      <div class="section-label">▸ Key Levels</div>
-      <div class="levels-list" id="levels-list">
-        <div class="lvl-row"><div class="skel" style="width:100%;height:10px"></div></div>
-        <div class="lvl-row"><div class="skel" style="width:100%;height:10px"></div></div>
-        <div class="lvl-row"><div class="skel" style="width:100%;height:10px"></div></div>
-        <div class="lvl-row"><div class="skel" style="width:100%;height:10px"></div></div>
-      </div>
-    </div>
-
-    <div class="reasoning-section">
-      <div class="section-label">▸ AI Analysis</div>
-      <div class="reasoning-box" id="reasoning-box">Waiting for data...</div>
-    </div>
-
-    <div class="log-section">
-      <div class="section-label">▸ Signal Log</div>
+    <!-- SIGNAL LOG -->
+    <div class="sec">
+      <div class="sec-lbl">▸ Signal Log</div>
       <div class="log-list" id="log-list">
-        <div class="log-entry neutral"><span class="log-time">--:--</span><span class="log-text">Initializing DMC engine...</span></div>
+        <div class="log-entry neutral"><span class="log-time">--:--</span><span class="log-text">Initialising DMC engine...</span></div>
       </div>
     </div>
 
+    <div style="padding:10px 14px;font-family:var(--mono);font-size:9px;color:var(--muted);display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;border-top:1px solid var(--border)">
+      <span>DMC · Chris Hunter · Maven Trading</span>
+      <span id="last-upd" style="color:var(--muted2)">—</span>
+    </div>
   </div>
 </div>
 
 <script>
-// ═══════════════════════════════════════════
-// CONFIG
-// ═══════════════════════════════════════════
-const SYMBOL = 'BTCUSDT';
-const REFRESH_MS = 90000; // 90 seconds
+'use strict';
 
-const TF_CONFIG = [
-  { label: '15m', binance: '15m', interval: '15',  weight: 1 },
-  { label: '1H',  binance: '1h',  interval: '60',  weight: 2 },
-  { label: '4H',  binance: '4h',  interval: '240', weight: 3 },
-  { label: '1D',  binance: '1d',  interval: 'D',   weight: 4 },
-  { label: '1W',  binance: '1w',  interval: 'W',   weight: 3 },
+// ═══════════════════════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════════════════════
+const SYMBOL  = 'BTCUSDT';
+const BASE    = 'https://api.binance.com/api/v3';
+const LIMIT   = 200;
+const REFRESH = 90000;
+
+// TF config — weights for overall signal (higher TF = more weight)
+const TFS = [
+  { label:'1W', binance:'1w', iv:'W',   weight:5 },
+  { label:'1D', binance:'1d', iv:'D',   weight:4 },
+  { label:'4H', binance:'4h', iv:'240', weight:3 },
+  { label:'1H', binance:'1h', iv:'60',  weight:2 },
+  { label:'15m', binance:'15m', iv:'15', weight:1 },
 ];
 
-let currentInterval = '60';
+let results   = {};
+let allLevels = [];
 let signalLog = [];
-let allResults = {};
-let refreshTimer = null;
 let isRunning = false;
+let timer     = null;
+let price     = 0;
 
-// ═══════════════════════════════════════════
-// TRADINGVIEW WIDGET
-// ═══════════════════════════════════════════
-function loadTVWidget(interval) {
-  const wrapper = document.getElementById('tv-wrapper');
-  wrapper.innerHTML = '';
-
-  const container = document.createElement('div');
-  container.style.cssText = 'width:100%;height:100%;position:relative;';
-  wrapper.appendChild(container);
-
-  const widgetDiv = document.createElement('div');
-  widgetDiv.className = 'tradingview-widget-container__widget';
-  widgetDiv.style.cssText = 'width:100%;height:100%;';
-  container.appendChild(widgetDiv);
-
-  const script = document.createElement('script');
-  script.type = 'text/javascript';
-  script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
-  script.async = true;
-  script.textContent = JSON.stringify({
-    autosize: true,
-    symbol: 'BINANCE:BTCUSDT',
-    interval: interval,
-    timezone: 'Etc/UTC',
-    theme: 'dark',
-    style: '1',
-    locale: 'en',
-    backgroundColor: '#0d1117',
-    hide_top_toolbar: false,
-    hide_legend: false,
-    allow_symbol_change: false,
-    save_image: false,
-    calendar: false,
-    support_host: 'https://www.tradingview.com'
+// ═══════════════════════════════════════════════════════════
+// TRADINGVIEW
+// ═══════════════════════════════════════════════════════════
+function loadTV(iv) {
+  const wrap = document.getElementById('tv-wrap');
+  wrap.innerHTML = '<div style="width:100%;height:100%"></div>';
+  const s = document.createElement('script');
+  s.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
+  s.async = true;
+  s.textContent = JSON.stringify({
+    autosize:true, symbol:'BINANCE:BTCUSDT', interval:iv,
+    timezone:'Etc/UTC', theme:'dark', style:'1', locale:'en',
+    backgroundColor:'#0c0f14', hide_top_toolbar:false,
+    allow_symbol_change:false, save_image:false
   });
-  container.appendChild(script);
+  wrap.firstChild.appendChild(s);
 }
 
-// ═══════════════════════════════════════════
-// TAB SWITCHING
-// ═══════════════════════════════════════════
 document.getElementById('tf-tabs').addEventListener('click', e => {
   const btn = e.target.closest('.tf-tab');
   if (!btn) return;
-  const interval = btn.dataset.interval;
-  if (!interval || interval === currentInterval) return;
-  currentInterval = interval;
-  document.querySelectorAll('.tf-tab').forEach(b => b.classList.toggle('active', b === btn));
-  loadTVWidget(interval);
-  syncActiveRow();
+  document.querySelectorAll('.tf-tab').forEach(b => b.classList.toggle('active', b===btn));
+  loadTV(btn.dataset.iv);
 });
 
-function syncActiveRow() {
-  const labelMap = {};
-  TF_CONFIG.forEach(tf => { labelMap[tf.interval] = tf.label; });
-  const activeLabel = labelMap[currentInterval];
-  document.querySelectorAll('.tf-row').forEach(r => {
-    r.classList.toggle('active-tf', r.dataset.label === activeLabel);
+// ═══════════════════════════════════════════════════════════
+// BINANCE
+// ═══════════════════════════════════════════════════════════
+async function getKlines(interval) {
+  const r = await fetch(`${BASE}/klines?symbol=${SYMBOL}&interval=${interval}&limit=${LIMIT}`);
+  if (!r.ok) throw new Error(`Klines ${interval}: ${r.status}`);
+  return (await r.json()).map(k => ({
+    t:+k[0], o:+k[1], h:+k[2], l:+k[3], c:+k[4], v:+k[5],
+    bodyHigh: Math.max(+k[1],+k[4]),
+    bodyLow:  Math.min(+k[1],+k[4])
+  }));
+}
+
+async function getTicker() {
+  const r = await fetch(`${BASE}/ticker/24hr?symbol=${SYMBOL}`);
+  if (!r.ok) throw new Error('Ticker: '+r.status);
+  const d = await r.json();
+  return { price:+d.lastPrice, change:+d.priceChangePercent };
+}
+
+// ═══════════════════════════════════════════════════════════
+// DMC ENGINE — PURE CANDLE BODY LOGIC
+// ═══════════════════════════════════════════════════════════
+
+// ATR for dynamic tolerances
+function calcATR(candles, p=14) {
+  const trs = candles.slice(1).map((c,i) => {
+    const prev = candles[i];
+    return Math.max(c.h-c.l, Math.abs(c.h-prev.c), Math.abs(c.l-prev.c));
   });
+  const last = trs.slice(-p);
+  return last.reduce((s,v)=>s+v,0)/last.length;
 }
 
-// ═══════════════════════════════════════════
-// BINANCE FETCH  (runs in user's browser — no CORS issue)
-// ═══════════════════════════════════════════
-async function fetchKlines(binanceInterval, limit = 150) {
-  const url = `https://api.binance.com/api/v3/klines?symbol=${SYMBOL}&interval=${binanceInterval}&limit=${limit}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Binance ${binanceInterval}: HTTP ${res.status}`);
-  const raw = await res.json();
-  return raw.map(k => ({ t:+k[0], o:+k[1], h:+k[2], l:+k[3], c:+k[4], v:+k[5] }));
-}
-
-async function fetchTicker() {
-  const res = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${SYMBOL}`);
-  if (!res.ok) throw new Error(`Ticker: HTTP ${res.status}`);
-  const d = await res.json();
-  return { price: +d.lastPrice, change: +d.priceChangePercent, high: +d.highPrice, low: +d.lowPrice, vol: +d.volume };
-}
-
-// ═══════════════════════════════════════════
-// DMC ENGINE
-// ═══════════════════════════════════════════
-function ema(arr, p) {
-  if (arr.length < p) return arr[arr.length - 1];
-  const k = 2 / (p + 1);
-  let e = arr.slice(0, p).reduce((a, b) => a + b, 0) / p;
-  for (let i = p; i < arr.length; i++) e = arr[i] * k + e * (1 - k);
-  return e;
-}
-
-function trend(candles) {
-  if (candles.length < 60) return 'RANGING';
-  const closes = candles.map(c => c.c);
-  const last = closes[closes.length - 1];
-  const e20 = ema(closes.slice(-30), 20);
-  const e50 = ema(closes.slice(-60), 50);
-
-  // HH/HL or LH/LL count
-  const r = candles.slice(-20);
-  let bull = 0, bear = 0;
-  for (let i = 1; i < r.length; i++) {
-    if (r[i].h > r[i-1].h && r[i].l > r[i-1].l) bull++;
-    else if (r[i].h < r[i-1].h && r[i].l < r[i-1].l) bear++;
-  }
-  const score = (bull - bear) / 19;
-  const emaBull = last > e20 && e20 > e50;
-  const emaBear = last < e20 && e20 < e50;
-  if (score > 0.2 || emaBull) return 'BULLISH';
-  if (score < -0.2 || emaBear) return 'BEARISH';
-  return 'RANGING';
-}
-
-function keyLevels(candles) {
+// ── UNTESTED CANDLE BODIES ─────────────────────────────────
+// A candle body is "untested" if no subsequent candle has closed its BODY
+// into that zone. These are Chris Hunter's key levels.
+function findUntestedBodies(candles) {
   const n = candles.length;
-  const lb = 5;
-  if (n < lb * 2 + 2) return [];
-  const raw = [];
-  for (let i = lb; i < n - lb; i++) {
-    const sl = candles.slice(i - lb, i + lb + 1);
-    const maxH = Math.max(...sl.map(c => c.h));
-    const minL = Math.min(...sl.map(c => c.l));
-    if (candles[i].h === maxH) {
-      const p = candles[i].h;
-      const t = candles.filter(c => Math.abs(c.h-p)/p < 0.006 || Math.abs(c.l-p)/p < 0.006).length;
-      if (t >= 2) raw.push({ price: p, type: 'resistance', touches: t });
-    }
-    if (candles[i].l === minL) {
-      const p = candles[i].l;
-      const t = candles.filter(c => Math.abs(c.l-p)/p < 0.006 || Math.abs(c.h-p)/p < 0.006).length;
-      if (t >= 2) raw.push({ price: p, type: 'support', touches: t });
-    }
-  }
-  // dedup
-  const out = [];
-  raw.sort((a,b) => b.price - a.price);
-  for (const lv of raw) {
-    if (!out.find(x => Math.abs(x.price - lv.price)/lv.price < 0.009)) out.push(lv);
-  }
-  return out;
-}
+  const levels = [];
 
-function failedBreak(candles, levels) {
-  if (!levels.length) return { detected: false };
-  const rec = candles.slice(-6);
-  for (const lv of levels.slice(0, 8)) {
-    for (let i = 1; i < rec.length; i++) {
-      const c = rec[i], p = rec[i-1];
-      if (lv.type === 'resistance' && c.h > lv.price && c.c < lv.price && p.c < lv.price)
-        return { detected: true, dir: 'SHORT', level: lv.price, reason: 'Failed break at resistance $' + Math.round(lv.price).toLocaleString() };
-      if (lv.type === 'support' && c.l < lv.price && c.c > lv.price && p.c > lv.price)
-        return { detected: true, dir: 'LONG',  level: lv.price, reason: 'Failed break at support $' + Math.round(lv.price).toLocaleString() };
-    }
-  }
-  return { detected: false };
-}
+  // Look for significant swing candles — large body, standing out from neighbours
+  for (let i = 5; i < n - 3; i++) {
+    const c = candles[i];
+    const bodySize = Math.abs(c.bodyHigh - c.bodyLow);
+    if (bodySize < 0.001) continue; // skip doji
 
-function candlePattern(candles) {
-  if (candles.length < 3) return { name: 'N/A', bias: 'neut' };
-  const [prev, c] = [candles[candles.length-2], candles[candles.length-1]];
-  const body = Math.abs(c.c - c.o);
-  const range = c.h - c.l || 0.001;
-  const uw = c.h - Math.max(c.o, c.c);
-  const lw = Math.min(c.o, c.c) - c.l;
-  if (body < range * 0.1) return { name: 'DOJI', bias: 'neut' };
-  if (lw > body * 2 && uw < body * 0.5) return { name: 'HAMMER', bias: 'bull' };
-  if (uw > body * 2 && lw < body * 0.5) return { name: 'SHOOT STAR', bias: 'bear' };
-  if (prev.c < prev.o && c.c > c.o && c.c > prev.o && c.o < prev.c) return { name: 'BULL ENGULF', bias: 'bull' };
-  if (prev.c > prev.o && c.c < c.o && c.c < prev.o && c.o > prev.c) return { name: 'BEAR ENGULF', bias: 'bear' };
-  if (body > range * 0.65 && c.c > c.o) return { name: 'STRONG BULL', bias: 'bull' };
-  if (body > range * 0.65 && c.c < c.o) return { name: 'STRONG BEAR', bias: 'bear' };
-  return { name: c.c > c.o ? 'BULL CLOSE' : 'BEAR CLOSE', bias: c.c > c.o ? 'bull' : 'bear' };
-}
+    const isSwingHigh = c.h >= Math.max(...candles.slice(i-3,i+4).map(x=>x.h)) - bodySize*0.1;
+    const isSwingLow  = c.l <= Math.min(...candles.slice(i-3,i+4).map(x=>x.l)) + bodySize*0.1;
 
-function momentum(candles) {
-  if (candles.length < 20) return { pct: 0, volRatio: 1 };
-  const rec = candles.slice(-10);
-  const pct = (rec[rec.length-1].c - rec[0].c) / rec[0].c * 100;
-  const avgVol = candles.slice(-20).reduce((s,c) => s + c.v, 0) / 20;
-  const vr = avgVol > 0 ? candles[candles.length-1].v / avgVol : 1;
-  return { pct: +pct.toFixed(2), volRatio: +vr.toFixed(2) };
-}
+    if (!isSwingHigh && !isSwingLow) continue;
 
-function analyze(candles) {
-  const lvls = keyLevels(candles);
-  const tr = trend(candles);
-  const fb = failedBreak(candles, lvls);
-  const cp = candlePattern(candles);
-  const mom = momentum(candles);
-  const price = candles[candles.length-1].c;
-
-  // Near level check
-  const nearLvl = lvls.find(l => Math.abs(l.price - price)/price < 0.009) || null;
-
-  // SCORE
-  let L = 0, S = 0;
-  if (tr === 'BULLISH') L += 25;
-  else if (tr === 'BEARISH') S += 25;
-  if (fb.detected) { fb.dir === 'LONG' ? L += 35 : S += 35; }
-  if (nearLvl) { nearLvl.type === 'support' ? L += 15 : S += 15; }
-  if (cp.bias === 'bull') L += 15; else if (cp.bias === 'bear') S += 15;
-  if (mom.pct > 0.4 && mom.volRatio > 1.2) L += 10;
-  else if (mom.pct < -0.4 && mom.volRatio > 1.2) S += 10;
-
-  const total = L + S || 1;
-  const bPct = Math.round(L/total*100);
-  const diff = L - S;
-  const signal = diff >= 30 ? 'LONG' : diff <= -30 ? 'SHORT' : diff >= 15 ? 'LONG' : diff <= -15 ? 'SHORT' : 'NEUTRAL';
-  const strength = Math.abs(diff) >= 30 ? 'high' : Math.abs(diff) >= 15 ? 'med' : 'low';
-
-  return { signal, strength, trend: tr, fb, cp, mom, nearLvl, levels: lvls, longScore: L, shortScore: S, bullPct: bPct, bearPct: 100-bPct, price };
-}
-
-// ═══════════════════════════════════════════
-// CLAUDE AI ANALYSIS via Anthropic API
-// ═══════════════════════════════════════════
-async function getAIAnalysis(ticker, tfSummaries) {
-  const summaryText = tfSummaries.map(s =>
-    `${s.label}: signal=${s.signal} (${s.bullPct}% bull/${s.bearPct}% bear), trend=${s.trend}, pattern=${s.cp}, failed_break=${s.fb}`
-  ).join('\n');
-
-  const prompt = `You are Chris Hunter's DMC (Dumb Money Concepts) signal engine for BTC/USD.
-
-Current BTC price: $${ticker.price.toLocaleString()}
-24h change: ${ticker.change.toFixed(2)}%
-24h high: $${ticker.high.toLocaleString()} | 24h low: $${ticker.low.toLocaleString()}
-
-Timeframe analysis:
-${summaryText}
-
-Based purely on DMC principles (key levels, failed breaks, momentum, candle reactions, NO complex indicators), give a concise 3-4 sentence trading insight. State the overall bias (LONG/SHORT/NEUTRAL), the single most important DMC signal right now, the key price level to watch, and what price behavior to wait for before entering. Be direct. No disclaimers.`;
-
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 200,
-      messages: [{ role: 'user', content: prompt }]
-    })
-  });
-
-  if (!res.ok) throw new Error(`Claude API: ${res.status}`);
-  const data = await res.json();
-  return data.content?.[0]?.text || 'Analysis unavailable.';
-}
-
-// ═══════════════════════════════════════════
-// RENDER
-// ═══════════════════════════════════════════
-function renderOverall() {
-  let wL = 0, wS = 0, wT = 0;
-  TF_CONFIG.forEach(tf => {
-    const r = allResults[tf.label];
-    if (!r) return;
-    wL += r.longScore * tf.weight;
-    wS += r.shortScore * tf.weight;
-    wT += (r.longScore + r.shortScore) * tf.weight;
-  });
-  const bPct = wT > 0 ? Math.round(wL/wT*100) : 50;
-  const diff = bPct - (100-bPct);
-  const sig = diff >= 20 ? 'LONG ▲' : diff <= -20 ? 'SHORT ▼' : 'NEUTRAL';
-  const cls = diff >= 20 ? 'long' : diff <= -20 ? 'short' : 'neutral';
-  document.getElementById('overall-box').className = 'overall-box ' + cls;
-  document.getElementById('overall-dir').textContent = sig;
-  document.getElementById('overall-score').textContent = bPct + '% / ' + (100-bPct) + '%';
-  document.getElementById('overall-sub').textContent = 'BULL / BEAR · ' + Object.keys(allResults).length + ' of ' + TF_CONFIG.length + ' TFs loaded';
-}
-
-function renderTFRows() {
-  const c = document.getElementById('tf-rows');
-  c.innerHTML = '';
-  TF_CONFIG.forEach(tf => {
-    const r = allResults[tf.label];
-    const row = document.createElement('div');
-    row.className = 'tf-row' + (tf.interval === currentInterval ? ' active-tf' : '');
-    row.dataset.label = tf.label;
-    row.addEventListener('click', () => {
-      const tab = document.querySelector(`.tf-tab[data-interval="${tf.interval}"]`);
-      if (tab) tab.click();
+    // Check if any SUBSEQUENT candle body has entered this zone
+    const testedByBody = candles.slice(i+1).some(future => {
+      return future.bodyHigh >= c.bodyLow && future.bodyLow <= c.bodyHigh;
     });
-    if (!r) {
-      row.innerHTML = `<span class="tf-name">${tf.label}</span><div class="tf-bars"><div class="skel" style="width:100px;height:7px"></div></div><span class="tf-badge WAIT">···</span><span></span>`;
-    } else {
-      row.innerHTML = `
-        <span class="tf-name">${tf.label}</span>
-        <div class="tf-bars">
-          <div class="bar-row"><span class="bar-lbl">B</span><div class="bar-track"><div class="bar-fill g" style="width:${r.bullPct}%"></div></div></div>
-          <div class="bar-row"><span class="bar-lbl">S</span><div class="bar-track"><div class="bar-fill r" style="width:${r.bearPct}%"></div></div></div>
-        </div>
-        <span class="tf-badge ${r.signal}">${r.signal}</span>
-        <span class="str-dot ${r.strength}"></span>`;
-    }
-    c.appendChild(row);
-  });
-}
 
-function renderConditions() {
-  const r = allResults['1H'];
-  if (!r) return;
-  const tC = r.trend==='BULLISH'?'bull':r.trend==='BEARISH'?'bear':'neut';
-  const nearStr = r.nearLvl ? `YES · ${r.nearLvl.type.toUpperCase()} $${Math.round(r.nearLvl.price).toLocaleString()}` : 'NO';
-  const nearC = r.nearLvl ? (r.nearLvl.type==='support'?'bull':'bear') : 'dim';
-  const fbStr = r.fb.detected ? `${r.fb.dir} · ${r.fb.reason.slice(0,30)}` : 'NONE';
-  const fbC = r.fb.detected ? (r.fb.dir==='LONG'?'bull':'bear') : 'dim';
-  const momC = r.mom.pct>0.3?'bull':r.mom.pct<-0.3?'bear':'neut';
-  const volStr = r.mom.volRatio>1.3?`HIGH ${r.mom.volRatio.toFixed(1)}x`:r.mom.volRatio>0.7?'AVERAGE':'LOW';
-  const volC = r.mom.volRatio>1.3?'bull':'dim';
-  const cpC = r.cp.bias==='bull'?'bull':r.cp.bias==='bear'?'bear':'neut';
-  document.getElementById('cond-list').innerHTML = `
-    <div class="cond-row"><span class="cond-name">📈 Trend</span><span class="cond-val ${tC}">${r.trend}</span></div>
-    <div class="cond-row"><span class="cond-name">🎯 At Key Level</span><span class="cond-val ${nearC}">${nearStr}</span></div>
-    <div class="cond-row"><span class="cond-name">🔄 Failed Break</span><span class="cond-val ${fbC}">${fbStr}</span></div>
-    <div class="cond-row"><span class="cond-name">⚡ Momentum (10c)</span><span class="cond-val ${momC}">${r.mom.pct>=0?'+':''}${r.mom.pct}%</span></div>
-    <div class="cond-row"><span class="cond-name">📊 Volume</span><span class="cond-val ${volC}">${volStr}</span></div>
-    <div class="cond-row"><span class="cond-name">🕯 Candle</span><span class="cond-val ${cpC}">${r.cp.name}</span></div>`;
-}
-
-function renderLevels(price) {
-  const r = allResults['1H'];
-  if (!r || !r.levels.length) {
-    document.getElementById('levels-list').innerHTML = '<div class="lvl-row"><span class="lvl-info">Calculating swing levels...</span></div>';
-    return;
+    levels.push({
+      price: isSwingHigh ? c.bodyHigh : c.bodyLow,
+      bodyHigh: c.bodyHigh,
+      bodyLow: c.bodyLow,
+      type: isSwingHigh ? 'resistance' : 'support',
+      tested: testedByBody,
+      idx: i,
+      candle: c
+    });
   }
-  const res = r.levels.filter(l => l.price > price).slice(0, 3).reverse();
-  const sup = r.levels.filter(l => l.price < price).slice(-3).reverse();
-  document.getElementById('levels-list').innerHTML = [...res, ...sup].map(l => {
-    const isR = l.price > price;
-    const cls = isR ? 'r' : 's';
-    const dist = ((l.price-price)/price*100).toFixed(2);
-    return `<div class="lvl-row">
-      <span class="lvl-tag ${cls}">${isR?'RES':'SUP'}</span>
-      <span class="lvl-info">${l.touches}x touched</span>
-      <span class="lvl-price ${cls}">$${Math.round(l.price).toLocaleString()}</span>
-      <span class="lvl-dist">${dist>0?'+':''}${dist}%</span>
-    </div>`;
+
+  return levels;
+}
+
+// ── CORE DMC SIGNAL: FAILURE TO GAIN / FAILURE TO LOSE ────
+// The ONLY signal Chris Hunter trades:
+// Price attempts to close its BODY beyond a level → fails → signal in opposite direction
+// Target: origin of the move that brought price to the level
+function detectDMCSignal(candles, atr) {
+  const n = candles.length;
+  if (n < 20) return { signal:'NEUTRAL', type:'NONE', reason:'Insufficient data' };
+
+  const tol = atr * 0.15; // body must be close to level to count
+
+  // Find levels from this TF
+  const levels = findUntestedBodies(candles);
+  const relevantLevels = levels.filter(l => {
+    const dist = Math.abs(l.price - candles[n-1].c);
+    return dist < atr * 8; // only check nearby levels
+  });
+
+  // ── CHECK: FAILURE TO GAIN (bearish) ────────────────────
+  // One or more recent candles attempt to close body ABOVE resistance
+  // but the latest candle closes back BELOW it → SHORT
+  for (const lv of relevantLevels.filter(l=>l.type==='resistance')) {
+    // Look back up to 6 candles for the attempt
+    for (let lookback = 2; lookback <= 6; lookback++) {
+      if (n - lookback < 0) break;
+      const attempt = candles[n - lookback]; // candle that tried to break through
+      const current = candles[n - 1];        // current/latest candle
+
+      // Attempt: body tried to close above the level
+      const attemptedBreak = attempt.bodyHigh > lv.price - tol;
+      // Failure: latest candle body closes back BELOW the level
+      const failedClose = current.bodyHigh < lv.price + tol && current.c < lv.price;
+      // Not already through (origin candle should be below)
+      const originBelow = candles[n - lookback - 1]?.c < lv.price;
+
+      if (attemptedBreak && failedClose && originBelow) {
+        // Find origin of the move (how far back did this move start?)
+        let originIdx = n - lookback - 1;
+        while (originIdx > 0 && candles[originIdx].c < candles[originIdx+1].c) originIdx--;
+        const target = candles[originIdx]?.c || lv.price * 0.98;
+
+        return {
+          signal: 'SHORT',
+          type: 'FAIL_GAIN',
+          level: lv.price,
+          target,
+          reason: `Failed to gain $${fmt(lv.price)} — body closed back below. Target: origin at $${fmt(target)}`,
+          strength: lookback <= 3 ? 'high' : 'med',
+          untested: !lv.tested
+        };
+      }
+    }
+  }
+
+  // ── CHECK: FAILURE TO LOSE (bullish) ────────────────────
+  // Candles attempt to close body BELOW support
+  // but the latest candle closes back ABOVE it → LONG
+  for (const lv of relevantLevels.filter(l=>l.type==='support')) {
+    for (let lookback = 2; lookback <= 6; lookback++) {
+      if (n - lookback < 0) break;
+      const attempt = candles[n - lookback];
+      const current = candles[n - 1];
+
+      const attemptedBreak = attempt.bodyLow < lv.price + tol;
+      const failedClose = current.bodyLow > lv.price - tol && current.c > lv.price;
+      const originAbove = candles[n - lookback - 1]?.c > lv.price;
+
+      if (attemptedBreak && failedClose && originAbove) {
+        let originIdx = n - lookback - 1;
+        while (originIdx > 0 && candles[originIdx].c > candles[originIdx+1].c) originIdx--;
+        const target = candles[originIdx]?.c || lv.price * 1.02;
+
+        return {
+          signal: 'LONG',
+          type: 'FAIL_LOSE',
+          level: lv.price,
+          target,
+          reason: `Failed to lose $${fmt(lv.price)} — body closed back above. Target: origin at $${fmt(target)}`,
+          strength: lookback <= 3 ? 'high' : 'med',
+          untested: !lv.tested
+        };
+      }
+    }
+  }
+
+  // ── CHECK: PRICE AT UNTESTED LEVEL (blind entry zone) ───
+  // No failure yet, but price is sitting at an untested level = watch zone
+  const nearest = relevantLevels
+    .filter(l => !l.tested)
+    .sort((a,b) => Math.abs(a.price - candles[n-1].c) - Math.abs(b.price - candles[n-1].c))[0];
+
+  if (nearest && Math.abs(nearest.price - candles[n-1].c) < atr * 1.5) {
+    const dir = nearest.type === 'support' ? 'LONG' : 'SHORT';
+    return {
+      signal: 'NEUTRAL',
+      type: 'AT_LEVEL',
+      level: nearest.price,
+      target: null,
+      reason: `At untested ${nearest.type} $${fmt(nearest.price)} — watch for failure to ${nearest.type==='support'?'lose':'gain'}`,
+      strength: 'low',
+      untested: true
+    };
+  }
+
+  // No setup
+  return {
+    signal: 'NEUTRAL',
+    type: 'NONE',
+    reason: 'No DMC setup active — price between levels',
+    strength: 'none'
+  };
+}
+
+// ── NEXT MAJOR MOVE (HTF trend direction) ─────────────────
+// Chris Hunter: trend = direction of next major move on HTF
+// Determined by: did the last significant candle body gain or lose its level?
+// If bodies keep closing beyond new levels = continuation
+// If body fails to close beyond last level = next move is reversal
+function detectNextMove(wCandles, dCandles) {
+  // Use weekly + daily bodies
+  const wn = wCandles.length;
+  const dn = dCandles.length;
+  if (wn < 10 || dn < 10) return { dir:'UNCLEAR', reason:'Insufficient HTF data' };
+
+  const wLast  = wCandles[wn-1];
+  const wPrev  = wCandles[wn-2];
+  const wPrev2 = wCandles[wn-3];
+
+  // Weekly: are bodies making higher highs or lower lows?
+  const wBullish = wLast.bodyHigh > wPrev.bodyHigh && wPrev.bodyHigh > wPrev2.bodyHigh;
+  const wBearish = wLast.bodyLow  < wPrev.bodyLow  && wPrev.bodyLow  < wPrev2.bodyLow;
+
+  // Daily: last 5 candles — are bodies gaining or losing?
+  const dRecent = dCandles.slice(-5);
+  let dGains = 0, dLoses = 0;
+  for (let i=1; i<dRecent.length; i++) {
+    if (dRecent[i].bodyHigh > dRecent[i-1].bodyHigh) dGains++;
+    else dLoses++;
+  }
+
+  // Did the daily recently fail to close above its last high? = reversal warning
+  const dLast  = dCandles[dn-1];
+  const dPrev  = dCandles[dn-2];
+  const dFailed = dLast.bodyHigh < dPrev.bodyHigh && dPrev.bodyHigh > dCandles[dn-3].bodyHigh;
+
+  let dir, reason;
+
+  if (wBullish && dGains >= 3) {
+    dir = 'UP';
+    reason = `Weekly bodies making higher highs · Daily ${dGains}/4 candles gaining levels`;
+  } else if (wBearish && dLoses >= 3) {
+    dir = 'DOWN';
+    reason = `Weekly bodies making lower lows · Daily ${dLoses}/4 candles losing levels`;
+  } else if (dFailed && dLoses >= 2) {
+    dir = 'DOWN';
+    reason = `Daily body failed to close above last high — next move likely down`;
+  } else if (wBullish || dGains >= 3) {
+    dir = 'UP';
+    reason = `Weekly ${wBullish?'bullish':'neutral'} · Daily gaining levels (${dGains}/4)`;
+  } else if (wBearish || dLoses >= 3) {
+    dir = 'DOWN';
+    reason = `Weekly ${wBearish?'bearish':'neutral'} · Daily losing levels (${dLoses}/4)`;
+  } else {
+    dir = 'UNCLEAR';
+    reason = 'Mixed HTF signals — bodies not confirming clear direction';
+  }
+
+  return { dir, reason };
+}
+
+// ── COLLECT ALL KEY LEVELS FOR DISPLAY ────────────────────
+function collectLevels(wCandles, dCandles, currentPrice) {
+  const atrW = calcATR(wCandles);
+  const atrD = calcATR(dCandles);
+
+  const wLevels = findUntestedBodies(wCandles).map(l=>({...l, tf:'1W', atr:atrW}));
+  const dLevels = findUntestedBodies(dCandles).map(l=>({...l, tf:'1D', atr:atrD}));
+
+  const all = [...wLevels, ...dLevels]
+    .sort((a,b) => b.price - a.price);
+
+  // Deduplicate within 0.5% of each other
+  const dedup = [];
+  for (const l of all) {
+    const clash = dedup.find(d => Math.abs(d.price-l.price)/l.price < 0.005);
+    if (!clash) dedup.push(l);
+    else if (!clash.tested && l.tested) { /* keep untested */ }
+  }
+
+  // Show 3 above + 3 below price
+  const above = dedup.filter(l=>l.price>currentPrice).slice(0,4);
+  const below = dedup.filter(l=>l.price<currentPrice).slice(-4).reverse();
+
+  return [...above, ...below];
+}
+
+// ═══════════════════════════════════════════════════════════
+// RENDER
+// ═══════════════════════════════════════════════════════════
+function fmt(n) {
+  return n >= 1000 ? n.toLocaleString('en-US',{maximumFractionDigits:0}) : n.toFixed(2);
+}
+
+function renderTopbar(t) {
+  price = t.price;
+  document.getElementById('tb-price').textContent = '$'+fmt(t.price);
+  const el = document.getElementById('tb-chg');
+  el.style.display = '';
+  el.textContent = (t.change>=0?'+':'')+t.change.toFixed(2)+'%';
+  el.style.background = t.change>=0?'var(--gdim)':'var(--rdim)';
+  el.style.color = t.change>=0?'var(--green)':'var(--red)';
+}
+
+function renderNextMove(nm) {
+  const el = document.getElementById('nm-val');
+  el.className = 'nm-val '+nm.dir;
+  el.textContent = nm.dir==='UP'?'UP ▲':nm.dir==='DOWN'?'DOWN ▼':'UNCLEAR';
+  document.getElementById('nm-reason').textContent = nm.reason;
+}
+
+function renderOverall() {
+  let wL=0, wS=0, wT=0;
+  TFS.forEach(tf=>{
+    const r=results[tf.label];
+    if(!r) return;
+    const pts = tf.weight;
+    if(r.signal==='LONG')  wL+=pts;
+    if(r.signal==='SHORT') wS+=pts;
+    wT+=pts;
+  });
+  const loaded = Object.keys(results).length;
+  const diff = wL - wS;
+  let sig, cls;
+  if      (diff>0 && loaded>=2) { sig='LONG ▲';  cls='long'; }
+  else if (diff<0 && loaded>=2) { sig='SHORT ▼'; cls='short'; }
+  else                          { sig='NEUTRAL';  cls='neutral'; }
+
+  const box = document.getElementById('ov-box');
+  box.className = 'ov-box '+cls;
+  document.getElementById('ov-dir').textContent = sig;
+  document.getElementById('ov-tfs').textContent = loaded+' / '+TFS.length+' TFs';
+
+  // Best reason from highest-weight TF with active signal
+  const best = [...TFS].sort((a,b)=>b.weight-a.weight)
+    .find(tf=>results[tf.label]&&results[tf.label].type!=='NONE');
+  document.getElementById('ov-reason').textContent =
+    best ? results[best.label].reason : 'No active DMC setup across timeframes';
+}
+
+function renderTFCards() {
+  const cont = document.getElementById('tf-cards');
+  cont.innerHTML = TFS.map(tf=>{
+    const r = results[tf.label];
+    if(!r) return `
+      <div class="signal-card none">
+        <div class="sc-head">
+          <span class="sc-tf">${tf.label}</span>
+          <span class="sc-type NONE">···</span>
+          <span class="sc-badge WAIT">—</span>
+        </div>
+        <div class="sc-reason"><span class="skel" style="width:180px;height:9px">&nbsp;</span></div>
+      </div>`;
+
+    const cls = r.signal==='LONG'?'long':r.signal==='SHORT'?'short':'neutral';
+    const typeLabel = r.type==='FAIL_GAIN'?'FAIL TO GAIN':
+                      r.type==='FAIL_LOSE'?'FAIL TO LOSE':
+                      r.type==='AT_LEVEL'?'AT LEVEL':'NO SETUP';
+
+    return `
+      <div class="signal-card ${cls}">
+        <div class="sc-head">
+          <span class="sc-tf">${tf.label}</span>
+          <span class="sc-type ${r.type}">${typeLabel}${r.untested?'<span class="untested-dot"></span>':''}</span>
+          <span class="sc-badge ${r.signal}">${r.signal}</span>
+        </div>
+        <div class="sc-reason">${r.reason}</div>
+        ${r.level ? `<div style="font-family:var(--mono);font-size:8px;color:var(--muted);margin-top:5px">
+          Level: <span style="color:var(--white)">$${fmt(r.level)}</span>
+          ${r.target?` · Target: <span style="color:${r.signal==='LONG'?'var(--green)':'var(--red)'}">$${fmt(r.target)}</span>`:''}
+          ${r.untested?' · <span style="color:var(--amber)">UNTESTED BODY</span>':''}
+        </div>`:''}
+      </div>`;
   }).join('');
 }
 
-function addLog(signal, label, reason) {
+function renderLevels() {
+  if(!allLevels.length){
+    document.getElementById('lvl-list').innerHTML=
+      '<div class="lvl-row"><span class="lvl-meta">No significant levels found</span></div>';
+    return;
+  }
+  document.getElementById('lvl-list').innerHTML = allLevels.map(l=>{
+    const isR = l.price > price;
+    const dist = ((l.price-price)/price*100).toFixed(2);
+    const cls  = isR?'R':'S';
+    return `
+      <div class="lvl-row ${!l.tested?'untested':''}">
+        <span class="lvl-tag ${cls}">${isR?'RES':'SUP'}</span>
+        <span class="lvl-meta">${l.tf}${!l.tested?' ● UNTESTED':''}</span>
+        <span class="lvl-price ${cls}">$${fmt(l.price)}</span>
+        <span class="lvl-dist">${dist>0?'+':''}${dist}%</span>
+      </div>`;
+  }).join('');
+}
+
+function addLog(signal, tf, reason, type) {
+  if(type==='NONE') return;
   const time = new Date().toTimeString().slice(0,5);
   const cls = signal==='LONG'?'long':signal==='SHORT'?'short':'neutral';
-  const html = `<div class="log-entry ${cls}"><span class="log-time">${time}</span><span class="log-text"><strong>${signal}</strong> [${label}] — ${reason}</span></div>`;
-  signalLog.unshift(html);
-  if (signalLog.length > 15) signalLog.pop();
+  const col = signal==='LONG'?'var(--green)':signal==='SHORT'?'var(--red)':'var(--amber)';
+  signalLog.unshift(`
+    <div class="log-entry ${cls}">
+      <span class="log-time">${time}</span>
+      <span class="log-text"><strong style="color:${col}">${signal}</strong> [${tf}] ${reason.slice(0,70)}</span>
+    </div>`);
+  if(signalLog.length>15) signalLog.pop();
   document.getElementById('log-list').innerHTML = signalLog.join('');
 }
 
-function setStatus(state, text) {
-  const dot = document.getElementById('pulse');
-  dot.className = 'pulse-dot' + (state==='ok'?'':state==='error'?' error':' loading');
-  document.getElementById('status-text').textContent = text;
+function setStatus(state, txt) {
+  document.getElementById('dot').className='dot '+state;
+  document.getElementById('status-txt').textContent=txt;
 }
 
-// ═══════════════════════════════════════════
-// MAIN LOOP
-// ═══════════════════════════════════════════
-async function runAnalysis() {
-  if (isRunning) return;
-  isRunning = true;
-  const btn = document.getElementById('refresh-btn');
-  btn.disabled = true;
-  setStatus('loading', 'Fetching data...');
+// ═══════════════════════════════════════════════════════════
+// MAIN
+// ═══════════════════════════════════════════════════════════
+async function run() {
+  if(isRunning) return;
+  isRunning=true;
+  document.getElementById('refresh-btn').disabled=true;
+  setStatus('loading','Fetching Binance data...');
 
   try {
-    // Fetch ticker + all klines in parallel
-    const [tickerResult, ...klineResults] = await Promise.allSettled([
-      fetchTicker(),
-      ...TF_CONFIG.map(tf => fetchKlines(tf.binance, 150))
+    const [tickerRes, ...klineResults] = await Promise.allSettled([
+      getTicker(),
+      ...TFS.map(tf=>getKlines(tf.binance))
     ]);
 
-    if (tickerResult.status === 'rejected') throw new Error('Ticker failed: ' + tickerResult.reason);
-    const ticker = tickerResult.value;
+    if(tickerRes.status==='rejected') throw new Error('Ticker: '+tickerRes.reason.message);
+    renderTopbar(tickerRes.value);
 
-    // Run DMC analysis per TF
-    klineResults.forEach((res, i) => {
-      if (res.status === 'rejected') {
-        console.warn('Klines failed for', TF_CONFIG[i].label, res.reason.message);
-        return;
-      }
-      try { allResults[TF_CONFIG[i].label] = analyze(res.value); }
-      catch(e) { console.error('Analysis error', TF_CONFIG[i].label, e); }
+    // Analyse each TF
+    klineResults.forEach((res,i)=>{
+      if(res.status==='rejected'){ console.warn(TFS[i].label, res.reason); return; }
+      const candles = res.value;
+      const atr = calcATR(candles);
+      const dmc = detectDMCSignal(candles, atr);
+      results[TFS[i].label] = dmc;
+      if(dmc.type!=='NONE' && dmc.type!=='AT_LEVEL') addLog(dmc.signal, TFS[i].label, dmc.reason, dmc.type);
     });
 
-    // Render UI
+    // Next major move using weekly + daily
+    const wK = klineResults[0].value;
+    const dK = klineResults[1].value;
+    if(wK && dK) renderNextMove(detectNextMove(wK, dK));
+
+    // Key levels (weekly + daily untested bodies)
+    if(wK && dK) allLevels = collectLevels(wK, dK, tickerRes.value.price);
+
     renderOverall();
-    renderTFRows();
-    syncActiveRow();
-    renderConditions();
-    renderLevels(ticker.price);
+    renderTFCards();
+    renderLevels();
 
-    // Log strong signals
-    TF_CONFIG.forEach(tf => {
-      const r = allResults[tf.label];
-      if (!r || r.signal === 'NEUTRAL' || r.strength === 'low') return;
-      const reason = r.fb.detected ? r.fb.reason
-        : r.nearLvl ? `Near ${r.nearLvl.type} @ $${Math.round(r.nearLvl.price).toLocaleString()}`
-        : `${r.trend} · ${r.cp.name}`;
-      addLog(r.signal, tf.label, reason);
-    });
+    const now = new Date().toTimeString().slice(0,8);
+    setStatus('ok','Updated '+now);
+    document.getElementById('last-upd').textContent = now;
 
-    setStatus('loading', 'Getting AI analysis...');
-
-    // AI analysis using Claude
-    const tfSummaries = TF_CONFIG.map(tf => {
-      const r = allResults[tf.label];
-      return r ? {
-        label: tf.label, signal: r.signal, bullPct: r.bullPct, bearPct: r.bearPct,
-        trend: r.trend, cp: r.cp.name, fb: r.fb.detected ? r.fb.dir : 'none'
-      } : { label: tf.label, signal: 'N/A', bullPct: 50, bearPct: 50, trend: 'N/A', cp: 'N/A', fb: 'none' };
-    });
-
-    const box = document.getElementById('reasoning-box');
-    box.className = 'reasoning-box streaming';
-    box.textContent = '';
-
-    try {
-      const aiText = await getAIAnalysis(ticker, tfSummaries);
-      // Typewriter effect
-      let i = 0;
-      const type = () => {
-        if (i < aiText.length) {
-          box.textContent += aiText[i++];
-          setTimeout(type, 12);
-        } else {
-          box.className = 'reasoning-box';
-        }
-      };
-      type();
-    } catch(aiErr) {
-      console.warn('AI analysis failed:', aiErr);
-      box.textContent = 'AI analysis unavailable — check API key in browser console.';
-      box.className = 'reasoning-box';
-    }
-
-    setStatus('ok', 'Updated ' + new Date().toTimeString().slice(0,8));
-
-  } catch(err) {
-    console.error('runAnalysis error:', err);
-    setStatus('error', 'Error: ' + err.message.slice(0,40));
-    addLog('NEUTRAL', 'SYS', 'Fetch error — ' + err.message.slice(0,50));
+  } catch(e) {
+    console.error(e);
+    setStatus('err','Error: '+e.message.slice(0,50));
+    addLog('NEUTRAL','SYS',e.message,'ERR');
   }
 
-  isRunning = false;
-  btn.disabled = false;
+  isRunning=false;
+  document.getElementById('refresh-btn').disabled=false;
 }
 
 function manualRefresh() {
-  clearTimeout(refreshTimer);
-  runAnalysis().then(scheduleNext);
+  clearTimeout(timer);
+  run().then(schedule);
+}
+function schedule() {
+  timer = setTimeout(()=>run().then(schedule), REFRESH);
 }
 
-function scheduleNext() {
-  refreshTimer = setTimeout(() => runAnalysis().then(scheduleNext), REFRESH_MS);
-}
-
-// ═══════════════════════════════════════════
-// INIT
-// ═══════════════════════════════════════════
-window.addEventListener('DOMContentLoaded', () => {
-  loadTVWidget('60');
-  runAnalysis().then(scheduleNext);
+window.addEventListener('DOMContentLoaded',()=>{
+  loadTV('240');
+  // Skeleton cards
+  document.getElementById('tf-cards').innerHTML = TFS.map(tf=>`
+    <div class="signal-card none">
+      <div class="sc-head"><span class="sc-tf">${tf.label}</span><span class="sc-type NONE">···</span><span class="sc-badge WAIT">—</span></div>
+      <div class="sc-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div>
+    </div>`).join('');
+  run().then(schedule);
 });
 </script>
 </body>
