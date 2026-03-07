@@ -47,13 +47,13 @@ body::before{content:’’;position:fixed;inset:0;background-image:linear-gradi
 .hero.short .hero-glow{background:#ff3d5a}
 .hero.neutral .hero-glow{background:#ffc107}
 .hero-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:12px}
-.hero-dir{font-family:‘Bebas Neue’,sans-serif;font-size:80px;line-height:.85;letter-spacing:.04em;color:#5d7a99;transition:color .4s}
+.hero-dir{font-family:‘Bebas Neue’,sans-serif;font-size:68px;line-height:.85;letter-spacing:.03em;color:#5d7a99;transition:color .4s;flex:1}
 .hero.long .hero-dir{color:#00e676}
 .hero.short .hero-dir{color:#ff3d5a}
 .hero.neutral .hero-dir{color:#ffc107}
-.hero-meta{text-align:right;display:flex;flex-direction:column;gap:6px;padding-top:6px}
-.hero-tfs{font-family:‘IBM Plex Mono’,monospace;font-size:11px;color:#5d7a99}
-.hero-conf{font-family:‘IBM Plex Mono’,monospace;font-size:11px;font-weight:600;padding:4px 10px;border-radius:6px;border:1px solid #243040;background:#0c0f14;color:#dce8f5}
+.hero-meta{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px;padding-top:4px;flex-shrink:0}
+.hero-tfs{font-family:‘IBM Plex Mono’,monospace;font-size:10px;color:#5d7a99;white-space:nowrap}
+.hero-conf{font-family:‘IBM Plex Mono’,monospace;font-size:10px;font-weight:600;padding:3px 8px;border-radius:5px;border:1px solid #243040;background:#0c0f14;color:#dce8f5;white-space:nowrap}
 .hero-conf.high{background:rgba(0,230,118,.12);border-color:rgba(0,230,118,.3);color:#00e676}
 .hero-conf.med{background:rgba(255,193,7,.1);border-color:rgba(255,193,7,.3);color:#ffc107}
 .hero-reason{font-family:‘IBM Plex Mono’,monospace;font-size:10px;color:#5d7a99;line-height:1.6;border-top:1px solid #1a2230;padding-top:10px;margin-top:2px}
@@ -420,8 +420,12 @@ function renderHero(){
   const pct=activeW>0?Math.round(Math.max(wL,wS)/activeW*100):0;
   const confEl=document.getElementById('hero-conf');
   const confLabel=pct>=75?'HIGH':pct>=50?'MED':'LOW';
-  confEl.textContent=pct+'% · '+confLabel;
+  confEl.textContent=pct+'%';
   confEl.className='hero-conf '+(pct>=75?'high':pct>=50?'med':'');
+  // show label separately below
+  let lblEl=document.getElementById('hero-conflbl');
+  if(!lblEl){lblEl=document.createElement('div');lblEl.id='hero-conflbl';lblEl.style.cssText='font-family:IBM Plex Mono,monospace;font-size:8px;letter-spacing:.15em;text-transform:uppercase;color:#3d5068;text-align:right;margin-top:-2px';document.getElementById('hero-conf').after(lblEl);}
+  lblEl.textContent=confLabel;
   const best=[...TFS].sort((a,b)=>b.w-a.w).find(tf=>results[tf.l]&&results[tf.l].type!=='NONE');
   document.getElementById('hero-reason').textContent=best?results[best.l].reason:'No active DMC setup across timeframes';
 }
