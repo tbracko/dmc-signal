@@ -3,240 +3,434 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DMC Signal Engine · BTC/USD</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>DMC Signal · BTC</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;600&family=Sora:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
-:root{
-  --bg:#07090d;--panel:#0c0f14;--card:#10151c;
-  --border:#1a2230;--border2:#243040;
-  --green:#00e676;--gdim:rgba(0,230,118,.1);--gbrd:rgba(0,230,118,.25);
-  --red:#ff3d5a;--rdim:rgba(255,61,90,.1);--rbrd:rgba(255,61,90,.25);
-  --amber:#ffc107;--adim:rgba(255,193,7,.1);--abrd:rgba(255,193,7,.22);
-  --muted:#3d5068;--muted2:#5d7a99;--white:#dce8f5;
-  --mono:'IBM Plex Mono',monospace;
-  --display:'Bebas Neue',sans-serif;
-  --body:'Sora',system-ui,sans-serif;
+:root {
+  --bg: #07090d;
+  --panel: #0c0f14;
+  --card: #10151c;
+  --card2: #131920;
+  --border: #1a2230;
+  --border2: #243040;
+  --green: #00e676;
+  --gdim: rgba(0,230,118,.1);
+  --gbrd: rgba(0,230,118,.22);
+  --red: #ff3d5a;
+  --rdim: rgba(255,61,90,.1);
+  --rbrd: rgba(255,61,90,.22);
+  --amber: #ffc107;
+  --adim: rgba(255,193,7,.08);
+  --abrd: rgba(255,193,7,.2);
+  --muted: #3d5068;
+  --muted2: #5d7a99;
+  --white: #dce8f5;
+  --mono: 'IBM Plex Mono', monospace;
+  --display: 'Bebas Neue', sans-serif;
+  --body: 'Sora', system-ui, sans-serif;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bot: env(safe-area-inset-bottom, 0px);
 }
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--white);font-family:var(--body);min-height:100vh;overflow-x:hidden}
-body::before{content:'';position:fixed;inset:0;
-  background-image:linear-gradient(rgba(0,230,118,.012) 1px,transparent 1px),linear-gradient(90deg,rgba(0,230,118,.012) 1px,transparent 1px);
-  background-size:36px 36px;pointer-events:none;z-index:0}
 
-.topbar{position:sticky;top:0;z-index:100;background:rgba(7,9,13,.96);backdrop-filter:blur(12px);
-border-bottom:1px solid var(–border);padding:0 16px;height:52px;
-display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.brand{font-family:var(–display);font-size:21px;letter-spacing:.12em;color:var(–green)}
-.pair-tag{font-family:var(–mono);font-size:10px;color:var(–muted2);background:var(–card);
-border:1px solid var(–border);padding:2px 9px;border-radius:3px}
-#tb-price{font-family:var(–mono);font-size:15px;font-weight:600}
-#tb-chg{font-family:var(–mono);font-size:11px;padding:2px 8px;border-radius:3px;display:none}
-.topbar-right{margin-left:auto;display:flex;align-items:center;gap:10px}
-.dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
-.dot.ok{background:var(–green);animation:pulse 2s infinite}
-.dot.loading{background:var(–amber);animation:pulse .9s infinite}
-.dot.err{background:var(–red)}
-@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(0,230,118,.4)}50%{box-shadow:0 0 0 5px rgba(0,230,118,0)}}
-#status-txt{font-family:var(–mono);font-size:10px;color:var(–muted)}
-.btn{font-family:var(–mono);font-size:10px;padding:5px 12px;border:1px solid var(–border2);
-background:var(–card);color:var(–muted2);border-radius:3px;cursor:pointer;letter-spacing:.05em;transition:all .15s}
-.btn:hover{border-color:var(–green);color:var(–green)}
-.btn:disabled{opacity:.4;cursor:not-allowed}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html { height: 100%; }
+body {
+background: var(–bg);
+color: var(–white);
+font-family: var(–body);
+min-height: 100%;
+overflow-x: hidden;
+padding-bottom: calc(72px + var(–safe-bot));
+}
+body::before {
+content: ‘’;
+position: fixed; inset: 0;
+background-image:
+linear-gradient(rgba(0,230,118,.01) 1px, transparent 1px),
+linear-gradient(90deg, rgba(0,230,118,.01) 1px, transparent 1px);
+background-size: 40px 40px;
+pointer-events: none; z-index: 0;
+}
 
-.main{position:relative;z-index:1;display:grid;grid-template-columns:1fr 380px;height:calc(100vh - 52px)}
-.chart-col{display:flex;flex-direction:column;border-right:1px solid var(–border);overflow:hidden}
-.chart-head{display:flex;align-items:center;gap:8px;padding:9px 14px;border-bottom:1px solid var(–border);background:var(–panel);flex-shrink:0}
-.chart-lbl{font-family:var(–mono);font-size:9px;color:var(–muted);text-transform:uppercase;letter-spacing:.15em;margin-right:4px}
-.tf-tabs{display:flex;gap:4px}
-.tf-tab{font-family:var(–mono);font-size:11px;padding:4px 11px;border-radius:3px;border:1px solid var(–border);
-background:transparent;color:var(–muted2);cursor:pointer;transition:all .15s}
-.tf-tab:hover{border-color:var(–border2);color:var(–white)}
-.tf-tab.active{background:var(–green);color:var(–bg);border-color:var(–green);font-weight:600}
-.tv-wrap{flex:1;min-height:0}
-.tv-wrap>div{width:100%;height:100%}
+/* ── TOP BAR ── */
+.topbar {
+position: sticky; top: 0; z-index: 100;
+background: rgba(7,9,13,.97);
+backdrop-filter: blur(16px) saturate(1.4);
+-webkit-backdrop-filter: blur(16px) saturate(1.4);
+border-bottom: 1px solid var(–border);
+padding: calc(var(–safe-top) + 10px) 16px 10px;
+display: flex; align-items: center; gap: 10px;
+}
+.brand { font-family: var(–display); font-size: 22px; letter-spacing: .12em; color: var(–green); line-height: 1; }
+.pair-tag {
+font-family: var(–mono); font-size: 9px; color: var(–muted2);
+background: var(–card); border: 1px solid var(–border);
+padding: 3px 8px; border-radius: 4px; letter-spacing: .08em;
+}
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+#tb-price { font-family: var(–mono); font-size: 16px; font-weight: 600; }
+#tb-chg {
+font-family: var(–mono); font-size: 11px;
+padding: 3px 8px; border-radius: 4px; display: none;
+}
+.dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.dot.ok { background: var(–green); animation: pulse 2s infinite; }
+.dot.loading { background: var(–amber); animation: pulse .8s infinite; }
+.dot.err { background: var(–red); }
+@keyframes pulse {
+0%,100% { box-shadow: 0 0 0 0 rgba(0,230,118,.5); }
+50% { box-shadow: 0 0 0 5px rgba(0,230,118,0); }
+}
 
-.sig-col{display:flex;flex-direction:column;overflow-y:auto;background:var(–panel)}
-.sig-col::-webkit-scrollbar{width:3px}
-.sig-col::-webkit-scrollbar-thumb{background:var(–border2)}
-.sec{padding:12px 14px;border-bottom:1px solid var(–border)}
-.sec-lbl{font-family:var(–mono);font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(–muted);margin-bottom:9px}
+/* ── BOTTOM NAV ── */
+.bottom-nav {
+position: fixed; bottom: 0; left: 0; right: 0; z-index: 200;
+background: rgba(7,9,13,.97);
+backdrop-filter: blur(20px);
+-webkit-backdrop-filter: blur(20px);
+border-top: 1px solid var(–border);
+display: flex;
+padding-bottom: var(–safe-bot);
+}
+.nav-btn {
+flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+gap: 4px; padding: 10px 4px 12px;
+font-family: var(–mono); font-size: 9px; letter-spacing: .08em;
+color: var(–muted); background: none; border: none; cursor: pointer;
+transition: color .2s; text-transform: uppercase;
+}
+.nav-btn.active { color: var(–green); }
+.nav-btn svg { width: 20px; height: 20px; stroke-width: 1.5; }
 
-.ov-box{border-radius:6px;padding:14px 16px;border:1px solid;transition:all .5s}
-.ov-box.long{background:var(–gdim);border-color:var(–gbrd)}
-.ov-box.short{background:var(–rdim);border-color:var(–rbrd)}
-.ov-box.neutral{background:var(–adim);border-color:var(–abrd)}
-.ov-box.wait{background:rgba(28,34,48,.4);border-color:var(–border)}
-.ov-dir{font-family:var(–display);font-size:44px;letter-spacing:.08em;line-height:1}
-.ov-box.long .ov-dir{color:var(–green)}
-.ov-box.short .ov-dir{color:var(–red)}
-.ov-box.neutral .ov-dir{color:var(–amber)}
-.ov-box.wait .ov-dir{color:var(–muted2)}
-.ov-row{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
-.ov-right{text-align:right;flex-shrink:0}
-.ov-tfs{font-family:var(–mono);font-size:11px;color:var(–muted2);margin-top:4px}
-.ov-reason{font-family:var(–mono);font-size:9px;color:var(–muted2);margin-top:8px;line-height:1.55}
+/* ── CONTENT PAGES ── */
+.page { display: none; position: relative; z-index: 1; padding: 0 0 16px; }
+.page.active { display: block; }
 
-.signal-card{background:var(–card);border:1px solid var(–border);border-radius:5px;padding:11px 13px;margin-bottom:5px;position:relative;overflow:hidden}
-.signal-card::before{content:’’;position:absolute;left:0;top:0;bottom:0;width:3px}
-.signal-card.long::before{background:var(–green)}
-.signal-card.short::before{background:var(–red)}
-.signal-card.neutral::before{background:var(–amber)}
-.signal-card.none::before{background:var(–muted)}
-.sc-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:5px}
-.sc-tf{font-family:var(–mono);font-size:10px;font-weight:600;color:var(–muted2)}
-.sc-type{font-family:var(–mono);font-size:9px;padding:2px 7px;border-radius:3px;font-weight:700;letter-spacing:.06em}
-.sc-type.FAIL_GAIN{background:var(–rdim);color:var(–red);border:1px solid var(–rbrd)}
-.sc-type.FAIL_LOSE{background:var(–gdim);color:var(–green);border:1px solid var(–gbrd)}
-.sc-type.AT_LEVEL{background:var(–adim);color:var(–amber);border:1px solid var(–abrd)}
-.sc-type.NONE{background:var(–border);color:var(–muted2);border:1px solid var(–border)}
-.sc-badge{font-family:var(–mono);font-size:12px;font-weight:700;letter-spacing:.05em}
-.sc-badge.LONG{color:var(–green)}.sc-badge.SHORT{color:var(–red)}.sc-badge.NEUTRAL{color:var(–amber)}.sc-badge.WAIT{color:var(–muted)}
-.sc-reason{font-family:var(–mono);font-size:9px;color:var(–muted2);line-height:1.5;margin-top:3px}
+/* ── SECTION ── */
+.sec { padding: 14px 16px; border-bottom: 1px solid var(–border); }
+.sec-lbl {
+font-family: var(–mono); font-size: 9px; letter-spacing: .22em;
+text-transform: uppercase; color: var(–muted); margin-bottom: 10px;
+display: flex; align-items: center; gap: 6px;
+}
+.sec-lbl::before { content: ‘’; width: 3px; height: 3px; background: var(–muted); border-radius: 50%; }
 
-.lvl-list{display:flex;flex-direction:column;gap:4px}
-.lvl-row{display:grid;grid-template-columns:32px 1fr auto auto;align-items:center;gap:8px;
-padding:8px 10px;background:var(–card);border:1px solid var(–border);border-radius:3px}
-.lvl-tag{font-family:var(–mono);font-size:9px;font-weight:700}
-.lvl-tag.R{color:var(–red)}.lvl-tag.S{color:var(–green)}
-.lvl-meta{font-family:var(–mono);font-size:9px;color:var(–muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.lvl-price{font-family:var(–mono);font-size:11px;font-weight:600}
-.lvl-price.R{color:var(–red)}.lvl-price.S{color:var(–green)}
-.lvl-dist{font-family:var(–mono);font-size:9px;color:var(–muted);text-align:right}
-.lvl-row.untested{border-color:rgba(255,193,7,.3);background:rgba(255,193,7,.04)}
-.untested-dot{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(–amber);margin-left:4px;vertical-align:middle}
+/* ── HERO SIGNAL CARD ── */
+.hero-card {
+margin: 14px 16px;
+border-radius: 12px; padding: 20px;
+border: 1px solid; position: relative; overflow: hidden;
+transition: all .5s;
+}
+.hero-card::after {
+content: ‘’; position: absolute; inset: 0;
+background: radial-gradient(ellipse at 20% 50%, rgba(255,255,255,.04) 0%, transparent 60%);
+pointer-events: none;
+}
+.hero-card.long { background: var(–gdim); border-color: var(–gbrd); }
+.hero-card.short { background: var(–rdim); border-color: var(–rbrd); }
+.hero-card.neutral { background: var(–adim); border-color: var(–abrd); }
+.hero-card.wait { background: rgba(20,28,40,.6); border-color: var(–border); }
 
-.nm-box{background:var(–card);border-radius:5px;padding:11px 13px;border:1px solid var(–border)}
-.nm-label{font-family:var(–mono);font-size:9px;color:var(–muted);margin-bottom:4px}
-.nm-val{font-family:var(–display);font-size:26px;letter-spacing:.08em}
-.nm-val.UP{color:var(–green)}.nm-val.DOWN{color:var(–red)}.nm-val.UNCLEAR{color:var(–amber)}
-.nm-reason{font-family:var(–mono);font-size:9px;color:var(–muted2);margin-top:5px;line-height:1.5}
+.hero-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+.hero-dir {
+font-family: var(–display); font-size: 64px; letter-spacing: .06em; line-height: .9;
+}
+.hero-card.long .hero-dir { color: var(–green); }
+.hero-card.short .hero-dir { color: var(–red); }
+.hero-card.neutral .hero-dir { color: var(–amber); }
+.hero-card.wait .hero-dir { color: var(–muted2); }
 
-.log-list{display:flex;flex-direction:column;gap:4px;max-height:180px;overflow-y:auto}
-.log-entry{display:flex;gap:8px;padding:7px 10px;background:var(–card);
-border-left:2px solid;border-top:1px solid var(–border);border-right:1px solid var(–border);border-bottom:1px solid var(–border);
-border-radius:0 3px 3px 0}
-.log-entry.long{border-left-color:var(–green)}
-.log-entry.short{border-left-color:var(–red)}
-.log-entry.neutral{border-left-color:var(–amber)}
-.log-time{font-family:var(–mono);font-size:9px;color:var(–muted);width:38px;flex-shrink:0;padding-top:1px}
-.log-text{font-family:var(–mono);font-size:9px;color:var(–muted2);line-height:1.45}
+.hero-right { text-align: right; }
+.hero-tfs { font-family: var(–mono); font-size: 11px; color: var(–muted2); }
+.hero-strength {
+display: inline-block; margin-top: 4px;
+font-family: var(–mono); font-size: 9px; letter-spacing: .1em;
+padding: 3px 8px; border-radius: 3px;
+background: rgba(255,255,255,.06); color: var(–muted2);
+}
+.hero-reason { font-family: var(–mono); font-size: 10px; color: var(–muted2); line-height: 1.6; }
 
-.skel{background:linear-gradient(90deg,var(–border) 25%,var(–border2) 50%,var(–border) 75%);
-background-size:200% 100%;animation:skel 1.5s infinite;border-radius:2px;display:inline-block}
-@keyframes skel{0%{background-position:200% center}100%{background-position:-200% center}}
+/* ── NEXT MOVE PILL ── */
+.nm-row { display: flex; gap: 10px; margin: 14px 16px 0; }
+.nm-pill {
+flex: 1; background: var(–card); border: 1px solid var(–border);
+border-radius: 10px; padding: 14px;
+}
+.nm-pill-lbl { font-family: var(–mono); font-size: 8px; letter-spacing: .18em; color: var(–muted); text-transform: uppercase; margin-bottom: 5px; }
+.nm-pill-val { font-family: var(–display); font-size: 28px; letter-spacing: .08em; }
+.nm-pill-val.UP { color: var(–green); }
+.nm-pill-val.DOWN { color: var(–red); }
+.nm-pill-val.UNCLEAR { color: var(–amber); }
+.nm-pill-sub { font-family: var(–mono); font-size: 8px; color: var(–muted2); margin-top: 3px; line-height: 1.45; }
 
-@media(max-width:820px){
-.main{grid-template-columns:1fr;grid-template-rows:340px 1fr;height:auto}
-.chart-col{border-right:none;border-bottom:1px solid var(–border)}
+/* ── TF SELECTOR (tab bar) ── */
+.tf-bar {
+display: flex; gap: 6px; padding: 10px 16px;
+overflow-x: auto; scrollbar-width: none;
+border-bottom: 1px solid var(–border);
+}
+.tf-bar::-webkit-scrollbar { display: none; }
+.tf-btn {
+flex-shrink: 0;
+font-family: var(–mono); font-size: 12px; font-weight: 600;
+padding: 8px 16px; border-radius: 6px;
+border: 1px solid var(–border);
+background: transparent; color: var(–muted2); cursor: pointer;
+transition: all .15s; letter-spacing: .06em;
+min-width: 52px; text-align: center;
+}
+.tf-btn.active {
+background: var(–green); color: var(–bg);
+border-color: var(–green);
+}
+
+/* ── SIGNAL CARDS (TF breakdown) ── */
+.tf-card {
+background: var(–card); border: 1px solid var(–border);
+border-radius: 10px; padding: 14px 16px;
+margin: 0 16px 8px; position: relative; overflow: hidden;
+}
+.tf-card::before { content: ‘’; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: 3px 0 0 3px; }
+.tf-card.long::before { background: var(–green); }
+.tf-card.short::before { background: var(–red); }
+.tf-card.neutral::before { background: var(–amber); }
+.tf-card.none::before { background: var(–muted); }
+
+.tf-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.tf-card-label { font-family: var(–mono); font-size: 13px; font-weight: 600; color: var(–white); }
+.tf-card-type {
+font-family: var(–mono); font-size: 9px; font-weight: 700; letter-spacing: .07em;
+padding: 3px 8px; border-radius: 4px;
+}
+.tf-card-type.FAIL_GAIN { background: var(–rdim); color: var(–red); border: 1px solid var(–rbrd); }
+.tf-card-type.FAIL_LOSE { background: var(–gdim); color: var(–green); border: 1px solid var(–gbrd); }
+.tf-card-type.AT_LEVEL  { background: var(–adim); color: var(–amber); border: 1px solid var(–abrd); }
+.tf-card-type.NONE      { background: var(–border); color: var(–muted2); border: 1px solid var(–border); }
+.tf-card-badge { margin-left: auto; font-family: var(–mono); font-size: 13px; font-weight: 700; }
+.tf-card-badge.LONG { color: var(–green); }
+.tf-card-badge.SHORT { color: var(–red); }
+.tf-card-badge.NEUTRAL { color: var(–amber); }
+.tf-card-badge.WAIT { color: var(–muted); }
+.tf-card-reason { font-family: var(–mono); font-size: 9px; color: var(–muted2); line-height: 1.55; }
+.tf-card-prices { display: flex; gap: 16px; margin-top: 8px; }
+.tcp { font-family: var(–mono); font-size: 9px; }
+.tcp-lbl { color: var(–muted); }
+.tcp-val { color: var(–white); font-weight: 600; }
+
+/* ── CHART TAB ── */
+.chart-wrap { height: calc(100svh - 160px); min-height: 400px; }
+.chart-wrap iframe, .chart-wrap > div { width: 100%; height: 100%; }
+
+/* ── LEVELS ── */
+.lvl-item {
+display: flex; align-items: center; gap: 12px;
+padding: 12px 16px; border-bottom: 1px solid var(–border);
+}
+.lvl-item.untested { background: rgba(255,193,7,.03); }
+.lvl-badge {
+font-family: var(–mono); font-size: 10px; font-weight: 700;
+width: 36px; text-align: center;
+padding: 4px 0; border-radius: 4px;
+}
+.lvl-badge.R { color: var(–red); background: var(–rdim); }
+.lvl-badge.S { color: var(–green); background: var(–gdim); }
+.lvl-info { flex: 1; }
+.lvl-tf { font-family: var(–mono); font-size: 9px; color: var(–muted); }
+.lvl-untested-tag {
+display: inline-block; font-family: var(–mono); font-size: 8px;
+color: var(–amber); margin-left: 4px;
+}
+.lvl-price-wrap { text-align: right; }
+.lvl-price { font-family: var(–mono); font-size: 14px; font-weight: 600; }
+.lvl-price.R { color: var(–red); }
+.lvl-price.S { color: var(–green); }
+.lvl-dist { font-family: var(–mono); font-size: 9px; color: var(–muted); }
+
+/* ── LOG ── */
+.log-item {
+display: flex; gap: 10px; padding: 12px 16px;
+border-bottom: 1px solid var(–border);
+border-left: 3px solid transparent;
+}
+.log-item.long { border-left-color: var(–green); }
+.log-item.short { border-left-color: var(–red); }
+.log-item.neutral { border-left-color: var(–amber); }
+.log-time { font-family: var(–mono); font-size: 9px; color: var(–muted); flex-shrink: 0; padding-top: 1px; }
+.log-txt { font-family: var(–mono); font-size: 10px; color: var(–muted2); line-height: 1.5; }
+
+/* ── REFRESH BTN ── */
+.refresh-fab {
+position: fixed; bottom: calc(84px + var(–safe-bot)); right: 16px; z-index: 150;
+width: 44px; height: 44px; border-radius: 50%;
+background: var(–card2); border: 1px solid var(–border2);
+color: var(–muted2); font-size: 18px; cursor: pointer;
+display: flex; align-items: center; justify-content: center;
+box-shadow: 0 4px 20px rgba(0,0,0,.4);
+transition: all .2s;
+}
+.refresh-fab:active { transform: scale(.9); }
+.refresh-fab.spinning { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── SKEL ── */
+.skel {
+background: linear-gradient(90deg, var(–border) 25%, var(–border2) 50%, var(–border) 75%);
+background-size: 200% 100%; animation: skel 1.5s infinite;
+border-radius: 3px; display: inline-block;
+}
+@keyframes skel { 0% { background-position: 200% center; } 100% { background-position: -200% center; } }
+
+/* ── STATUS BAR ── */
+.status-bar {
+display: flex; align-items: center; gap: 6px;
+padding: 6px 16px; border-bottom: 1px solid var(–border);
+font-family: var(–mono); font-size: 9px; color: var(–muted);
+}
+
+/* ── SECTION HEADER for pages ── */
+.page-header {
+padding: 14px 16px 10px;
+font-family: var(–mono); font-size: 9px; letter-spacing: .2em;
+text-transform: uppercase; color: var(–muted);
+border-bottom: 1px solid var(–border);
 }
 </style>
 
 </head>
 <body>
 
+<!-- TOP BAR -->
+
 <div class="topbar">
-  <span class="brand">DMC ⚡ SIGNAL</span>
-  <span class="pair-tag">BTC/USD</span>
-  <span id="tb-price">—</span>
-  <span id="tb-chg"></span>
+  <span class="brand">DMC ⚡</span>
+  <span class="pair-tag">BTCUSD</span>
   <div class="topbar-right">
+    <span id="tb-price">—</span>
+    <span id="tb-chg"></span>
     <span class="dot loading" id="dot"></span>
-    <span id="status-txt">Connecting...</span>
-    <button class="btn" id="refresh-btn" onclick="manualRefresh()">↻ REFRESH</button>
   </div>
 </div>
 
-<div class="main">
-  <div class="chart-col">
-    <div class="chart-head">
-      <span class="chart-lbl">TradingView · Live</span>
-      <div class="tf-tabs" id="tf-tabs">
-        <button class="tf-tab" data-iv="W">1W</button>
-        <button class="tf-tab" data-iv="D">1D</button>
-        <button class="tf-tab active" data-iv="240">4H</button>
-        <button class="tf-tab" data-iv="60">1H</button>
-        <button class="tf-tab" data-iv="15">15m</button>
+<!-- STATUS BAR -->
+
+<div class="status-bar">
+  <span id="status-txt">Connecting to CoinGecko...</span>
+  <span style="margin-left:auto" id="last-upd">—</span>
+</div>
+
+<!-- PAGE: SIGNAL -->
+
+<div class="page active" id="page-signal">
+
+  <!-- Hero overall signal -->
+
+  <div class="hero-card wait" id="hero-card">
+    <div class="hero-top">
+      <div class="hero-dir" id="hero-dir">—</div>
+      <div class="hero-right">
+        <div class="hero-tfs" id="hero-tfs">0 / 5 TFs</div>
+        <div class="hero-strength" id="hero-strength">LOADING</div>
       </div>
     </div>
-    <div class="tv-wrap" id="tv-wrap"></div>
+    <div class="hero-reason" id="hero-reason">Fetching candle data from CoinGecko...</div>
   </div>
 
-  <div class="sig-col">
-    <div class="sec">
-      <div class="sec-lbl">▸ Next Major Move (HTF)</div>
-      <div class="nm-box">
-        <div class="nm-label">DIRECTION</div>
-        <div class="nm-val UNCLEAR" id="nm-val">—</div>
-        <div class="nm-reason" id="nm-reason">Analysing higher timeframe levels...</div>
-      </div>
+  <!-- Next move pills -->
+
+  <div class="nm-row">
+    <div class="nm-pill">
+      <div class="nm-pill-lbl">Next Move (HTF)</div>
+      <div class="nm-pill-val UNCLEAR" id="nm-val">—</div>
+      <div class="nm-pill-sub" id="nm-sub">Analysing weekly + daily bodies...</div>
     </div>
+  </div>
 
-```
-<div class="sec">
-  <div class="sec-lbl">▸ Overall DMC Signal</div>
-  <div class="ov-box wait" id="ov-box">
-    <div class="ov-row">
-      <div class="ov-dir" id="ov-dir">—</div>
-      <div class="ov-right"><div class="ov-tfs" id="ov-tfs">0 / 5 TFs</div></div>
+  <!-- TF breakdown label -->
+
+  <div class="sec-lbl" style="padding: 14px 16px 0; margin-bottom: 0;">Timeframe Breakdown</div>
+
+  <div style="padding: 10px 0 0;" id="tf-cards-wrap"></div>
+
+</div>
+
+<!-- PAGE: CHART -->
+
+<div class="page" id="page-chart">
+  <div class="tf-bar" id="tf-bar">
+    <button class="tf-btn" data-iv="W">1W</button>
+    <button class="tf-btn" data-iv="D">1D</button>
+    <button class="tf-btn active" data-iv="240">4H</button>
+    <button class="tf-btn" data-iv="60">1H</button>
+    <button class="tf-btn" data-iv="15">15m</button>
+  </div>
+  <div class="chart-wrap" id="tv-wrap"></div>
+</div>
+
+<!-- PAGE: LEVELS -->
+
+<div class="page" id="page-levels">
+  <div class="page-header">Key Levels · Untested Candle Bodies</div>
+  <div id="lvl-list"></div>
+</div>
+
+<!-- PAGE: LOG -->
+
+<div class="page" id="page-log">
+  <div class="page-header">Signal Log</div>
+  <div id="log-list">
+    <div class="log-item neutral">
+      <span class="log-time">--:--</span>
+      <span class="log-txt">Initialising DMC engine...</span>
     </div>
-    <div class="ov-reason" id="ov-reason">Fetching candle data...</div>
   </div>
 </div>
 
-<div class="sec">
-  <div class="sec-lbl">▸ Timeframe Analysis</div>
-  <div id="tf-cards"></div>
-</div>
+<!-- REFRESH FAB -->
 
-<div class="sec">
-  <div class="sec-lbl">▸ Key Levels · Untested Bodies <span style="font-family:var(--mono);font-size:8px;color:var(--amber)">● = untested</span></div>
-  <div class="lvl-list" id="lvl-list">
-    <div class="lvl-row"><span class="lvl-meta">Detecting untested candle bodies...</span></div>
-  </div>
-</div>
+<button class="refresh-fab" id="refresh-fab" onclick="manualRefresh()" title="Refresh">↻</button>
 
-<div class="sec">
-  <div class="sec-lbl">▸ Signal Log</div>
-  <div class="log-list" id="log-list">
-    <div class="log-entry neutral"><span class="log-time">--:--</span><span class="log-text">Initialising DMC engine...</span></div>
-  </div>
-</div>
+<!-- BOTTOM NAV -->
 
-<div style="padding:10px 14px;font-family:var(--mono);font-size:9px;color:var(--muted);display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;border-top:1px solid var(--border)">
-  <span>DMC · Chris Hunter · Maven Trading</span>
-  <span id="last-upd" style="color:var(--muted2)">—</span>
-</div>
-```
-
-  </div>
-</div>
+<nav class="bottom-nav">
+  <button class="nav-btn active" data-page="signal" onclick="switchPage('signal', this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+    Signal
+  </button>
+  <button class="nav-btn" data-page="chart" onclick="switchPage('chart', this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+    Chart
+  </button>
+  <button class="nav-btn" data-page="levels" onclick="switchPage('levels', this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    Levels
+  </button>
+  <button class="nav-btn" data-page="log" onclick="switchPage('log', this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
+    Log
+  </button>
+</nav>
 
 <script>
 'use strict';
 
 // ═══════════════════════════════════════════════════════════
-// CONFIG — CoinGecko (no CORS issues, works everywhere)
+// CONFIG
 // ═══════════════════════════════════════════════════════════
-// CoinGecko free API — OHLC data
-// /coins/{id}/ohlc?vs_currency=usd&days=N
-// days=1 → hourly candles, days=7/14/30 → daily, days=max → weekly
-
-const REFRESH = 120000; // 2 min (CoinGecko rate limit is generous)
 const COIN_ID = 'bitcoin';
 const CG_BASE = 'https://api.coingecko.com/api/v3';
+const REFRESH  = 120000;
 
-// Map each TF to a CoinGecko days param
-// CoinGecko returns: [timestamp, open, high, low, close]
-// days=1 → ~24 hourly candles
-// days=7 → ~daily-ish candles
-// days=30/90/max → various resolutions
 const TFS = [
-  { label:'1W',  cgDays:'max',  cgResolution:'weekly',  iv:'W',   weight:5 },
-  { label:'1D',  cgDays:'90',   cgResolution:'daily',   iv:'D',   weight:4 },
-  { label:'4H',  cgDays:'16',   cgResolution:'4h',      iv:'240', weight:3 },
-  { label:'1H',  cgDays:'3',    cgResolution:'hourly',  iv:'60',  weight:2 },
-  { label:'15m', cgDays:'1',    cgResolution:'15m',     iv:'15',  weight:1 },
+  { label:'1W',  iv:'W',   weight:5 },
+  { label:'1D',  iv:'D',   weight:4 },
+  { label:'4H',  iv:'240', weight:3 },
+  { label:'1H',  iv:'60',  weight:2 },
+  { label:'15m', iv:'15',  weight:1 },
 ];
 
 let results   = {};
@@ -245,6 +439,18 @@ let signalLog = [];
 let isRunning = false;
 let timer     = null;
 let price     = 0;
+let tvLoaded  = false;
+
+// ═══════════════════════════════════════════════════════════
+// NAVIGATION
+// ═══════════════════════════════════════════════════════════
+function switchPage(id, btn) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  btn.classList.add('active');
+  if (id === 'chart' && !tvLoaded) { loadTV('240'); tvLoaded = true; }
+}
 
 // ═══════════════════════════════════════════════════════════
 // TRADINGVIEW
@@ -256,84 +462,55 @@ function loadTV(iv) {
   s.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
   s.async = true;
   s.textContent = JSON.stringify({
-    autosize:true, symbol:'BINANCE:BTCUSDT', interval:iv,
-    timezone:'Etc/UTC', theme:'dark', style:'1', locale:'en',
-    backgroundColor:'#0c0f14', hide_top_toolbar:false,
-    allow_symbol_change:false, save_image:false
+    autosize: true, symbol: 'BINANCE:BTCUSDT', interval: iv,
+    timezone: 'Etc/UTC', theme: 'dark', style: '1', locale: 'en',
+    backgroundColor: '#07090d', hide_top_toolbar: false,
+    allow_symbol_change: false, save_image: false,
+    hide_side_toolbar: true
   });
   wrap.firstChild.appendChild(s);
 }
 
-document.getElementById('tf-tabs').addEventListener('click', e => {
-  const btn = e.target.closest('.tf-tab');
+document.getElementById('tf-bar').addEventListener('click', e => {
+  const btn = e.target.closest('.tf-btn');
   if (!btn) return;
-  document.querySelectorAll('.tf-tab').forEach(b => b.classList.toggle('active', b===btn));
+  document.querySelectorAll('.tf-btn').forEach(b => b.classList.toggle('active', b === btn));
   loadTV(btn.dataset.iv);
+  tvLoaded = true;
 });
 
 // ═══════════════════════════════════════════════════════════
 // COINGECKO API
 // ═══════════════════════════════════════════════════════════
-
-// CoinGecko OHLC endpoint — returns [[ts, o, h, l, c], ...]
-// Resolution depends on days: 1=hourly, 7-30=daily-ish
-async function getOHLC(days) {
-  const url = `${CG_BASE}/coins/${COIN_ID}/ohlc?vs_currency=usd&days=${days}`;
-  const r = await fetch(url);
-  if (!r.ok) {
-    const errText = await r.text().catch(()=>'');
-    throw new Error(`OHLC ${days}d: ${r.status} ${errText.slice(0,60)}`);
-  }
-  const raw = await r.json();
-  if (!Array.isArray(raw) || raw.length === 0) throw new Error(`OHLC ${days}d: empty response`);
-  return raw.map(k => ({
-    t: k[0],
-    o: k[1], h: k[2], l: k[3], c: k[4],
-    bodyHigh: Math.max(k[1], k[4]),
-    bodyLow:  Math.min(k[1], k[4])
-  }));
-}
-
-// Current price + 24h change from simple price endpoint
 async function getPrice() {
-  const url = `${CG_BASE}/simple/price?ids=${COIN_ID}&vs_currencies=usd&include_24hr_change=true`;
-  const r = await fetch(url);
+  const r = await fetch(`${CG_BASE}/simple/price?ids=${COIN_ID}&vs_currencies=usd&include_24hr_change=true`);
   if (!r.ok) throw new Error('Price: ' + r.status);
   const d = await r.json();
-  return {
-    price:  d[COIN_ID].usd,
-    change: d[COIN_ID].usd_24h_change
-  };
+  return { price: d[COIN_ID].usd, change: d[COIN_ID].usd_24h_change };
 }
 
-// For 4H and 15m, CoinGecko doesn't have sub-hourly OHLC natively in free tier.
-// Strategy: use market_chart for intraday, aggregate into OHLC candles manually.
+async function getOHLC(days) {
+  const r = await fetch(`${CG_BASE}/coins/${COIN_ID}/ohlc?vs_currency=usd&days=${days}`);
+  if (!r.ok) throw new Error(`OHLC ${days}d: ${r.status}`);
+  const raw = await r.json();
+  if (!Array.isArray(raw) || raw.length === 0) throw new Error(`OHLC ${days}d: empty`);
+  return raw.map(k => ({ t:k[0], o:k[1], h:k[2], l:k[3], c:k[4], bodyHigh:Math.max(k[1],k[4]), bodyLow:Math.min(k[1],k[4]) }));
+}
+
 async function getMarketChart(days, intervalMinutes) {
-  const url = `${CG_BASE}/coins/${COIN_ID}/market_chart?vs_currency=usd&days=${days}`;
-  const r = await fetch(url);
+  const r = await fetch(`${CG_BASE}/coins/${COIN_ID}/market_chart?vs_currency=usd&days=${days}`);
   if (!r.ok) throw new Error(`Chart ${days}d: ${r.status}`);
   const d = await r.json();
-  // prices: [[ts, price], ...]
   const prices = d.prices;
-  if (!prices || prices.length < 4) throw new Error(`Chart ${days}d: insufficient data`);
-
-  // Group into intervalMinutes buckets → synthetic OHLC
-  const bucketMs = intervalMinutes * 60 * 1000;
+  if (!prices || prices.length < 4) throw new Error(`Chart ${days}d: insufficient`);
+  const bms = intervalMinutes * 60000;
   const buckets = {};
   for (const [ts, p] of prices) {
-    const bucket = Math.floor(ts / bucketMs) * bucketMs;
-    if (!buckets[bucket]) buckets[bucket] = { t:bucket, o:p, h:p, l:p, c:p };
-    else {
-      buckets[bucket].h = Math.max(buckets[bucket].h, p);
-      buckets[bucket].l = Math.min(buckets[bucket].l, p);
-      buckets[bucket].c = p;
-    }
+    const b = Math.floor(ts / bms) * bms;
+    if (!buckets[b]) buckets[b] = { t:b, o:p, h:p, l:p, c:p };
+    else { buckets[b].h = Math.max(buckets[b].h, p); buckets[b].l = Math.min(buckets[b].l, p); buckets[b].c = p; }
   }
-  return Object.values(buckets).sort((a,b)=>a.t-b.t).map(k => ({
-    ...k,
-    bodyHigh: Math.max(k.o, k.c),
-    bodyLow:  Math.min(k.o, k.c)
-  }));
+  return Object.values(buckets).sort((a,b)=>a.t-b.t).map(k => ({ ...k, bodyHigh:Math.max(k.o,k.c), bodyLow:Math.min(k.o,k.c) }));
 }
 
 async function getCandles(tf) {
@@ -343,40 +520,30 @@ async function getCandles(tf) {
     case '4H':  return getMarketChart('16', 240);
     case '1H':  return getMarketChart('7', 60);
     case '15m': return getMarketChart('2', 15);
-    default:    return getOHLC('30');
   }
 }
 
 // ═══════════════════════════════════════════════════════════
-// DMC ENGINE (unchanged from v4 — pure Chris Hunter logic)
+// DMC ENGINE
 // ═══════════════════════════════════════════════════════════
-
 function calcATR(candles, p=14) {
   const trs = candles.slice(1).map((c,i) => {
     const prev = candles[i];
     return Math.max(c.h-c.l, Math.abs(c.h-prev.c), Math.abs(c.l-prev.c));
   });
-  const last = trs.slice(-p);
-  return last.reduce((s,v)=>s+v,0)/last.length;
+  return trs.slice(-p).reduce((s,v)=>s+v,0)/p;
 }
 
 function findUntestedBodies(candles) {
-  const n = candles.length;
-  const levels = [];
-  for (let i = 5; i < n - 3; i++) {
-    const c = candles[i];
-    const bodySize = Math.abs(c.bodyHigh - c.bodyLow);
-    if (bodySize < 0.001) continue;
-    const isSwingHigh = c.h >= Math.max(...candles.slice(i-3,i+4).map(x=>x.h)) - bodySize*0.1;
-    const isSwingLow  = c.l <= Math.min(...candles.slice(i-3,i+4).map(x=>x.l)) + bodySize*0.1;
-    if (!isSwingHigh && !isSwingLow) continue;
-    const testedByBody = candles.slice(i+1).some(f => f.bodyHigh>=c.bodyLow && f.bodyLow<=c.bodyHigh);
-    levels.push({
-      price: isSwingHigh ? c.bodyHigh : c.bodyLow,
-      bodyHigh: c.bodyHigh, bodyLow: c.bodyLow,
-      type: isSwingHigh ? 'resistance' : 'support',
-      tested: testedByBody, idx: i
-    });
+  const n = candles.length, levels = [];
+  for (let i=5; i<n-3; i++) {
+    const c = candles[i], sz = Math.abs(c.bodyHigh-c.bodyLow);
+    if (sz < 0.001) continue;
+    const isHigh = c.h >= Math.max(...candles.slice(i-3,i+4).map(x=>x.h)) - sz*0.1;
+    const isLow  = c.l <= Math.min(...candles.slice(i-3,i+4).map(x=>x.l)) + sz*0.1;
+    if (!isHigh && !isLow) continue;
+    const tested = candles.slice(i+1).some(f => f.bodyHigh>=c.bodyLow && f.bodyLow<=c.bodyHigh);
+    levels.push({ price:isHigh?c.bodyHigh:c.bodyLow, bodyHigh:c.bodyHigh, bodyLow:c.bodyLow, type:isHigh?'resistance':'support', tested, idx:i });
   }
   return levels;
 }
@@ -386,74 +553,73 @@ function detectDMCSignal(candles, atr) {
   if (n < 20) return { signal:'NEUTRAL', type:'NONE', reason:'Insufficient data' };
   const tol = atr * 0.15;
   const levels = findUntestedBodies(candles);
-  const rel = levels.filter(l => Math.abs(l.price - candles[n-1].c) < atr * 8);
+  const rel = levels.filter(l => Math.abs(l.price - candles[n-1].c) < atr*8);
 
   for (const lv of rel.filter(l=>l.type==='resistance')) {
-    for (let lb = 2; lb <= 6; lb++) {
-      if (n - lb < 0) break;
-      const att = candles[n-lb], cur = candles[n-1];
-      if (att.bodyHigh > lv.price-tol && cur.bodyHigh < lv.price+tol && cur.c < lv.price && candles[n-lb-1]?.c < lv.price) {
-        let oi = n-lb-1;
-        while (oi>0 && candles[oi].c<candles[oi+1].c) oi--;
-        const target = candles[oi]?.c || lv.price*0.98;
+    for (let lb=2; lb<=6; lb++) {
+      if (n-lb<0) break;
+      const att=candles[n-lb], cur=candles[n-1];
+      if (att.bodyHigh>lv.price-tol && cur.bodyHigh<lv.price+tol && cur.c<lv.price && candles[n-lb-1]?.c<lv.price) {
+        // Target = origin of the move = lowest body low in the 60 candles before the attempt, must be BELOW current price
+        const lookbackCandles = candles.slice(Math.max(0, n-lb-60), n-lb);
+        const belowCurrent = lookbackCandles.filter(c => c.bodyLow < cur.c);
+        const target = belowCurrent.length > 0
+          ? Math.min(...belowCurrent.map(c => c.bodyLow))
+          : cur.c * 0.98;
         return { signal:'SHORT', type:'FAIL_GAIN', level:lv.price, target, reason:`Failed to gain $${fmt(lv.price)} — body closed back below. Target: $${fmt(target)}`, strength:lb<=3?'high':'med', untested:!lv.tested };
       }
     }
   }
-
   for (const lv of rel.filter(l=>l.type==='support')) {
-    for (let lb = 2; lb <= 6; lb++) {
-      if (n - lb < 0) break;
-      const att = candles[n-lb], cur = candles[n-1];
-      if (att.bodyLow < lv.price+tol && cur.bodyLow > lv.price-tol && cur.c > lv.price && candles[n-lb-1]?.c > lv.price) {
-        let oi = n-lb-1;
-        while (oi>0 && candles[oi].c>candles[oi+1].c) oi--;
-        const target = candles[oi]?.c || lv.price*1.02;
+    for (let lb=2; lb<=6; lb++) {
+      if (n-lb<0) break;
+      const att=candles[n-lb], cur=candles[n-1];
+      if (att.bodyLow<lv.price+tol && cur.bodyLow>lv.price-tol && cur.c>lv.price && candles[n-lb-1]?.c>lv.price) {
+        // Target = origin of the move = highest body high in the 60 candles before the attempt, must be ABOVE current price
+        const lookbackCandles = candles.slice(Math.max(0, n-lb-60), n-lb);
+        const aboveCurrent = lookbackCandles.filter(c => c.bodyHigh > cur.c);
+        const target = aboveCurrent.length > 0
+          ? Math.max(...aboveCurrent.map(c => c.bodyHigh))
+          : cur.c * 1.02;
         return { signal:'LONG', type:'FAIL_LOSE', level:lv.price, target, reason:`Failed to lose $${fmt(lv.price)} — body closed back above. Target: $${fmt(target)}`, strength:lb<=3?'high':'med', untested:!lv.tested };
       }
     }
   }
-
   const nearest = rel.filter(l=>!l.tested).sort((a,b)=>Math.abs(a.price-candles[n-1].c)-Math.abs(b.price-candles[n-1].c))[0];
-  if (nearest && Math.abs(nearest.price-candles[n-1].c) < atr*1.5) {
+  if (nearest && Math.abs(nearest.price-candles[n-1].c)<atr*1.5)
     return { signal:'NEUTRAL', type:'AT_LEVEL', level:nearest.price, target:null, reason:`At untested ${nearest.type} $${fmt(nearest.price)} — watch for failure to ${nearest.type==='support'?'lose':'gain'}`, strength:'low', untested:true };
-  }
-  return { signal:'NEUTRAL', type:'NONE', reason:'No DMC setup active — price between levels', strength:'none' };
+  return { signal:'NEUTRAL', type:'NONE', reason:'No DMC setup — price between levels', strength:'none' };
 }
 
 function detectNextMove(wC, dC) {
   const wn=wC.length, dn=dC.length;
   if (wn<10||dn<10) return { dir:'UNCLEAR', reason:'Insufficient HTF data' };
-  const wBull = wC[wn-1].bodyHigh>wC[wn-2].bodyHigh && wC[wn-2].bodyHigh>wC[wn-3].bodyHigh;
-  const wBear = wC[wn-1].bodyLow<wC[wn-2].bodyLow && wC[wn-2].bodyLow<wC[wn-3].bodyLow;
-  const dr = dC.slice(-5); let dG=0, dL=0;
-  for (let i=1;i<dr.length;i++) { if(dr[i].bodyHigh>dr[i-1].bodyHigh)dG++;else dL++; }
-  const dFail = dC[dn-1].bodyHigh<dC[dn-2].bodyHigh && dC[dn-2].bodyHigh>dC[dn-3].bodyHigh;
-
-  if (wBull&&dG>=3) return { dir:'UP', reason:`Weekly bodies making higher highs · Daily ${dG}/4 candles gaining` };
-  if (wBear&&dL>=3) return { dir:'DOWN', reason:`Weekly bodies making lower lows · Daily ${dL}/4 candles losing` };
-  if (dFail&&dL>=2) return { dir:'DOWN', reason:`Daily body failed to close above last high — next move likely down` };
-  if (wBull||dG>=3) return { dir:'UP', reason:`Weekly ${wBull?'bullish':'neutral'} · Daily gaining (${dG}/4)` };
-  if (wBear||dL>=3) return { dir:'DOWN', reason:`Weekly ${wBear?'bearish':'neutral'} · Daily losing (${dL}/4)` };
-  return { dir:'UNCLEAR', reason:'Mixed HTF signals — bodies not confirming direction' };
+  const wBull=wC[wn-1].bodyHigh>wC[wn-2].bodyHigh&&wC[wn-2].bodyHigh>wC[wn-3].bodyHigh;
+  const wBear=wC[wn-1].bodyLow<wC[wn-2].bodyLow&&wC[wn-2].bodyLow<wC[wn-3].bodyLow;
+  const dr=dC.slice(-5); let dG=0,dL=0;
+  for(let i=1;i<dr.length;i++){if(dr[i].bodyHigh>dr[i-1].bodyHigh)dG++;else dL++;}
+  const dFail=dC[dn-1].bodyHigh<dC[dn-2].bodyHigh&&dC[dn-2].bodyHigh>dC[dn-3].bodyHigh;
+  if(wBull&&dG>=3)return{dir:'UP',reason:`Weekly higher highs · Daily ${dG}/4 gaining`};
+  if(wBear&&dL>=3)return{dir:'DOWN',reason:`Weekly lower lows · Daily ${dL}/4 losing`};
+  if(dFail&&dL>=2)return{dir:'DOWN',reason:`Daily body failed to close above last high`};
+  if(wBull||dG>=3)return{dir:'UP',reason:`Weekly ${wBull?'bullish':'neutral'} · Daily gaining ${dG}/4`};
+  if(wBear||dL>=3)return{dir:'DOWN',reason:`Weekly ${wBear?'bearish':'neutral'} · Daily losing ${dL}/4`};
+  return{dir:'UNCLEAR',reason:'Mixed HTF — no clear body direction'};
 }
 
 function collectLevels(wC, dC, p) {
-  const wL = findUntestedBodies(wC).map(l=>({...l,tf:'1W'}));
-  const dL = findUntestedBodies(dC).map(l=>({...l,tf:'1D'}));
-  const all = [...wL,...dL].sort((a,b)=>b.price-a.price);
-  const dd = [];
-  for (const l of all) {
-    const clash = dd.find(d=>Math.abs(d.price-l.price)/l.price<0.005);
-    if (!clash) dd.push(l);
-  }
-  return [...dd.filter(l=>l.price>p).slice(0,4), ...dd.filter(l=>l.price<p).slice(-4).reverse()];
+  const wL=findUntestedBodies(wC).map(l=>({...l,tf:'1W'}));
+  const dL=findUntestedBodies(dC).map(l=>({...l,tf:'1D'}));
+  const all=[...wL,...dL].sort((a,b)=>b.price-a.price);
+  const dd=[];
+  for(const l of all){const c=dd.find(d=>Math.abs(d.price-l.price)/l.price<0.005);if(!c)dd.push(l);}
+  return[...dd.filter(l=>l.price>p).slice(0,5),...dd.filter(l=>l.price<p).slice(-5).reverse()];
 }
 
 // ═══════════════════════════════════════════════════════════
 // RENDER
 // ═══════════════════════════════════════════════════════════
-function fmt(n) { return n>=1000?n.toLocaleString('en-US',{maximumFractionDigits:0}):n.toFixed(2); }
+function fmt(n){return n>=1000?n.toLocaleString('en-US',{maximumFractionDigits:0}):n.toFixed(2);}
 
 function renderTopbar(t) {
   price = t.price;
@@ -465,14 +631,7 @@ function renderTopbar(t) {
   el.style.color = t.change>=0?'var(--green)':'var(--red)';
 }
 
-function renderNextMove(nm) {
-  const el = document.getElementById('nm-val');
-  el.className = 'nm-val '+nm.dir;
-  el.textContent = nm.dir==='UP'?'UP ▲':nm.dir==='DOWN'?'DOWN ▼':'UNCLEAR';
-  document.getElementById('nm-reason').textContent = nm.reason;
-}
-
-function renderOverall() {
+function renderHero() {
   let wL=0,wS=0;
   TFS.forEach(tf=>{const r=results[tf.label];if(!r)return;if(r.signal==='LONG')wL+=tf.weight;if(r.signal==='SHORT')wS+=tf.weight;});
   const loaded=Object.keys(results).length, diff=wL-wS;
@@ -480,38 +639,69 @@ function renderOverall() {
   if(diff>0&&loaded>=2){sig='LONG ▲';cls='long';}
   else if(diff<0&&loaded>=2){sig='SHORT ▼';cls='short';}
   else{sig='NEUTRAL';cls='neutral';}
-  document.getElementById('ov-box').className='ov-box '+cls;
-  document.getElementById('ov-dir').textContent=sig;
-  document.getElementById('ov-tfs').textContent=loaded+' / '+TFS.length+' TFs';
+  document.getElementById('hero-card').className='hero-card '+cls;
+  document.getElementById('hero-dir').textContent=sig;
+  document.getElementById('hero-tfs').textContent=loaded+' / '+TFS.length+' TFs';
   const best=[...TFS].sort((a,b)=>b.weight-a.weight).find(tf=>results[tf.label]&&results[tf.label].type!=='NONE');
-  document.getElementById('ov-reason').textContent=best?results[best.label].reason:'No active DMC setup across timeframes';
+  document.getElementById('hero-reason').textContent=best?results[best.label].reason:'No active DMC setup across timeframes';
+  const totalW=TFS.reduce((s,t)=>s+t.weight,0);
+  const pct=totalW>0?Math.round(Math.max(wL,wS)/totalW*100):0;
+  document.getElementById('hero-strength').textContent=pct+'% CONFIDENCE';
+}
+
+function renderNextMove(nm) {
+  const el=document.getElementById('nm-val');
+  el.className='nm-pill-val '+nm.dir;
+  el.textContent=nm.dir==='UP'?'UP ▲':nm.dir==='DOWN'?'DOWN ▼':'UNCLEAR';
+  document.getElementById('nm-sub').textContent=nm.reason;
 }
 
 function renderTFCards() {
-  document.getElementById('tf-cards').innerHTML = TFS.map(tf=>{
+  document.getElementById('tf-cards-wrap').innerHTML = TFS.map(tf => {
     const r=results[tf.label];
-    if(!r) return `<div class="signal-card none"><div class="sc-head"><span class="sc-tf">${tf.label}</span><span class="sc-type NONE">···</span><span class="sc-badge WAIT">—</span></div><div class="sc-reason"><span class="skel" style="width:180px;height:9px">&nbsp;</span></div></div>`;
+    if(!r) return `<div class="tf-card none"><div class="tf-card-head"><span class="tf-card-label">${tf.label}</span><span class="tf-card-type NONE">···</span><span class="tf-card-badge WAIT" style="margin-left:auto">—</span></div><div class="tf-card-reason"><span class="skel" style="width:180px;height:9px">&nbsp;</span></div></div>`;
     const cls=r.signal==='LONG'?'long':r.signal==='SHORT'?'short':'neutral';
     const tl=r.type==='FAIL_GAIN'?'FAIL TO GAIN':r.type==='FAIL_LOSE'?'FAIL TO LOSE':r.type==='AT_LEVEL'?'AT LEVEL':'NO SETUP';
-    return `<div class="signal-card ${cls}"><div class="sc-head"><span class="sc-tf">${tf.label}</span><span class="sc-type ${r.type}">${tl}${r.untested?'<span class="untested-dot"></span>':''}</span><span class="sc-badge ${r.signal}">${r.signal}</span></div><div class="sc-reason">${r.reason}</div>${r.level?`<div style="font-family:var(--mono);font-size:8px;color:var(--muted);margin-top:5px">Level: <span style="color:var(--white)">$${fmt(r.level)}</span>${r.target?` · Target: <span style="color:${r.signal==='LONG'?'var(--green)':'var(--red)'}">$${fmt(r.target)}</span>`:''}</div>`:''}</div>`;
+    return `<div class="tf-card ${cls}">
+      <div class="tf-card-head">
+        <span class="tf-card-label">${tf.label}</span>
+        <span class="tf-card-type ${r.type}">${tl}</span>
+        <span class="tf-card-badge ${r.signal}" style="margin-left:auto">${r.signal}</span>
+      </div>
+      <div class="tf-card-reason">${r.reason}</div>
+      ${r.level?`<div class="tf-card-prices">
+        <span class="tcp"><span class="tcp-lbl">LVL </span><span class="tcp-val">$${fmt(r.level)}</span></span>
+        ${r.target?`<span class="tcp"><span class="tcp-lbl">TGT </span><span class="tcp-val" style="color:${r.signal==='LONG'?'var(--green)':'var(--red)'}">$${fmt(r.target)}</span></span>`:''}
+        ${r.untested?`<span class="tcp" style="color:var(--amber)">UNTESTED ●</span>`:''}
+      </div>`:''}
+    </div>`;
   }).join('');
 }
 
 function renderLevels() {
-  if (!allLevels.length) { document.getElementById('lvl-list').innerHTML='<div class="lvl-row"><span class="lvl-meta">No significant levels found</span></div>';return; }
-  document.getElementById('lvl-list').innerHTML = allLevels.map(l=>{
-    const isR=l.price>price, dist=((l.price-price)/price*100).toFixed(2), cls=isR?'R':'S';
-    return `<div class="lvl-row ${!l.tested?'untested':''}"><span class="lvl-tag ${cls}">${isR?'RES':'SUP'}</span><span class="lvl-meta">${l.tf}${!l.tested?' ● UNTESTED':''}</span><span class="lvl-price ${cls}">$${fmt(l.price)}</span><span class="lvl-dist">${dist>0?'+':''}${dist}%</span></div>`;
+  if(!allLevels.length){document.getElementById('lvl-list').innerHTML='<div style="padding:20px 16px;font-family:var(--mono);font-size:10px;color:var(--muted)">No significant levels detected</div>';return;}
+  document.getElementById('lvl-list').innerHTML=allLevels.map(l=>{
+    const isR=l.price>price,dist=((l.price-price)/price*100).toFixed(2),cls=isR?'R':'S';
+    return `<div class="lvl-item ${!l.tested?'untested':''}">
+      <span class="lvl-badge ${cls}">${isR?'RES':'SUP'}</span>
+      <div class="lvl-info">
+        <div class="lvl-tf">${l.tf}${!l.tested?'<span class="lvl-untested-tag">● UNTESTED</span>':''}</div>
+      </div>
+      <div class="lvl-price-wrap">
+        <div class="lvl-price ${cls}">$${fmt(l.price)}</div>
+        <div class="lvl-dist">${dist>0?'+':''}${dist}%</div>
+      </div>
+    </div>`;
   }).join('');
 }
 
 function addLog(signal, tf, reason, type) {
-  if (type==='NONE') return;
+  if(type==='NONE') return;
   const time=new Date().toTimeString().slice(0,5);
   const cls=signal==='LONG'?'long':signal==='SHORT'?'short':'neutral';
   const col=signal==='LONG'?'var(--green)':signal==='SHORT'?'var(--red)':'var(--amber)';
-  signalLog.unshift(`<div class="log-entry ${cls}"><span class="log-time">${time}</span><span class="log-text"><strong style="color:${col}">${signal}</strong> [${tf}] ${reason.slice(0,70)}</span></div>`);
-  if (signalLog.length>15) signalLog.pop();
+  signalLog.unshift(`<div class="log-item ${cls}"><span class="log-time">${time}</span><span class="log-txt"><strong style="color:${col}">${signal}</strong> [${tf}] ${reason.slice(0,80)}</span></div>`);
+  if(signalLog.length>20) signalLog.pop();
   document.getElementById('log-list').innerHTML=signalLog.join('');
 }
 
@@ -524,59 +714,55 @@ function setStatus(state, txt) {
 // MAIN
 // ═══════════════════════════════════════════════════════════
 async function run() {
-  if (isRunning) return;
+  if(isRunning) return;
   isRunning=true;
-  document.getElementById('refresh-btn').disabled=true;
+  const fab=document.getElementById('refresh-fab');
+  fab.classList.add('spinning');
   setStatus('loading','Fetching data...');
 
   try {
-    // Fetch price first (fast)
     const tickerData = await getPrice();
     renderTopbar(tickerData);
 
-    // Fetch all TF candles in parallel
     const klineResults = await Promise.allSettled(TFS.map(tf => getCandles(tf)));
 
-    klineResults.forEach((res, i) => {
-      if (res.status==='rejected') { console.warn(TFS[i].label, res.reason); return; }
-      const candles = res.value;
-      const atr = calcATR(candles);
-      const dmc = detectDMCSignal(candles, atr);
-      results[TFS[i].label] = dmc;
-      if (dmc.type!=='NONE'&&dmc.type!=='AT_LEVEL') addLog(dmc.signal, TFS[i].label, dmc.reason, dmc.type);
+    klineResults.forEach((res,i)=>{
+      if(res.status==='rejected'){console.warn(TFS[i].label, res.reason);return;}
+      const c=res.value, atr=calcATR(c), dmc=detectDMCSignal(c,atr);
+      results[TFS[i].label]=dmc;
+      if(dmc.type!=='NONE'&&dmc.type!=='AT_LEVEL') addLog(dmc.signal,TFS[i].label,dmc.reason,dmc.type);
     });
 
-    const wK = klineResults[0].status==='fulfilled' ? klineResults[0].value : null;
-    const dK = klineResults[1].status==='fulfilled' ? klineResults[1].value : null;
-    if (wK&&dK) { renderNextMove(detectNextMove(wK,dK)); allLevels=collectLevels(wK,dK,tickerData.price); }
+    const wK=klineResults[0].status==='fulfilled'?klineResults[0].value:null;
+    const dK=klineResults[1].status==='fulfilled'?klineResults[1].value:null;
+    if(wK&&dK){renderNextMove(detectNextMove(wK,dK));allLevels=collectLevels(wK,dK,tickerData.price);}
 
-    renderOverall();
+    renderHero();
     renderTFCards();
     renderLevels();
 
-    const now = new Date().toTimeString().slice(0,8);
-    setStatus('ok','Updated '+now);
+    const now=new Date().toTimeString().slice(0,8);
+    setStatus('ok','Live · '+now);
     document.getElementById('last-upd').textContent=now;
 
   } catch(e) {
     console.error(e);
-    setStatus('err','Error: '+e.message.slice(0,50));
+    setStatus('err',e.message.slice(0,50));
     addLog('NEUTRAL','SYS',e.message,'ERR');
   }
 
   isRunning=false;
-  document.getElementById('refresh-btn').disabled=false;
+  fab.classList.remove('spinning');
 }
 
-function manualRefresh() { clearTimeout(timer); run().then(schedule); }
-function schedule() { timer=setTimeout(()=>run().then(schedule), REFRESH); }
+function manualRefresh(){clearTimeout(timer);run().then(schedule);}
+function schedule(){timer=setTimeout(()=>run().then(schedule),REFRESH);}
 
-window.addEventListener('DOMContentLoaded', ()=>{
-  loadTV('240');
-  document.getElementById('tf-cards').innerHTML = TFS.map(tf=>`
-    <div class="signal-card none">
-      <div class="sc-head"><span class="sc-tf">${tf.label}</span><span class="sc-type NONE">···</span><span class="sc-badge WAIT">—</span></div>
-      <div class="sc-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div>
+window.addEventListener('DOMContentLoaded',()=>{
+  document.getElementById('tf-cards-wrap').innerHTML=TFS.map(tf=>`
+    <div class="tf-card none">
+      <div class="tf-card-head"><span class="tf-card-label">${tf.label}</span><span class="tf-card-type NONE">···</span><span class="tf-card-badge WAIT" style="margin-left:auto">—</span></div>
+      <div class="tf-card-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div>
     </div>`).join('');
   run().then(schedule);
 });
