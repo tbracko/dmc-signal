@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -24,135 +25,119 @@ body::before{content:'';position:fixed;inset:0;
   background-size:36px 36px;pointer-events:none;z-index:0}
 
 .topbar{position:sticky;top:0;z-index:100;background:rgba(7,9,13,.96);backdrop-filter:blur(12px);
-  border-bottom:1px solid var(--border);padding:0 16px;height:52px;
-  display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.brand{font-family:var(--display);font-size:21px;letter-spacing:.12em;color:var(--green)}
-.pair-tag{font-family:var(--mono);font-size:10px;color:var(--muted2);background:var(--card);
-  border:1px solid var(--border);padding:2px 9px;border-radius:3px}
-#tb-price{font-family:var(--mono);font-size:15px;font-weight:600}
-#tb-chg{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:3px;display:none}
+border-bottom:1px solid var(–border);padding:0 16px;height:52px;
+display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.brand{font-family:var(–display);font-size:21px;letter-spacing:.12em;color:var(–green)}
+.pair-tag{font-family:var(–mono);font-size:10px;color:var(–muted2);background:var(–card);
+border:1px solid var(–border);padding:2px 9px;border-radius:3px}
+#tb-price{font-family:var(–mono);font-size:15px;font-weight:600}
+#tb-chg{font-family:var(–mono);font-size:11px;padding:2px 8px;border-radius:3px;display:none}
 .topbar-right{margin-left:auto;display:flex;align-items:center;gap:10px}
 .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
-.dot.ok{background:var(--green);animation:pulse 2s infinite}
-.dot.loading{background:var(--amber);animation:pulse .9s infinite}
-.dot.err{background:var(--red)}
+.dot.ok{background:var(–green);animation:pulse 2s infinite}
+.dot.loading{background:var(–amber);animation:pulse .9s infinite}
+.dot.err{background:var(–red)}
 @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(0,230,118,.4)}50%{box-shadow:0 0 0 5px rgba(0,230,118,0)}}
-#status-txt{font-family:var(--mono);font-size:10px;color:var(--muted)}
-.btn{font-family:var(--mono);font-size:10px;padding:5px 12px;border:1px solid var(--border2);
-  background:var(--card);color:var(--muted2);border-radius:3px;cursor:pointer;letter-spacing:.05em;transition:all .15s}
-.btn:hover{border-color:var(--green);color:var(--green)}
+#status-txt{font-family:var(–mono);font-size:10px;color:var(–muted)}
+.btn{font-family:var(–mono);font-size:10px;padding:5px 12px;border:1px solid var(–border2);
+background:var(–card);color:var(–muted2);border-radius:3px;cursor:pointer;letter-spacing:.05em;transition:all .15s}
+.btn:hover{border-color:var(–green);color:var(–green)}
 .btn:disabled{opacity:.4;cursor:not-allowed}
 
-/* LAYOUT */
 .main{position:relative;z-index:1;display:grid;grid-template-columns:1fr 380px;height:calc(100vh - 52px)}
-.chart-col{display:flex;flex-direction:column;border-right:1px solid var(--border);overflow:hidden}
-.chart-head{display:flex;align-items:center;gap:8px;padding:9px 14px;border-bottom:1px solid var(--border);background:var(--panel);flex-shrink:0}
-.chart-lbl{font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.15em;margin-right:4px}
+.chart-col{display:flex;flex-direction:column;border-right:1px solid var(–border);overflow:hidden}
+.chart-head{display:flex;align-items:center;gap:8px;padding:9px 14px;border-bottom:1px solid var(–border);background:var(–panel);flex-shrink:0}
+.chart-lbl{font-family:var(–mono);font-size:9px;color:var(–muted);text-transform:uppercase;letter-spacing:.15em;margin-right:4px}
 .tf-tabs{display:flex;gap:4px}
-.tf-tab{font-family:var(--mono);font-size:11px;padding:4px 11px;border-radius:3px;border:1px solid var(--border);
-  background:transparent;color:var(--muted2);cursor:pointer;transition:all .15s}
-.tf-tab:hover{border-color:var(--border2);color:var(--white)}
-.tf-tab.active{background:var(--green);color:var(--bg);border-color:var(--green);font-weight:600}
+.tf-tab{font-family:var(–mono);font-size:11px;padding:4px 11px;border-radius:3px;border:1px solid var(–border);
+background:transparent;color:var(–muted2);cursor:pointer;transition:all .15s}
+.tf-tab:hover{border-color:var(–border2);color:var(–white)}
+.tf-tab.active{background:var(–green);color:var(–bg);border-color:var(–green);font-weight:600}
 .tv-wrap{flex:1;min-height:0}
 .tv-wrap>div{width:100%;height:100%}
 
-/* SIGNAL PANEL */
-.sig-col{display:flex;flex-direction:column;overflow-y:auto;background:var(--panel)}
+.sig-col{display:flex;flex-direction:column;overflow-y:auto;background:var(–panel)}
 .sig-col::-webkit-scrollbar{width:3px}
-.sig-col::-webkit-scrollbar-thumb{background:var(--border2)}
-.sec{padding:12px 14px;border-bottom:1px solid var(--border)}
-.sec-lbl{font-family:var(--mono);font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);margin-bottom:9px}
+.sig-col::-webkit-scrollbar-thumb{background:var(–border2)}
+.sec{padding:12px 14px;border-bottom:1px solid var(–border)}
+.sec-lbl{font-family:var(–mono);font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(–muted);margin-bottom:9px}
 
-/* OVERALL */
 .ov-box{border-radius:6px;padding:14px 16px;border:1px solid;transition:all .5s}
-.ov-box.long{background:var(--gdim);border-color:var(--gbrd)}
-.ov-box.short{background:var(--rdim);border-color:var(--rbrd)}
-.ov-box.neutral{background:var(--adim);border-color:var(--abrd)}
-.ov-box.wait{background:rgba(28,34,48,.4);border-color:var(--border)}
-.ov-dir{font-family:var(--display);font-size:44px;letter-spacing:.08em;line-height:1}
-.ov-box.long .ov-dir{color:var(--green)}
-.ov-box.short .ov-dir{color:var(--red)}
-.ov-box.neutral .ov-dir{color:var(--amber)}
-.ov-box.wait .ov-dir{color:var(--muted2)}
+.ov-box.long{background:var(–gdim);border-color:var(–gbrd)}
+.ov-box.short{background:var(–rdim);border-color:var(–rbrd)}
+.ov-box.neutral{background:var(–adim);border-color:var(–abrd)}
+.ov-box.wait{background:rgba(28,34,48,.4);border-color:var(–border)}
+.ov-dir{font-family:var(–display);font-size:44px;letter-spacing:.08em;line-height:1}
+.ov-box.long .ov-dir{color:var(–green)}
+.ov-box.short .ov-dir{color:var(–red)}
+.ov-box.neutral .ov-dir{color:var(–amber)}
+.ov-box.wait .ov-dir{color:var(–muted2)}
 .ov-row{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
 .ov-right{text-align:right;flex-shrink:0}
-.ov-tfs{font-family:var(--mono);font-size:11px;color:var(--muted2);margin-top:4px}
-.ov-reason{font-family:var(--mono);font-size:9px;color:var(--muted2);margin-top:8px;line-height:1.55}
+.ov-tfs{font-family:var(–mono);font-size:11px;color:var(–muted2);margin-top:4px}
+.ov-reason{font-family:var(–mono);font-size:9px;color:var(–muted2);margin-top:8px;line-height:1.55}
 
-/* DMC SIGNAL TYPES */
-.signal-card{background:var(--card);border:1px solid var(--border);border-radius:5px;padding:11px 13px;margin-bottom:5px;position:relative;overflow:hidden}
-.signal-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
-.signal-card.long::before{background:var(--green)}
-.signal-card.short::before{background:var(--red)}
-.signal-card.neutral::before{background:var(--amber)}
-.signal-card.none::before{background:var(--muted)}
+.signal-card{background:var(–card);border:1px solid var(–border);border-radius:5px;padding:11px 13px;margin-bottom:5px;position:relative;overflow:hidden}
+.signal-card::before{content:’’;position:absolute;left:0;top:0;bottom:0;width:3px}
+.signal-card.long::before{background:var(–green)}
+.signal-card.short::before{background:var(–red)}
+.signal-card.neutral::before{background:var(–amber)}
+.signal-card.none::before{background:var(–muted)}
 .sc-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:5px}
-.sc-tf{font-family:var(--mono);font-size:10px;font-weight:600;color:var(--muted2)}
-.sc-type{font-family:var(--mono);font-size:9px;padding:2px 7px;border-radius:3px;font-weight:700;letter-spacing:.06em}
-.sc-type.FAIL_GAIN{background:var(--rdim);color:var(--red);border:1px solid var(--rbrd)}
-.sc-type.FAIL_LOSE{background:var(--gdim);color:var(--green);border:1px solid var(--gbrd)}
-.sc-type.AT_LEVEL{background:var(--adim);color:var(--amber);border:1px solid var(--abrd)}
-.sc-type.NONE{background:var(--border);color:var(--muted2);border:1px solid var(--border)}
-.sc-badge{font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.05em}
-.sc-badge.LONG{color:var(--green)}
-.sc-badge.SHORT{color:var(--red)}
-.sc-badge.NEUTRAL{color:var(--amber)}
-.sc-badge.WAIT{color:var(--muted)}
-.sc-reason{font-family:var(--mono);font-size:9px;color:var(--muted2);line-height:1.5;margin-top:3px}
-.sc-bars{display:flex;gap:3px;margin-top:7px}
-.sc-bar{flex:1;height:3px;border-radius:1px}
-.bars-row{display:flex;align-items:center;gap:6px;margin-top:5px}
-.bar-lbl{font-family:var(--mono);font-size:8px;color:var(--muted);width:8px}
-.bar-track{flex:1;height:2px;background:var(--border);border-radius:1px;overflow:hidden}
-.bar-fill-g{height:100%;background:var(--green);border-radius:1px;transition:width .7s}
-.bar-fill-r{height:100%;background:var(--red);border-radius:1px;transition:width .7s}
+.sc-tf{font-family:var(–mono);font-size:10px;font-weight:600;color:var(–muted2)}
+.sc-type{font-family:var(–mono);font-size:9px;padding:2px 7px;border-radius:3px;font-weight:700;letter-spacing:.06em}
+.sc-type.FAIL_GAIN{background:var(–rdim);color:var(–red);border:1px solid var(–rbrd)}
+.sc-type.FAIL_LOSE{background:var(–gdim);color:var(–green);border:1px solid var(–gbrd)}
+.sc-type.AT_LEVEL{background:var(–adim);color:var(–amber);border:1px solid var(–abrd)}
+.sc-type.NONE{background:var(–border);color:var(–muted2);border:1px solid var(–border)}
+.sc-badge{font-family:var(–mono);font-size:12px;font-weight:700;letter-spacing:.05em}
+.sc-badge.LONG{color:var(–green)}.sc-badge.SHORT{color:var(–red)}.sc-badge.NEUTRAL{color:var(–amber)}.sc-badge.WAIT{color:var(–muted)}
+.sc-reason{font-family:var(–mono);font-size:9px;color:var(–muted2);line-height:1.5;margin-top:3px}
 
-/* LEVELS */
 .lvl-list{display:flex;flex-direction:column;gap:4px}
 .lvl-row{display:grid;grid-template-columns:32px 1fr auto auto;align-items:center;gap:8px;
-  padding:8px 10px;background:var(--card);border:1px solid var(--border);border-radius:3px}
-.lvl-tag{font-family:var(--mono);font-size:9px;font-weight:700}
-.lvl-tag.R{color:var(--red)}.lvl-tag.S{color:var(--green)}
-.lvl-meta{font-family:var(--mono);font-size:9px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.lvl-price{font-family:var(--mono);font-size:11px;font-weight:600}
-.lvl-price.R{color:var(--red)}.lvl-price.S{color:var(--green)}
-.lvl-dist{font-family:var(--mono);font-size:9px;color:var(--muted);text-align:right}
+padding:8px 10px;background:var(–card);border:1px solid var(–border);border-radius:3px}
+.lvl-tag{font-family:var(–mono);font-size:9px;font-weight:700}
+.lvl-tag.R{color:var(–red)}.lvl-tag.S{color:var(–green)}
+.lvl-meta{font-family:var(–mono);font-size:9px;color:var(–muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lvl-price{font-family:var(–mono);font-size:11px;font-weight:600}
+.lvl-price.R{color:var(–red)}.lvl-price.S{color:var(–green)}
+.lvl-dist{font-family:var(–mono);font-size:9px;color:var(–muted);text-align:right}
 .lvl-row.untested{border-color:rgba(255,193,7,.3);background:rgba(255,193,7,.04)}
-.untested-dot{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--amber);margin-left:4px;vertical-align:middle}
+.untested-dot{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(–amber);margin-left:4px;vertical-align:middle}
 
-/* NEXT MOVE */
-.nm-box{background:var(--card);border-radius:5px;padding:11px 13px;border:1px solid var(--border)}
-.nm-label{font-family:var(--mono);font-size:9px;color:var(--muted);margin-bottom:4px}
-.nm-val{font-family:var(--display);font-size:26px;letter-spacing:.08em}
-.nm-val.UP{color:var(--green)}.nm-val.DOWN{color:var(--red)}.nm-val.UNCLEAR{color:var(--amber)}
-.nm-reason{font-family:var(--mono);font-size:9px;color:var(--muted2);margin-top:5px;line-height:1.5}
+.nm-box{background:var(–card);border-radius:5px;padding:11px 13px;border:1px solid var(–border)}
+.nm-label{font-family:var(–mono);font-size:9px;color:var(–muted);margin-bottom:4px}
+.nm-val{font-family:var(–display);font-size:26px;letter-spacing:.08em}
+.nm-val.UP{color:var(–green)}.nm-val.DOWN{color:var(–red)}.nm-val.UNCLEAR{color:var(–amber)}
+.nm-reason{font-family:var(–mono);font-size:9px;color:var(–muted2);margin-top:5px;line-height:1.5}
 
-/* LOG */
 .log-list{display:flex;flex-direction:column;gap:4px;max-height:180px;overflow-y:auto}
-.log-entry{display:flex;gap:8px;padding:7px 10px;background:var(--card);
-  border-left:2px solid;border-top:1px solid var(--border);border-right:1px solid var(--border);border-bottom:1px solid var(--border);
-  border-radius:0 3px 3px 0}
-.log-entry.long{border-left-color:var(--green)}
-.log-entry.short{border-left-color:var(--red)}
-.log-entry.neutral{border-left-color:var(--amber)}
-.log-time{font-family:var(--mono);font-size:9px;color:var(--muted);width:38px;flex-shrink:0;padding-top:1px}
-.log-text{font-family:var(--mono);font-size:9px;color:var(--muted2);line-height:1.45}
+.log-entry{display:flex;gap:8px;padding:7px 10px;background:var(–card);
+border-left:2px solid;border-top:1px solid var(–border);border-right:1px solid var(–border);border-bottom:1px solid var(–border);
+border-radius:0 3px 3px 0}
+.log-entry.long{border-left-color:var(–green)}
+.log-entry.short{border-left-color:var(–red)}
+.log-entry.neutral{border-left-color:var(–amber)}
+.log-time{font-family:var(–mono);font-size:9px;color:var(–muted);width:38px;flex-shrink:0;padding-top:1px}
+.log-text{font-family:var(–mono);font-size:9px;color:var(–muted2);line-height:1.45}
 
-.skel{background:linear-gradient(90deg,var(--border) 25%,var(--border2) 50%,var(--border) 75%);
-  background-size:200% 100%;animation:skel 1.5s infinite;border-radius:2px;display:inline-block}
+.skel{background:linear-gradient(90deg,var(–border) 25%,var(–border2) 50%,var(–border) 75%);
+background-size:200% 100%;animation:skel 1.5s infinite;border-radius:2px;display:inline-block}
 @keyframes skel{0%{background-position:200% center}100%{background-position:-200% center}}
 
 @media(max-width:820px){
-  .main{grid-template-columns:1fr;grid-template-rows:340px 1fr;height:auto}
-  .chart-col{border-right:none;border-bottom:1px solid var(--border)}
+.main{grid-template-columns:1fr;grid-template-rows:340px 1fr;height:auto}
+.chart-col{border-right:none;border-bottom:1px solid var(–border)}
 }
 </style>
+
 </head>
 <body>
 
 <div class="topbar">
   <span class="brand">DMC ⚡ SIGNAL</span>
-  <span class="pair-tag">BTCUSDT</span>
+  <span class="pair-tag">BTC/USD</span>
   <span id="tb-price">—</span>
   <span id="tb-chg"></span>
   <div class="topbar-right">
@@ -178,8 +163,6 @@ body::before{content:'';position:fixed;inset:0;
   </div>
 
   <div class="sig-col">
-
-    <!-- NEXT MOVE -->
     <div class="sec">
       <div class="sec-lbl">▸ Next Major Move (HTF)</div>
       <div class="nm-box">
@@ -189,46 +172,43 @@ body::before{content:'';position:fixed;inset:0;
       </div>
     </div>
 
-    <!-- OVERALL -->
-    <div class="sec">
-      <div class="sec-lbl">▸ Overall DMC Signal</div>
-      <div class="ov-box wait" id="ov-box">
-        <div class="ov-row">
-          <div class="ov-dir" id="ov-dir">—</div>
-          <div class="ov-right">
-            <div class="ov-tfs" id="ov-tfs">0 / 5 TFs</div>
-          </div>
-        </div>
-        <div class="ov-reason" id="ov-reason">Fetching Binance candle data...</div>
-      </div>
+```
+<div class="sec">
+  <div class="sec-lbl">▸ Overall DMC Signal</div>
+  <div class="ov-box wait" id="ov-box">
+    <div class="ov-row">
+      <div class="ov-dir" id="ov-dir">—</div>
+      <div class="ov-right"><div class="ov-tfs" id="ov-tfs">0 / 5 TFs</div></div>
     </div>
+    <div class="ov-reason" id="ov-reason">Fetching candle data...</div>
+  </div>
+</div>
 
-    <!-- TF BREAKDOWN -->
-    <div class="sec">
-      <div class="sec-lbl">▸ Timeframe Analysis</div>
-      <div id="tf-cards"></div>
-    </div>
+<div class="sec">
+  <div class="sec-lbl">▸ Timeframe Analysis</div>
+  <div id="tf-cards"></div>
+</div>
 
-    <!-- KEY LEVELS (untested candle bodies) -->
-    <div class="sec">
-      <div class="sec-lbl">▸ Key Levels · Untested Bodies <span style="font-family:var(--mono);font-size:8px;color:var(--amber)">● = untested</span></div>
-      <div class="lvl-list" id="lvl-list">
-        <div class="lvl-row"><span class="lvl-meta">Detecting untested candle bodies...</span></div>
-      </div>
-    </div>
+<div class="sec">
+  <div class="sec-lbl">▸ Key Levels · Untested Bodies <span style="font-family:var(--mono);font-size:8px;color:var(--amber)">● = untested</span></div>
+  <div class="lvl-list" id="lvl-list">
+    <div class="lvl-row"><span class="lvl-meta">Detecting untested candle bodies...</span></div>
+  </div>
+</div>
 
-    <!-- SIGNAL LOG -->
-    <div class="sec">
-      <div class="sec-lbl">▸ Signal Log</div>
-      <div class="log-list" id="log-list">
-        <div class="log-entry neutral"><span class="log-time">--:--</span><span class="log-text">Initialising DMC engine...</span></div>
-      </div>
-    </div>
+<div class="sec">
+  <div class="sec-lbl">▸ Signal Log</div>
+  <div class="log-list" id="log-list">
+    <div class="log-entry neutral"><span class="log-time">--:--</span><span class="log-text">Initialising DMC engine...</span></div>
+  </div>
+</div>
 
-    <div style="padding:10px 14px;font-family:var(--mono);font-size:9px;color:var(--muted);display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;border-top:1px solid var(--border)">
-      <span>DMC · Chris Hunter · Maven Trading</span>
-      <span id="last-upd" style="color:var(--muted2)">—</span>
-    </div>
+<div style="padding:10px 14px;font-family:var(--mono);font-size:9px;color:var(--muted);display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;border-top:1px solid var(--border)">
+  <span>DMC · Chris Hunter · Maven Trading</span>
+  <span id="last-upd" style="color:var(--muted2)">—</span>
+</div>
+```
+
   </div>
 </div>
 
@@ -236,20 +216,27 @@ body::before{content:'';position:fixed;inset:0;
 'use strict';
 
 // ═══════════════════════════════════════════════════════════
-// CONFIG
+// CONFIG — CoinGecko (no CORS issues, works everywhere)
 // ═══════════════════════════════════════════════════════════
-const SYMBOL  = 'BTCUSDT';
-const BASE    = 'https://api.binance.com/api/v3';
-const LIMIT   = 200;
-const REFRESH = 90000;
+// CoinGecko free API — OHLC data
+// /coins/{id}/ohlc?vs_currency=usd&days=N
+// days=1 → hourly candles, days=7/14/30 → daily, days=max → weekly
 
-// TF config — weights for overall signal (higher TF = more weight)
+const REFRESH = 120000; // 2 min (CoinGecko rate limit is generous)
+const COIN_ID = 'bitcoin';
+const CG_BASE = 'https://api.coingecko.com/api/v3';
+
+// Map each TF to a CoinGecko days param
+// CoinGecko returns: [timestamp, open, high, low, close]
+// days=1 → ~24 hourly candles
+// days=7 → ~daily-ish candles
+// days=30/90/max → various resolutions
 const TFS = [
-  { label:'1W', binance:'1w', iv:'W',   weight:5 },
-  { label:'1D', binance:'1d', iv:'D',   weight:4 },
-  { label:'4H', binance:'4h', iv:'240', weight:3 },
-  { label:'1H', binance:'1h', iv:'60',  weight:2 },
-  { label:'15m', binance:'15m', iv:'15', weight:1 },
+  { label:'1W',  cgDays:'max',  cgResolution:'weekly',  iv:'W',   weight:5 },
+  { label:'1D',  cgDays:'90',   cgResolution:'daily',   iv:'D',   weight:4 },
+  { label:'4H',  cgDays:'16',   cgResolution:'4h',      iv:'240', weight:3 },
+  { label:'1H',  cgDays:'3',    cgResolution:'hourly',  iv:'60',  weight:2 },
+  { label:'15m', cgDays:'1',    cgResolution:'15m',     iv:'15',  weight:1 },
 ];
 
 let results   = {};
@@ -285,30 +272,85 @@ document.getElementById('tf-tabs').addEventListener('click', e => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// BINANCE
+// COINGECKO API
 // ═══════════════════════════════════════════════════════════
-async function getKlines(interval) {
-  const r = await fetch(`${BASE}/klines?symbol=${SYMBOL}&interval=${interval}&limit=${LIMIT}`);
-  if (!r.ok) throw new Error(`Klines ${interval}: ${r.status}`);
-  return (await r.json()).map(k => ({
-    t:+k[0], o:+k[1], h:+k[2], l:+k[3], c:+k[4], v:+k[5],
-    bodyHigh: Math.max(+k[1],+k[4]),
-    bodyLow:  Math.min(+k[1],+k[4])
+
+// CoinGecko OHLC endpoint — returns [[ts, o, h, l, c], ...]
+// Resolution depends on days: 1=hourly, 7-30=daily-ish
+async function getOHLC(days) {
+  const url = `${CG_BASE}/coins/${COIN_ID}/ohlc?vs_currency=usd&days=${days}`;
+  const r = await fetch(url);
+  if (!r.ok) {
+    const errText = await r.text().catch(()=>'');
+    throw new Error(`OHLC ${days}d: ${r.status} ${errText.slice(0,60)}`);
+  }
+  const raw = await r.json();
+  if (!Array.isArray(raw) || raw.length === 0) throw new Error(`OHLC ${days}d: empty response`);
+  return raw.map(k => ({
+    t: k[0],
+    o: k[1], h: k[2], l: k[3], c: k[4],
+    bodyHigh: Math.max(k[1], k[4]),
+    bodyLow:  Math.min(k[1], k[4])
   }));
 }
 
-async function getTicker() {
-  const r = await fetch(`${BASE}/ticker/24hr?symbol=${SYMBOL}`);
-  if (!r.ok) throw new Error('Ticker: '+r.status);
+// Current price + 24h change from simple price endpoint
+async function getPrice() {
+  const url = `${CG_BASE}/simple/price?ids=${COIN_ID}&vs_currencies=usd&include_24hr_change=true`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('Price: ' + r.status);
   const d = await r.json();
-  return { price:+d.lastPrice, change:+d.priceChangePercent };
+  return {
+    price:  d[COIN_ID].usd,
+    change: d[COIN_ID].usd_24h_change
+  };
+}
+
+// For 4H and 15m, CoinGecko doesn't have sub-hourly OHLC natively in free tier.
+// Strategy: use market_chart for intraday, aggregate into OHLC candles manually.
+async function getMarketChart(days, intervalMinutes) {
+  const url = `${CG_BASE}/coins/${COIN_ID}/market_chart?vs_currency=usd&days=${days}`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`Chart ${days}d: ${r.status}`);
+  const d = await r.json();
+  // prices: [[ts, price], ...]
+  const prices = d.prices;
+  if (!prices || prices.length < 4) throw new Error(`Chart ${days}d: insufficient data`);
+
+  // Group into intervalMinutes buckets → synthetic OHLC
+  const bucketMs = intervalMinutes * 60 * 1000;
+  const buckets = {};
+  for (const [ts, p] of prices) {
+    const bucket = Math.floor(ts / bucketMs) * bucketMs;
+    if (!buckets[bucket]) buckets[bucket] = { t:bucket, o:p, h:p, l:p, c:p };
+    else {
+      buckets[bucket].h = Math.max(buckets[bucket].h, p);
+      buckets[bucket].l = Math.min(buckets[bucket].l, p);
+      buckets[bucket].c = p;
+    }
+  }
+  return Object.values(buckets).sort((a,b)=>a.t-b.t).map(k => ({
+    ...k,
+    bodyHigh: Math.max(k.o, k.c),
+    bodyLow:  Math.min(k.o, k.c)
+  }));
+}
+
+async function getCandles(tf) {
+  switch(tf.label) {
+    case '1W':  return getOHLC('max');
+    case '1D':  return getOHLC('90');
+    case '4H':  return getMarketChart('16', 240);
+    case '1H':  return getMarketChart('7', 60);
+    case '15m': return getMarketChart('2', 15);
+    default:    return getOHLC('30');
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
-// DMC ENGINE — PURE CANDLE BODY LOGIC
+// DMC ENGINE (unchanged from v4 — pure Chris Hunter logic)
 // ═══════════════════════════════════════════════════════════
 
-// ATR for dynamic tolerances
 function calcATR(candles, p=14) {
   const trs = candles.slice(1).map((c,i) => {
     const prev = candles[i];
@@ -318,244 +360,100 @@ function calcATR(candles, p=14) {
   return last.reduce((s,v)=>s+v,0)/last.length;
 }
 
-// ── UNTESTED CANDLE BODIES ─────────────────────────────────
-// A candle body is "untested" if no subsequent candle has closed its BODY
-// into that zone. These are Chris Hunter's key levels.
 function findUntestedBodies(candles) {
   const n = candles.length;
   const levels = [];
-
-  // Look for significant swing candles — large body, standing out from neighbours
   for (let i = 5; i < n - 3; i++) {
     const c = candles[i];
     const bodySize = Math.abs(c.bodyHigh - c.bodyLow);
-    if (bodySize < 0.001) continue; // skip doji
-
+    if (bodySize < 0.001) continue;
     const isSwingHigh = c.h >= Math.max(...candles.slice(i-3,i+4).map(x=>x.h)) - bodySize*0.1;
     const isSwingLow  = c.l <= Math.min(...candles.slice(i-3,i+4).map(x=>x.l)) + bodySize*0.1;
-
     if (!isSwingHigh && !isSwingLow) continue;
-
-    // Check if any SUBSEQUENT candle body has entered this zone
-    const testedByBody = candles.slice(i+1).some(future => {
-      return future.bodyHigh >= c.bodyLow && future.bodyLow <= c.bodyHigh;
-    });
-
+    const testedByBody = candles.slice(i+1).some(f => f.bodyHigh>=c.bodyLow && f.bodyLow<=c.bodyHigh);
     levels.push({
       price: isSwingHigh ? c.bodyHigh : c.bodyLow,
-      bodyHigh: c.bodyHigh,
-      bodyLow: c.bodyLow,
+      bodyHigh: c.bodyHigh, bodyLow: c.bodyLow,
       type: isSwingHigh ? 'resistance' : 'support',
-      tested: testedByBody,
-      idx: i,
-      candle: c
+      tested: testedByBody, idx: i
     });
   }
-
   return levels;
 }
 
-// ── CORE DMC SIGNAL: FAILURE TO GAIN / FAILURE TO LOSE ────
-// The ONLY signal Chris Hunter trades:
-// Price attempts to close its BODY beyond a level → fails → signal in opposite direction
-// Target: origin of the move that brought price to the level
 function detectDMCSignal(candles, atr) {
   const n = candles.length;
   if (n < 20) return { signal:'NEUTRAL', type:'NONE', reason:'Insufficient data' };
-
-  const tol = atr * 0.15; // body must be close to level to count
-
-  // Find levels from this TF
+  const tol = atr * 0.15;
   const levels = findUntestedBodies(candles);
-  const relevantLevels = levels.filter(l => {
-    const dist = Math.abs(l.price - candles[n-1].c);
-    return dist < atr * 8; // only check nearby levels
-  });
+  const rel = levels.filter(l => Math.abs(l.price - candles[n-1].c) < atr * 8);
 
-  // ── CHECK: FAILURE TO GAIN (bearish) ────────────────────
-  // One or more recent candles attempt to close body ABOVE resistance
-  // but the latest candle closes back BELOW it → SHORT
-  for (const lv of relevantLevels.filter(l=>l.type==='resistance')) {
-    // Look back up to 6 candles for the attempt
-    for (let lookback = 2; lookback <= 6; lookback++) {
-      if (n - lookback < 0) break;
-      const attempt = candles[n - lookback]; // candle that tried to break through
-      const current = candles[n - 1];        // current/latest candle
-
-      // Attempt: body tried to close above the level
-      const attemptedBreak = attempt.bodyHigh > lv.price - tol;
-      // Failure: latest candle body closes back BELOW the level
-      const failedClose = current.bodyHigh < lv.price + tol && current.c < lv.price;
-      // Not already through (origin candle should be below)
-      const originBelow = candles[n - lookback - 1]?.c < lv.price;
-
-      if (attemptedBreak && failedClose && originBelow) {
-        // Find origin of the move (how far back did this move start?)
-        let originIdx = n - lookback - 1;
-        while (originIdx > 0 && candles[originIdx].c < candles[originIdx+1].c) originIdx--;
-        const target = candles[originIdx]?.c || lv.price * 0.98;
-
-        return {
-          signal: 'SHORT',
-          type: 'FAIL_GAIN',
-          level: lv.price,
-          target,
-          reason: `Failed to gain $${fmt(lv.price)} — body closed back below. Target: origin at $${fmt(target)}`,
-          strength: lookback <= 3 ? 'high' : 'med',
-          untested: !lv.tested
-        };
+  for (const lv of rel.filter(l=>l.type==='resistance')) {
+    for (let lb = 2; lb <= 6; lb++) {
+      if (n - lb < 0) break;
+      const att = candles[n-lb], cur = candles[n-1];
+      if (att.bodyHigh > lv.price-tol && cur.bodyHigh < lv.price+tol && cur.c < lv.price && candles[n-lb-1]?.c < lv.price) {
+        let oi = n-lb-1;
+        while (oi>0 && candles[oi].c<candles[oi+1].c) oi--;
+        const target = candles[oi]?.c || lv.price*0.98;
+        return { signal:'SHORT', type:'FAIL_GAIN', level:lv.price, target, reason:`Failed to gain $${fmt(lv.price)} — body closed back below. Target: $${fmt(target)}`, strength:lb<=3?'high':'med', untested:!lv.tested };
       }
     }
   }
 
-  // ── CHECK: FAILURE TO LOSE (bullish) ────────────────────
-  // Candles attempt to close body BELOW support
-  // but the latest candle closes back ABOVE it → LONG
-  for (const lv of relevantLevels.filter(l=>l.type==='support')) {
-    for (let lookback = 2; lookback <= 6; lookback++) {
-      if (n - lookback < 0) break;
-      const attempt = candles[n - lookback];
-      const current = candles[n - 1];
-
-      const attemptedBreak = attempt.bodyLow < lv.price + tol;
-      const failedClose = current.bodyLow > lv.price - tol && current.c > lv.price;
-      const originAbove = candles[n - lookback - 1]?.c > lv.price;
-
-      if (attemptedBreak && failedClose && originAbove) {
-        let originIdx = n - lookback - 1;
-        while (originIdx > 0 && candles[originIdx].c > candles[originIdx+1].c) originIdx--;
-        const target = candles[originIdx]?.c || lv.price * 1.02;
-
-        return {
-          signal: 'LONG',
-          type: 'FAIL_LOSE',
-          level: lv.price,
-          target,
-          reason: `Failed to lose $${fmt(lv.price)} — body closed back above. Target: origin at $${fmt(target)}`,
-          strength: lookback <= 3 ? 'high' : 'med',
-          untested: !lv.tested
-        };
+  for (const lv of rel.filter(l=>l.type==='support')) {
+    for (let lb = 2; lb <= 6; lb++) {
+      if (n - lb < 0) break;
+      const att = candles[n-lb], cur = candles[n-1];
+      if (att.bodyLow < lv.price+tol && cur.bodyLow > lv.price-tol && cur.c > lv.price && candles[n-lb-1]?.c > lv.price) {
+        let oi = n-lb-1;
+        while (oi>0 && candles[oi].c>candles[oi+1].c) oi--;
+        const target = candles[oi]?.c || lv.price*1.02;
+        return { signal:'LONG', type:'FAIL_LOSE', level:lv.price, target, reason:`Failed to lose $${fmt(lv.price)} — body closed back above. Target: $${fmt(target)}`, strength:lb<=3?'high':'med', untested:!lv.tested };
       }
     }
   }
 
-  // ── CHECK: PRICE AT UNTESTED LEVEL (blind entry zone) ───
-  // No failure yet, but price is sitting at an untested level = watch zone
-  const nearest = relevantLevels
-    .filter(l => !l.tested)
-    .sort((a,b) => Math.abs(a.price - candles[n-1].c) - Math.abs(b.price - candles[n-1].c))[0];
-
-  if (nearest && Math.abs(nearest.price - candles[n-1].c) < atr * 1.5) {
-    const dir = nearest.type === 'support' ? 'LONG' : 'SHORT';
-    return {
-      signal: 'NEUTRAL',
-      type: 'AT_LEVEL',
-      level: nearest.price,
-      target: null,
-      reason: `At untested ${nearest.type} $${fmt(nearest.price)} — watch for failure to ${nearest.type==='support'?'lose':'gain'}`,
-      strength: 'low',
-      untested: true
-    };
+  const nearest = rel.filter(l=>!l.tested).sort((a,b)=>Math.abs(a.price-candles[n-1].c)-Math.abs(b.price-candles[n-1].c))[0];
+  if (nearest && Math.abs(nearest.price-candles[n-1].c) < atr*1.5) {
+    return { signal:'NEUTRAL', type:'AT_LEVEL', level:nearest.price, target:null, reason:`At untested ${nearest.type} $${fmt(nearest.price)} — watch for failure to ${nearest.type==='support'?'lose':'gain'}`, strength:'low', untested:true };
   }
-
-  // No setup
-  return {
-    signal: 'NEUTRAL',
-    type: 'NONE',
-    reason: 'No DMC setup active — price between levels',
-    strength: 'none'
-  };
+  return { signal:'NEUTRAL', type:'NONE', reason:'No DMC setup active — price between levels', strength:'none' };
 }
 
-// ── NEXT MAJOR MOVE (HTF trend direction) ─────────────────
-// Chris Hunter: trend = direction of next major move on HTF
-// Determined by: did the last significant candle body gain or lose its level?
-// If bodies keep closing beyond new levels = continuation
-// If body fails to close beyond last level = next move is reversal
-function detectNextMove(wCandles, dCandles) {
-  // Use weekly + daily bodies
-  const wn = wCandles.length;
-  const dn = dCandles.length;
-  if (wn < 10 || dn < 10) return { dir:'UNCLEAR', reason:'Insufficient HTF data' };
+function detectNextMove(wC, dC) {
+  const wn=wC.length, dn=dC.length;
+  if (wn<10||dn<10) return { dir:'UNCLEAR', reason:'Insufficient HTF data' };
+  const wBull = wC[wn-1].bodyHigh>wC[wn-2].bodyHigh && wC[wn-2].bodyHigh>wC[wn-3].bodyHigh;
+  const wBear = wC[wn-1].bodyLow<wC[wn-2].bodyLow && wC[wn-2].bodyLow<wC[wn-3].bodyLow;
+  const dr = dC.slice(-5); let dG=0, dL=0;
+  for (let i=1;i<dr.length;i++) { if(dr[i].bodyHigh>dr[i-1].bodyHigh)dG++;else dL++; }
+  const dFail = dC[dn-1].bodyHigh<dC[dn-2].bodyHigh && dC[dn-2].bodyHigh>dC[dn-3].bodyHigh;
 
-  const wLast  = wCandles[wn-1];
-  const wPrev  = wCandles[wn-2];
-  const wPrev2 = wCandles[wn-3];
-
-  // Weekly: are bodies making higher highs or lower lows?
-  const wBullish = wLast.bodyHigh > wPrev.bodyHigh && wPrev.bodyHigh > wPrev2.bodyHigh;
-  const wBearish = wLast.bodyLow  < wPrev.bodyLow  && wPrev.bodyLow  < wPrev2.bodyLow;
-
-  // Daily: last 5 candles — are bodies gaining or losing?
-  const dRecent = dCandles.slice(-5);
-  let dGains = 0, dLoses = 0;
-  for (let i=1; i<dRecent.length; i++) {
-    if (dRecent[i].bodyHigh > dRecent[i-1].bodyHigh) dGains++;
-    else dLoses++;
-  }
-
-  // Did the daily recently fail to close above its last high? = reversal warning
-  const dLast  = dCandles[dn-1];
-  const dPrev  = dCandles[dn-2];
-  const dFailed = dLast.bodyHigh < dPrev.bodyHigh && dPrev.bodyHigh > dCandles[dn-3].bodyHigh;
-
-  let dir, reason;
-
-  if (wBullish && dGains >= 3) {
-    dir = 'UP';
-    reason = `Weekly bodies making higher highs · Daily ${dGains}/4 candles gaining levels`;
-  } else if (wBearish && dLoses >= 3) {
-    dir = 'DOWN';
-    reason = `Weekly bodies making lower lows · Daily ${dLoses}/4 candles losing levels`;
-  } else if (dFailed && dLoses >= 2) {
-    dir = 'DOWN';
-    reason = `Daily body failed to close above last high — next move likely down`;
-  } else if (wBullish || dGains >= 3) {
-    dir = 'UP';
-    reason = `Weekly ${wBullish?'bullish':'neutral'} · Daily gaining levels (${dGains}/4)`;
-  } else if (wBearish || dLoses >= 3) {
-    dir = 'DOWN';
-    reason = `Weekly ${wBearish?'bearish':'neutral'} · Daily losing levels (${dLoses}/4)`;
-  } else {
-    dir = 'UNCLEAR';
-    reason = 'Mixed HTF signals — bodies not confirming clear direction';
-  }
-
-  return { dir, reason };
+  if (wBull&&dG>=3) return { dir:'UP', reason:`Weekly bodies making higher highs · Daily ${dG}/4 candles gaining` };
+  if (wBear&&dL>=3) return { dir:'DOWN', reason:`Weekly bodies making lower lows · Daily ${dL}/4 candles losing` };
+  if (dFail&&dL>=2) return { dir:'DOWN', reason:`Daily body failed to close above last high — next move likely down` };
+  if (wBull||dG>=3) return { dir:'UP', reason:`Weekly ${wBull?'bullish':'neutral'} · Daily gaining (${dG}/4)` };
+  if (wBear||dL>=3) return { dir:'DOWN', reason:`Weekly ${wBear?'bearish':'neutral'} · Daily losing (${dL}/4)` };
+  return { dir:'UNCLEAR', reason:'Mixed HTF signals — bodies not confirming direction' };
 }
 
-// ── COLLECT ALL KEY LEVELS FOR DISPLAY ────────────────────
-function collectLevels(wCandles, dCandles, currentPrice) {
-  const atrW = calcATR(wCandles);
-  const atrD = calcATR(dCandles);
-
-  const wLevels = findUntestedBodies(wCandles).map(l=>({...l, tf:'1W', atr:atrW}));
-  const dLevels = findUntestedBodies(dCandles).map(l=>({...l, tf:'1D', atr:atrD}));
-
-  const all = [...wLevels, ...dLevels]
-    .sort((a,b) => b.price - a.price);
-
-  // Deduplicate within 0.5% of each other
-  const dedup = [];
+function collectLevels(wC, dC, p) {
+  const wL = findUntestedBodies(wC).map(l=>({...l,tf:'1W'}));
+  const dL = findUntestedBodies(dC).map(l=>({...l,tf:'1D'}));
+  const all = [...wL,...dL].sort((a,b)=>b.price-a.price);
+  const dd = [];
   for (const l of all) {
-    const clash = dedup.find(d => Math.abs(d.price-l.price)/l.price < 0.005);
-    if (!clash) dedup.push(l);
-    else if (!clash.tested && l.tested) { /* keep untested */ }
+    const clash = dd.find(d=>Math.abs(d.price-l.price)/l.price<0.005);
+    if (!clash) dd.push(l);
   }
-
-  // Show 3 above + 3 below price
-  const above = dedup.filter(l=>l.price>currentPrice).slice(0,4);
-  const below = dedup.filter(l=>l.price<currentPrice).slice(-4).reverse();
-
-  return [...above, ...below];
+  return [...dd.filter(l=>l.price>p).slice(0,4), ...dd.filter(l=>l.price<p).slice(-4).reverse()];
 }
 
 // ═══════════════════════════════════════════════════════════
 // RENDER
 // ═══════════════════════════════════════════════════════════
-function fmt(n) {
-  return n >= 1000 ? n.toLocaleString('en-US',{maximumFractionDigits:0}) : n.toFixed(2);
-}
+function fmt(n) { return n>=1000?n.toLocaleString('en-US',{maximumFractionDigits:0}):n.toFixed(2); }
 
 function renderTopbar(t) {
   price = t.price;
@@ -575,102 +473,46 @@ function renderNextMove(nm) {
 }
 
 function renderOverall() {
-  let wL=0, wS=0, wT=0;
-  TFS.forEach(tf=>{
-    const r=results[tf.label];
-    if(!r) return;
-    const pts = tf.weight;
-    if(r.signal==='LONG')  wL+=pts;
-    if(r.signal==='SHORT') wS+=pts;
-    wT+=pts;
-  });
-  const loaded = Object.keys(results).length;
-  const diff = wL - wS;
-  let sig, cls;
-  if      (diff>0 && loaded>=2) { sig='LONG ▲';  cls='long'; }
-  else if (diff<0 && loaded>=2) { sig='SHORT ▼'; cls='short'; }
-  else                          { sig='NEUTRAL';  cls='neutral'; }
-
-  const box = document.getElementById('ov-box');
-  box.className = 'ov-box '+cls;
-  document.getElementById('ov-dir').textContent = sig;
-  document.getElementById('ov-tfs').textContent = loaded+' / '+TFS.length+' TFs';
-
-  // Best reason from highest-weight TF with active signal
-  const best = [...TFS].sort((a,b)=>b.weight-a.weight)
-    .find(tf=>results[tf.label]&&results[tf.label].type!=='NONE');
-  document.getElementById('ov-reason').textContent =
-    best ? results[best.label].reason : 'No active DMC setup across timeframes';
+  let wL=0,wS=0;
+  TFS.forEach(tf=>{const r=results[tf.label];if(!r)return;if(r.signal==='LONG')wL+=tf.weight;if(r.signal==='SHORT')wS+=tf.weight;});
+  const loaded=Object.keys(results).length, diff=wL-wS;
+  let sig,cls;
+  if(diff>0&&loaded>=2){sig='LONG ▲';cls='long';}
+  else if(diff<0&&loaded>=2){sig='SHORT ▼';cls='short';}
+  else{sig='NEUTRAL';cls='neutral';}
+  document.getElementById('ov-box').className='ov-box '+cls;
+  document.getElementById('ov-dir').textContent=sig;
+  document.getElementById('ov-tfs').textContent=loaded+' / '+TFS.length+' TFs';
+  const best=[...TFS].sort((a,b)=>b.weight-a.weight).find(tf=>results[tf.label]&&results[tf.label].type!=='NONE');
+  document.getElementById('ov-reason').textContent=best?results[best.label].reason:'No active DMC setup across timeframes';
 }
 
 function renderTFCards() {
-  const cont = document.getElementById('tf-cards');
-  cont.innerHTML = TFS.map(tf=>{
-    const r = results[tf.label];
-    if(!r) return `
-      <div class="signal-card none">
-        <div class="sc-head">
-          <span class="sc-tf">${tf.label}</span>
-          <span class="sc-type NONE">···</span>
-          <span class="sc-badge WAIT">—</span>
-        </div>
-        <div class="sc-reason"><span class="skel" style="width:180px;height:9px">&nbsp;</span></div>
-      </div>`;
-
-    const cls = r.signal==='LONG'?'long':r.signal==='SHORT'?'short':'neutral';
-    const typeLabel = r.type==='FAIL_GAIN'?'FAIL TO GAIN':
-                      r.type==='FAIL_LOSE'?'FAIL TO LOSE':
-                      r.type==='AT_LEVEL'?'AT LEVEL':'NO SETUP';
-
-    return `
-      <div class="signal-card ${cls}">
-        <div class="sc-head">
-          <span class="sc-tf">${tf.label}</span>
-          <span class="sc-type ${r.type}">${typeLabel}${r.untested?'<span class="untested-dot"></span>':''}</span>
-          <span class="sc-badge ${r.signal}">${r.signal}</span>
-        </div>
-        <div class="sc-reason">${r.reason}</div>
-        ${r.level ? `<div style="font-family:var(--mono);font-size:8px;color:var(--muted);margin-top:5px">
-          Level: <span style="color:var(--white)">$${fmt(r.level)}</span>
-          ${r.target?` · Target: <span style="color:${r.signal==='LONG'?'var(--green)':'var(--red)'}">$${fmt(r.target)}</span>`:''}
-          ${r.untested?' · <span style="color:var(--amber)">UNTESTED BODY</span>':''}
-        </div>`:''}
-      </div>`;
+  document.getElementById('tf-cards').innerHTML = TFS.map(tf=>{
+    const r=results[tf.label];
+    if(!r) return `<div class="signal-card none"><div class="sc-head"><span class="sc-tf">${tf.label}</span><span class="sc-type NONE">···</span><span class="sc-badge WAIT">—</span></div><div class="sc-reason"><span class="skel" style="width:180px;height:9px">&nbsp;</span></div></div>`;
+    const cls=r.signal==='LONG'?'long':r.signal==='SHORT'?'short':'neutral';
+    const tl=r.type==='FAIL_GAIN'?'FAIL TO GAIN':r.type==='FAIL_LOSE'?'FAIL TO LOSE':r.type==='AT_LEVEL'?'AT LEVEL':'NO SETUP';
+    return `<div class="signal-card ${cls}"><div class="sc-head"><span class="sc-tf">${tf.label}</span><span class="sc-type ${r.type}">${tl}${r.untested?'<span class="untested-dot"></span>':''}</span><span class="sc-badge ${r.signal}">${r.signal}</span></div><div class="sc-reason">${r.reason}</div>${r.level?`<div style="font-family:var(--mono);font-size:8px;color:var(--muted);margin-top:5px">Level: <span style="color:var(--white)">$${fmt(r.level)}</span>${r.target?` · Target: <span style="color:${r.signal==='LONG'?'var(--green)':'var(--red)'}">$${fmt(r.target)}</span>`:''}</div>`:''}</div>`;
   }).join('');
 }
 
 function renderLevels() {
-  if(!allLevels.length){
-    document.getElementById('lvl-list').innerHTML=
-      '<div class="lvl-row"><span class="lvl-meta">No significant levels found</span></div>';
-    return;
-  }
+  if (!allLevels.length) { document.getElementById('lvl-list').innerHTML='<div class="lvl-row"><span class="lvl-meta">No significant levels found</span></div>';return; }
   document.getElementById('lvl-list').innerHTML = allLevels.map(l=>{
-    const isR = l.price > price;
-    const dist = ((l.price-price)/price*100).toFixed(2);
-    const cls  = isR?'R':'S';
-    return `
-      <div class="lvl-row ${!l.tested?'untested':''}">
-        <span class="lvl-tag ${cls}">${isR?'RES':'SUP'}</span>
-        <span class="lvl-meta">${l.tf}${!l.tested?' ● UNTESTED':''}</span>
-        <span class="lvl-price ${cls}">$${fmt(l.price)}</span>
-        <span class="lvl-dist">${dist>0?'+':''}${dist}%</span>
-      </div>`;
+    const isR=l.price>price, dist=((l.price-price)/price*100).toFixed(2), cls=isR?'R':'S';
+    return `<div class="lvl-row ${!l.tested?'untested':''}"><span class="lvl-tag ${cls}">${isR?'RES':'SUP'}</span><span class="lvl-meta">${l.tf}${!l.tested?' ● UNTESTED':''}</span><span class="lvl-price ${cls}">$${fmt(l.price)}</span><span class="lvl-dist">${dist>0?'+':''}${dist}%</span></div>`;
   }).join('');
 }
 
 function addLog(signal, tf, reason, type) {
-  if(type==='NONE') return;
-  const time = new Date().toTimeString().slice(0,5);
-  const cls = signal==='LONG'?'long':signal==='SHORT'?'short':'neutral';
-  const col = signal==='LONG'?'var(--green)':signal==='SHORT'?'var(--red)':'var(--amber)';
-  signalLog.unshift(`
-    <div class="log-entry ${cls}">
-      <span class="log-time">${time}</span>
-      <span class="log-text"><strong style="color:${col}">${signal}</strong> [${tf}] ${reason.slice(0,70)}</span>
-    </div>`);
-  if(signalLog.length>15) signalLog.pop();
-  document.getElementById('log-list').innerHTML = signalLog.join('');
+  if (type==='NONE') return;
+  const time=new Date().toTimeString().slice(0,5);
+  const cls=signal==='LONG'?'long':signal==='SHORT'?'short':'neutral';
+  const col=signal==='LONG'?'var(--green)':signal==='SHORT'?'var(--red)':'var(--amber)';
+  signalLog.unshift(`<div class="log-entry ${cls}"><span class="log-time">${time}</span><span class="log-text"><strong style="color:${col}">${signal}</strong> [${tf}] ${reason.slice(0,70)}</span></div>`);
+  if (signalLog.length>15) signalLog.pop();
+  document.getElementById('log-list').innerHTML=signalLog.join('');
 }
 
 function setStatus(state, txt) {
@@ -682,37 +524,31 @@ function setStatus(state, txt) {
 // MAIN
 // ═══════════════════════════════════════════════════════════
 async function run() {
-  if(isRunning) return;
+  if (isRunning) return;
   isRunning=true;
   document.getElementById('refresh-btn').disabled=true;
-  setStatus('loading','Fetching Binance data...');
+  setStatus('loading','Fetching data...');
 
   try {
-    const [tickerRes, ...klineResults] = await Promise.allSettled([
-      getTicker(),
-      ...TFS.map(tf=>getKlines(tf.binance))
-    ]);
+    // Fetch price first (fast)
+    const tickerData = await getPrice();
+    renderTopbar(tickerData);
 
-    if(tickerRes.status==='rejected') throw new Error('Ticker: '+tickerRes.reason.message);
-    renderTopbar(tickerRes.value);
+    // Fetch all TF candles in parallel
+    const klineResults = await Promise.allSettled(TFS.map(tf => getCandles(tf)));
 
-    // Analyse each TF
-    klineResults.forEach((res,i)=>{
-      if(res.status==='rejected'){ console.warn(TFS[i].label, res.reason); return; }
+    klineResults.forEach((res, i) => {
+      if (res.status==='rejected') { console.warn(TFS[i].label, res.reason); return; }
       const candles = res.value;
       const atr = calcATR(candles);
       const dmc = detectDMCSignal(candles, atr);
       results[TFS[i].label] = dmc;
-      if(dmc.type!=='NONE' && dmc.type!=='AT_LEVEL') addLog(dmc.signal, TFS[i].label, dmc.reason, dmc.type);
+      if (dmc.type!=='NONE'&&dmc.type!=='AT_LEVEL') addLog(dmc.signal, TFS[i].label, dmc.reason, dmc.type);
     });
 
-    // Next major move using weekly + daily
-    const wK = klineResults[0].value;
-    const dK = klineResults[1].value;
-    if(wK && dK) renderNextMove(detectNextMove(wK, dK));
-
-    // Key levels (weekly + daily untested bodies)
-    if(wK && dK) allLevels = collectLevels(wK, dK, tickerRes.value.price);
+    const wK = klineResults[0].status==='fulfilled' ? klineResults[0].value : null;
+    const dK = klineResults[1].status==='fulfilled' ? klineResults[1].value : null;
+    if (wK&&dK) { renderNextMove(detectNextMove(wK,dK)); allLevels=collectLevels(wK,dK,tickerData.price); }
 
     renderOverall();
     renderTFCards();
@@ -720,7 +556,7 @@ async function run() {
 
     const now = new Date().toTimeString().slice(0,8);
     setStatus('ok','Updated '+now);
-    document.getElementById('last-upd').textContent = now;
+    document.getElementById('last-upd').textContent=now;
 
   } catch(e) {
     console.error(e);
@@ -732,17 +568,11 @@ async function run() {
   document.getElementById('refresh-btn').disabled=false;
 }
 
-function manualRefresh() {
-  clearTimeout(timer);
-  run().then(schedule);
-}
-function schedule() {
-  timer = setTimeout(()=>run().then(schedule), REFRESH);
-}
+function manualRefresh() { clearTimeout(timer); run().then(schedule); }
+function schedule() { timer=setTimeout(()=>run().then(schedule), REFRESH); }
 
-window.addEventListener('DOMContentLoaded',()=>{
+window.addEventListener('DOMContentLoaded', ()=>{
   loadTV('240');
-  // Skeleton cards
   document.getElementById('tf-cards').innerHTML = TFS.map(tf=>`
     <div class="signal-card none">
       <div class="sc-head"><span class="sc-tf">${tf.label}</span><span class="sc-type NONE">···</span><span class="sc-badge WAIT">—</span></div>
@@ -751,5 +581,6 @@ window.addEventListener('DOMContentLoaded',()=>{
   run().then(schedule);
 });
 </script>
+
 </body>
 </html>
