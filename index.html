@@ -36,7 +36,7 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-html { height: 100%; }
+html { height: 100%; background: #07090d; }
 body {
 background: var(–bg);
 color: var(–white);
@@ -138,7 +138,7 @@ pointer-events: none;
 
 .hero-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
 .hero-dir {
-font-family: var(–display); font-size: 64px; letter-spacing: .06em; line-height: .9;
+font-family: var(–display); font-size: 72px; letter-spacing: .04em; line-height: .85;
 }
 .hero-card.long .hero-dir { color: var(–green); }
 .hero-card.short .hero-dir { color: var(–red); }
@@ -148,10 +148,10 @@ font-family: var(–display); font-size: 64px; letter-spacing: .06em; line-heigh
 .hero-right { text-align: right; }
 .hero-tfs { font-family: var(–mono); font-size: 11px; color: var(–muted2); }
 .hero-strength {
-display: inline-block; margin-top: 4px;
-font-family: var(–mono); font-size: 9px; letter-spacing: .1em;
-padding: 3px 8px; border-radius: 3px;
-background: rgba(255,255,255,.06); color: var(–muted2);
+display: inline-block; margin-top: 6px;
+font-family: var(–mono); font-size: 10px; font-weight: 600; letter-spacing: .1em;
+padding: 4px 10px; border-radius: 4px;
+background: rgba(255,255,255,.07); color: var(–white); border: 1px solid rgba(255,255,255,.1);
 }
 .hero-reason { font-family: var(–mono); font-size: 10px; color: var(–muted2); line-height: 1.6; }
 
@@ -515,7 +515,9 @@ async function getMarketChart(days, intervalMinutes) {
 
 async function getCandles(tf) {
   switch(tf.label) {
-    case '1W':  return getOHLC('max');
+    case '1W':
+      try { return await getOHLC('max'); }
+      catch(e) { return await getOHLC('365'); }
     case '1D':  return getOHLC('90');
     case '4H':  return getMarketChart('16', 240);
     case '1H':  return getMarketChart('7', 60);
@@ -644,9 +646,11 @@ function renderHero() {
   document.getElementById('hero-tfs').textContent=loaded+' / '+TFS.length+' TFs';
   const best=[...TFS].sort((a,b)=>b.weight-a.weight).find(tf=>results[tf.label]&&results[tf.label].type!=='NONE');
   document.getElementById('hero-reason').textContent=best?results[best.label].reason:'No active DMC setup across timeframes';
-  const totalW=TFS.reduce((s,t)=>s+t.weight,0);
-  const pct=totalW>0?Math.round(Math.max(wL,wS)/totalW*100):0;
-  document.getElementById('hero-strength').textContent=pct+'% CONFIDENCE';
+  // Confidence = winning weight / total weight of TFs that have ANY signal (not just NONE)
+  const activeW=TFS.reduce((s,t)=>{const r=results[t.label];return r&&r.type!=='NONE'?s+t.weight:s;},0);
+  const pct=activeW>0?Math.round(Math.max(wL,wS)/activeW*100):0;
+  const confLabel=pct>=80?'HIGH':pct>=50?'MED':'LOW';
+  document.getElementById('hero-strength').textContent=pct+'% · '+confLabel;
 }
 
 function renderNextMove(nm) {
