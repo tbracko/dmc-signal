@@ -1,304 +1,149 @@
 <!DOCTYPE html>
 
-<html lang="en">
+<html lang="en" style="background:#07090d">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>DMC Signal · BTC</title>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;600&family=Sora:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;600&family=Sora:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-:root {
-  --bg: #07090d;
-  --panel: #0c0f14;
-  --card: #10151c;
-  --card2: #131920;
-  --border: #1a2230;
-  --border2: #243040;
-  --green: #00e676;
-  --gdim: rgba(0,230,118,.1);
-  --gbrd: rgba(0,230,118,.22);
-  --red: #ff3d5a;
-  --rdim: rgba(255,61,90,.1);
-  --rbrd: rgba(255,61,90,.22);
-  --amber: #ffc107;
-  --adim: rgba(255,193,7,.08);
-  --abrd: rgba(255,193,7,.2);
-  --muted: #3d5068;
-  --muted2: #5d7a99;
-  --white: #dce8f5;
-  --mono: 'IBM Plex Mono', monospace;
-  --display: 'Bebas Neue', sans-serif;
-  --body: 'Sora', system-ui, sans-serif;
-  --safe-top: env(safe-area-inset-top, 0px);
-  --safe-bot: env(safe-area-inset-bottom, 0px);
-}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{background:#07090d;color:#dce8f5;font-family:'Sora',system-ui,sans-serif;min-height:100%;-webkit-text-size-adjust:100%}
+body{padding-bottom:calc(68px + env(safe-area-inset-bottom,0px));overflow-x:hidden}
 
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-html { height: 100%; background: #07090d; }
-body {
-background: var(–bg);
-color: var(–white);
-font-family: var(–body);
-min-height: 100%;
-overflow-x: hidden;
-padding-bottom: calc(72px + var(–safe-bot));
-}
-body::before {
-content: ‘’;
-position: fixed; inset: 0;
-background-image:
-linear-gradient(rgba(0,230,118,.01) 1px, transparent 1px),
-linear-gradient(90deg, rgba(0,230,118,.01) 1px, transparent 1px);
-background-size: 40px 40px;
-pointer-events: none; z-index: 0;
-}
+/* GRID BG */
+body::before{content:’’;position:fixed;inset:0;background-image:linear-gradient(rgba(0,230,118,.015) 1px,transparent 1px),linear-gradient(90deg,rgba(0,230,118,.015) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0}
 
-/* ── TOP BAR ── */
-.topbar {
-position: sticky; top: 0; z-index: 100;
-background: rgba(7,9,13,.97);
-backdrop-filter: blur(16px) saturate(1.4);
--webkit-backdrop-filter: blur(16px) saturate(1.4);
-border-bottom: 1px solid var(–border);
-padding: calc(var(–safe-top) + 10px) 16px 10px;
-display: flex; align-items: center; gap: 10px;
-}
-.brand { font-family: var(–display); font-size: 22px; letter-spacing: .12em; color: var(–green); line-height: 1; }
-.pair-tag {
-font-family: var(–mono); font-size: 9px; color: var(–muted2);
-background: var(–card); border: 1px solid var(–border);
-padding: 3px 8px; border-radius: 4px; letter-spacing: .08em;
-}
-.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-#tb-price { font-family: var(–mono); font-size: 16px; font-weight: 600; }
-#tb-chg {
-font-family: var(–mono); font-size: 11px;
-padding: 3px 8px; border-radius: 4px; display: none;
-}
-.dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-.dot.ok { background: var(–green); animation: pulse 2s infinite; }
-.dot.loading { background: var(–amber); animation: pulse .8s infinite; }
-.dot.err { background: var(–red); }
-@keyframes pulse {
-0%,100% { box-shadow: 0 0 0 0 rgba(0,230,118,.5); }
-50% { box-shadow: 0 0 0 5px rgba(0,230,118,0); }
-}
+/* TOP BAR */
+.topbar{position:sticky;top:0;z-index:100;background:#07090dF5;border-bottom:1px solid #1a2230;padding:calc(env(safe-area-inset-top,0px) + 10px) 16px 10px;display:flex;align-items:center;gap:10px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.brand{font-family:‘Bebas Neue’,sans-serif;font-size:24px;letter-spacing:.1em;color:#00e676;line-height:1;flex-shrink:0}
+.pair{font-family:‘IBM Plex Mono’,monospace;font-size:10px;color:#5d7a99;background:#10151c;border:1px solid #1a2230;padding:3px 8px;border-radius:4px;letter-spacing:.06em}
+.topbar-r{margin-left:auto;display:flex;align-items:center;gap:8px}
+#tb-price{font-family:‘IBM Plex Mono’,monospace;font-size:16px;font-weight:600;color:#dce8f5}
+#tb-chg{font-family:‘IBM Plex Mono’,monospace;font-size:11px;padding:3px 7px;border-radius:4px;display:none}
+.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:#ffc107}
+.dot.ok{background:#00e676;animation:pulse 2s infinite}
+.dot.err{background:#ff3d5a;animation:none}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(0,230,118,.5)}50%{box-shadow:0 0 0 5px rgba(0,230,118,0)}}
 
-/* ── BOTTOM NAV ── */
-.bottom-nav {
-position: fixed; bottom: 0; left: 0; right: 0; z-index: 200;
-background: rgba(7,9,13,.97);
-backdrop-filter: blur(20px);
--webkit-backdrop-filter: blur(20px);
-border-top: 1px solid var(–border);
-display: flex;
-padding-bottom: var(–safe-bot);
-}
-.nav-btn {
-flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-gap: 4px; padding: 10px 4px 12px;
-font-family: var(–mono); font-size: 9px; letter-spacing: .08em;
-color: var(–muted); background: none; border: none; cursor: pointer;
-transition: color .2s; text-transform: uppercase;
-}
-.nav-btn.active { color: var(–green); }
-.nav-btn svg { width: 20px; height: 20px; stroke-width: 1.5; }
+/* STATUS */
+.statusbar{display:flex;align-items:center;gap:6px;padding:5px 16px;border-bottom:1px solid #1a2230;background:#0c0f14}
+#status-txt{font-family:‘IBM Plex Mono’,monospace;font-size:9px;color:#3d5068;flex:1}
+#last-upd{font-family:‘IBM Plex Mono’,monospace;font-size:9px;color:#3d5068}
 
-/* ── CONTENT PAGES ── */
-.page { display: none; position: relative; z-index: 1; padding: 0 0 16px; }
-.page.active { display: block; }
+/* PAGES */
+.page{display:none;position:relative;z-index:1}
+.page.active{display:block}
 
-/* ── SECTION ── */
-.sec { padding: 14px 16px; border-bottom: 1px solid var(–border); }
-.sec-lbl {
-font-family: var(–mono); font-size: 9px; letter-spacing: .22em;
-text-transform: uppercase; color: var(–muted); margin-bottom: 10px;
-display: flex; align-items: center; gap: 6px;
-}
-.sec-lbl::before { content: ‘’; width: 3px; height: 3px; background: var(–muted); border-radius: 50%; }
+/* HERO CARD */
+.hero{margin:14px 16px;border-radius:14px;padding:20px 18px;border:1px solid #243040;background:#10151c;position:relative;overflow:hidden;transition:background .4s,border-color .4s}
+.hero.long{background:#001f0e;border-color:rgba(0,230,118,.3)}
+.hero.short{background:#1a0008;border-color:rgba(255,61,90,.3)}
+.hero.neutral{background:#1a1400;border-color:rgba(255,193,7,.25)}
+.hero-glow{position:absolute;top:-40px;left:-40px;width:180px;height:180px;border-radius:50%;opacity:.12;pointer-events:none;filter:blur(40px);transition:background .4s}
+.hero.long .hero-glow{background:#00e676}
+.hero.short .hero-glow{background:#ff3d5a}
+.hero.neutral .hero-glow{background:#ffc107}
+.hero-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:12px}
+.hero-dir{font-family:‘Bebas Neue’,sans-serif;font-size:80px;line-height:.85;letter-spacing:.04em;color:#5d7a99;transition:color .4s}
+.hero.long .hero-dir{color:#00e676}
+.hero.short .hero-dir{color:#ff3d5a}
+.hero.neutral .hero-dir{color:#ffc107}
+.hero-meta{text-align:right;display:flex;flex-direction:column;gap:6px;padding-top:6px}
+.hero-tfs{font-family:‘IBM Plex Mono’,monospace;font-size:11px;color:#5d7a99}
+.hero-conf{font-family:‘IBM Plex Mono’,monospace;font-size:11px;font-weight:600;padding:4px 10px;border-radius:6px;border:1px solid #243040;background:#0c0f14;color:#dce8f5}
+.hero-conf.high{background:rgba(0,230,118,.12);border-color:rgba(0,230,118,.3);color:#00e676}
+.hero-conf.med{background:rgba(255,193,7,.1);border-color:rgba(255,193,7,.3);color:#ffc107}
+.hero-reason{font-family:‘IBM Plex Mono’,monospace;font-size:10px;color:#5d7a99;line-height:1.6;border-top:1px solid #1a2230;padding-top:10px;margin-top:2px}
 
-/* ── HERO SIGNAL CARD ── */
-.hero-card {
-margin: 14px 16px;
-border-radius: 12px; padding: 20px;
-border: 1px solid; position: relative; overflow: hidden;
-transition: all .5s;
-}
-.hero-card::after {
-content: ‘’; position: absolute; inset: 0;
-background: radial-gradient(ellipse at 20% 50%, rgba(255,255,255,.04) 0%, transparent 60%);
-pointer-events: none;
-}
-.hero-card.long { background: var(–gdim); border-color: var(–gbrd); }
-.hero-card.short { background: var(–rdim); border-color: var(–rbrd); }
-.hero-card.neutral { background: var(–adim); border-color: var(–abrd); }
-.hero-card.wait { background: rgba(20,28,40,.6); border-color: var(–border); }
+/* NEXT MOVE */
+.nm-card{margin:0 16px 14px;border-radius:10px;background:#0c0f14;border:1px solid #1a2230;padding:14px 16px;display:flex;align-items:center;gap:14px}
+.nm-left{flex:1}
+.nm-lbl{font-family:‘IBM Plex Mono’,monospace;font-size:8px;letter-spacing:.2em;text-transform:uppercase;color:#3d5068;margin-bottom:4px}
+.nm-sub{font-family:‘IBM Plex Mono’,monospace;font-size:9px;color:#3d5068;line-height:1.5;margin-top:4px}
+.nm-val{font-family:‘Bebas Neue’,sans-serif;font-size:36px;letter-spacing:.06em;line-height:1;color:#5d7a99}
+.nm-val.UP{color:#00e676}
+.nm-val.DOWN{color:#ff3d5a}
+.nm-val.UNCLEAR{color:#ffc107}
 
-.hero-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
-.hero-dir {
-font-family: var(–display); font-size: 72px; letter-spacing: .04em; line-height: .85;
-}
-.hero-card.long .hero-dir { color: var(–green); }
-.hero-card.short .hero-dir { color: var(–red); }
-.hero-card.neutral .hero-dir { color: var(–amber); }
-.hero-card.wait .hero-dir { color: var(–muted2); }
+/* SECTION HEADER */
+.sh{padding:12px 16px 8px;font-family:‘IBM Plex Mono’,monospace;font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:#3d5068;display:flex;align-items:center;gap:6px}
+.sh::before{content:’’;width:12px;height:1px;background:#1a2230}
 
-.hero-right { text-align: right; }
-.hero-tfs { font-family: var(–mono); font-size: 11px; color: var(–muted2); }
-.hero-strength {
-display: inline-block; margin-top: 6px;
-font-family: var(–mono); font-size: 10px; font-weight: 600; letter-spacing: .1em;
-padding: 4px 10px; border-radius: 4px;
-background: rgba(255,255,255,.07); color: var(–white); border: 1px solid rgba(255,255,255,.1);
-}
-.hero-reason { font-family: var(–mono); font-size: 10px; color: var(–muted2); line-height: 1.6; }
+/* TF CARDS */
+.tf-cards{padding:0 16px 4px;display:flex;flex-direction:column;gap:8px}
+.tfc{background:#0c0f14;border:1px solid #1a2230;border-radius:10px;padding:14px;position:relative;overflow:hidden}
+.tfc::before{content:’’;position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:3px 0 0 3px;background:#3d5068}
+.tfc.long::before{background:#00e676}
+.tfc.short::before{background:#ff3d5a}
+.tfc.neutral::before{background:#ffc107}
+.tfc-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.tfc-tf{font-family:‘IBM Plex Mono’,monospace;font-size:13px;font-weight:600;color:#dce8f5;min-width:30px}
+.tfc-type{font-family:‘IBM Plex Mono’,monospace;font-size:9px;font-weight:700;letter-spacing:.07em;padding:3px 8px;border-radius:4px;white-space:nowrap}
+.tfc-type.FAIL_GAIN{background:rgba(255,61,90,.12);color:#ff3d5a;border:1px solid rgba(255,61,90,.25)}
+.tfc-type.FAIL_LOSE{background:rgba(0,230,118,.1);color:#00e676;border:1px solid rgba(0,230,118,.22)}
+.tfc-type.AT_LEVEL{background:rgba(255,193,7,.1);color:#ffc107;border:1px solid rgba(255,193,7,.22)}
+.tfc-type.NONE{background:#10151c;color:#3d5068;border:1px solid #1a2230}
+.tfc-sig{margin-left:auto;font-family:‘IBM Plex Mono’,monospace;font-size:13px;font-weight:700}
+.tfc-sig.LONG{color:#00e676}.tfc-sig.SHORT{color:#ff3d5a}.tfc-sig.NEUTRAL{color:#ffc107}.tfc-sig.WAIT{color:#3d5068}
+.tfc-reason{font-family:‘IBM Plex Mono’,monospace;font-size:9px;color:#5d7a99;line-height:1.55}
+.tfc-prices{display:flex;gap:14px;margin-top:8px;padding-top:8px;border-top:1px solid #1a2230}
+.tcp{font-family:‘IBM Plex Mono’,monospace;font-size:9px}
+.tcp-l{color:#3d5068;margin-right:4px}
 
-/* ── NEXT MOVE PILL ── */
-.nm-row { display: flex; gap: 10px; margin: 14px 16px 0; }
-.nm-pill {
-flex: 1; background: var(–card); border: 1px solid var(–border);
-border-radius: 10px; padding: 14px;
-}
-.nm-pill-lbl { font-family: var(–mono); font-size: 8px; letter-spacing: .18em; color: var(–muted); text-transform: uppercase; margin-bottom: 5px; }
-.nm-pill-val { font-family: var(–display); font-size: 28px; letter-spacing: .08em; }
-.nm-pill-val.UP { color: var(–green); }
-.nm-pill-val.DOWN { color: var(–red); }
-.nm-pill-val.UNCLEAR { color: var(–amber); }
-.nm-pill-sub { font-family: var(–mono); font-size: 8px; color: var(–muted2); margin-top: 3px; line-height: 1.45; }
+/* TF TAB BAR (chart) */
+.tf-bar{display:flex;gap:6px;padding:10px 16px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid #1a2230;background:#0c0f14}
+.tf-bar::-webkit-scrollbar{display:none}
+.tf-btn{flex-shrink:0;font-family:‘IBM Plex Mono’,monospace;font-size:12px;font-weight:600;padding:8px 16px;border-radius:7px;border:1px solid #1a2230;background:transparent;color:#5d7a99;cursor:pointer;transition:all .15s;letter-spacing:.05em}
+.tf-btn.active{background:#00e676;color:#07090d;border-color:#00e676}
 
-/* ── TF SELECTOR (tab bar) ── */
-.tf-bar {
-display: flex; gap: 6px; padding: 10px 16px;
-overflow-x: auto; scrollbar-width: none;
-border-bottom: 1px solid var(–border);
-}
-.tf-bar::-webkit-scrollbar { display: none; }
-.tf-btn {
-flex-shrink: 0;
-font-family: var(–mono); font-size: 12px; font-weight: 600;
-padding: 8px 16px; border-radius: 6px;
-border: 1px solid var(–border);
-background: transparent; color: var(–muted2); cursor: pointer;
-transition: all .15s; letter-spacing: .06em;
-min-width: 52px; text-align: center;
-}
-.tf-btn.active {
-background: var(–green); color: var(–bg);
-border-color: var(–green);
-}
+/* CHART */
+.chart-wrap{height:calc(100svh - 160px);min-height:380px}
+.chart-wrap>div{width:100%;height:100%}
 
-/* ── SIGNAL CARDS (TF breakdown) ── */
-.tf-card {
-background: var(–card); border: 1px solid var(–border);
-border-radius: 10px; padding: 14px 16px;
-margin: 0 16px 8px; position: relative; overflow: hidden;
-}
-.tf-card::before { content: ‘’; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: 3px 0 0 3px; }
-.tf-card.long::before { background: var(–green); }
-.tf-card.short::before { background: var(–red); }
-.tf-card.neutral::before { background: var(–amber); }
-.tf-card.none::before { background: var(–muted); }
+/* LEVELS */
+.lvl-item{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid #1a2230}
+.lvl-item.untested{background:rgba(255,193,7,.025)}
+.lvl-badge{font-family:‘IBM Plex Mono’,monospace;font-size:10px;font-weight:700;width:36px;text-align:center;padding:4px 0;border-radius:5px}
+.lvl-badge.R{color:#ff3d5a;background:rgba(255,61,90,.1)}
+.lvl-badge.S{color:#00e676;background:rgba(0,230,118,.08)}
+.lvl-info{flex:1}
+.lvl-tf{font-family:‘IBM Plex Mono’,monospace;font-size:10px;color:#3d5068}
+.lvl-untag{font-family:‘IBM Plex Mono’,monospace;font-size:8px;color:#ffc107;margin-left:5px}
+.lvl-right{text-align:right}
+.lvl-price{font-family:‘IBM Plex Mono’,monospace;font-size:14px;font-weight:600}
+.lvl-price.R{color:#ff3d5a}
+.lvl-price.S{color:#00e676}
+.lvl-dist{font-family:‘IBM Plex Mono’,monospace;font-size:9px;color:#3d5068;margin-top:2px}
 
-.tf-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.tf-card-label { font-family: var(–mono); font-size: 13px; font-weight: 600; color: var(–white); }
-.tf-card-type {
-font-family: var(–mono); font-size: 9px; font-weight: 700; letter-spacing: .07em;
-padding: 3px 8px; border-radius: 4px;
-}
-.tf-card-type.FAIL_GAIN { background: var(–rdim); color: var(–red); border: 1px solid var(–rbrd); }
-.tf-card-type.FAIL_LOSE { background: var(–gdim); color: var(–green); border: 1px solid var(–gbrd); }
-.tf-card-type.AT_LEVEL  { background: var(–adim); color: var(–amber); border: 1px solid var(–abrd); }
-.tf-card-type.NONE      { background: var(–border); color: var(–muted2); border: 1px solid var(–border); }
-.tf-card-badge { margin-left: auto; font-family: var(–mono); font-size: 13px; font-weight: 700; }
-.tf-card-badge.LONG { color: var(–green); }
-.tf-card-badge.SHORT { color: var(–red); }
-.tf-card-badge.NEUTRAL { color: var(–amber); }
-.tf-card-badge.WAIT { color: var(–muted); }
-.tf-card-reason { font-family: var(–mono); font-size: 9px; color: var(–muted2); line-height: 1.55; }
-.tf-card-prices { display: flex; gap: 16px; margin-top: 8px; }
-.tcp { font-family: var(–mono); font-size: 9px; }
-.tcp-lbl { color: var(–muted); }
-.tcp-val { color: var(–white); font-weight: 600; }
+/* LOG */
+.log-item{display:flex;gap:10px;padding:12px 16px;border-bottom:1px solid #1a2230;border-left:3px solid transparent}
+.log-item.long{border-left-color:#00e676}
+.log-item.short{border-left-color:#ff3d5a}
+.log-item.neutral{border-left-color:#ffc107}
+.log-time{font-family:‘IBM Plex Mono’,monospace;font-size:9px;color:#3d5068;flex-shrink:0;padding-top:1px;min-width:36px}
+.log-txt{font-family:‘IBM Plex Mono’,monospace;font-size:10px;color:#5d7a99;line-height:1.5}
 
-/* ── CHART TAB ── */
-.chart-wrap { height: calc(100svh - 160px); min-height: 400px; }
-.chart-wrap iframe, .chart-wrap > div { width: 100%; height: 100%; }
+/* BOTTOM NAV */
+.bnav{position:fixed;bottom:0;left:0;right:0;z-index:200;background:#07090dF5;border-top:1px solid #1a2230;display:flex;padding-bottom:env(safe-area-inset-bottom,0px);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.nb{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:10px 4px 12px;font-family:‘IBM Plex Mono’,monospace;font-size:9px;letter-spacing:.07em;color:#3d5068;background:none;border:none;cursor:pointer;transition:color .2s;text-transform:uppercase}
+.nb.active{color:#00e676}
+.nb svg{width:21px;height:21px;stroke-width:1.5;flex-shrink:0}
 
-/* ── LEVELS ── */
-.lvl-item {
-display: flex; align-items: center; gap: 12px;
-padding: 12px 16px; border-bottom: 1px solid var(–border);
-}
-.lvl-item.untested { background: rgba(255,193,7,.03); }
-.lvl-badge {
-font-family: var(–mono); font-size: 10px; font-weight: 700;
-width: 36px; text-align: center;
-padding: 4px 0; border-radius: 4px;
-}
-.lvl-badge.R { color: var(–red); background: var(–rdim); }
-.lvl-badge.S { color: var(–green); background: var(–gdim); }
-.lvl-info { flex: 1; }
-.lvl-tf { font-family: var(–mono); font-size: 9px; color: var(–muted); }
-.lvl-untested-tag {
-display: inline-block; font-family: var(–mono); font-size: 8px;
-color: var(–amber); margin-left: 4px;
-}
-.lvl-price-wrap { text-align: right; }
-.lvl-price { font-family: var(–mono); font-size: 14px; font-weight: 600; }
-.lvl-price.R { color: var(–red); }
-.lvl-price.S { color: var(–green); }
-.lvl-dist { font-family: var(–mono); font-size: 9px; color: var(–muted); }
+/* REFRESH FAB */
+.fab{position:fixed;bottom:calc(80px + env(safe-area-inset-bottom,0px));right:16px;z-index:150;width:44px;height:44px;border-radius:50%;background:#10151c;border:1px solid #243040;color:#5d7a99;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(0,0,0,.5);transition:transform .15s,color .15s}
+.fab:active{transform:scale(.88)}
+.fab.spin{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 
-/* ── LOG ── */
-.log-item {
-display: flex; gap: 10px; padding: 12px 16px;
-border-bottom: 1px solid var(–border);
-border-left: 3px solid transparent;
-}
-.log-item.long { border-left-color: var(–green); }
-.log-item.short { border-left-color: var(–red); }
-.log-item.neutral { border-left-color: var(–amber); }
-.log-time { font-family: var(–mono); font-size: 9px; color: var(–muted); flex-shrink: 0; padding-top: 1px; }
-.log-txt { font-family: var(–mono); font-size: 10px; color: var(–muted2); line-height: 1.5; }
+/* SKEL */
+.skel{background:linear-gradient(90deg,#1a2230 25%,#243040 50%,#1a2230 75%);background-size:200% 100%;animation:skel 1.5s infinite;border-radius:3px;display:inline-block}
+@keyframes skel{0%{background-position:200% center}100%{background-position:-200% center}}
 
-/* ── REFRESH BTN ── */
-.refresh-fab {
-position: fixed; bottom: calc(84px + var(–safe-bot)); right: 16px; z-index: 150;
-width: 44px; height: 44px; border-radius: 50%;
-background: var(–card2); border: 1px solid var(–border2);
-color: var(–muted2); font-size: 18px; cursor: pointer;
-display: flex; align-items: center; justify-content: center;
-box-shadow: 0 4px 20px rgba(0,0,0,.4);
-transition: all .2s;
-}
-.refresh-fab:active { transform: scale(.9); }
-.refresh-fab.spinning { animation: spin 1s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-
-/* ── SKEL ── */
-.skel {
-background: linear-gradient(90deg, var(–border) 25%, var(–border2) 50%, var(–border) 75%);
-background-size: 200% 100%; animation: skel 1.5s infinite;
-border-radius: 3px; display: inline-block;
-}
-@keyframes skel { 0% { background-position: 200% center; } 100% { background-position: -200% center; } }
-
-/* ── STATUS BAR ── */
-.status-bar {
-display: flex; align-items: center; gap: 6px;
-padding: 6px 16px; border-bottom: 1px solid var(–border);
-font-family: var(–mono); font-size: 9px; color: var(–muted);
-}
-
-/* ── SECTION HEADER for pages ── */
-.page-header {
-padding: 14px 16px 10px;
-font-family: var(–mono); font-size: 9px; letter-spacing: .2em;
-text-transform: uppercase; color: var(–muted);
-border-bottom: 1px solid var(–border);
-}
+/* EMPTY */
+.empty{padding:24px 16px;font-family:‘IBM Plex Mono’,monospace;font-size:10px;color:#3d5068;text-align:center}
 </style>
 
 </head>
@@ -308,53 +153,47 @@ border-bottom: 1px solid var(–border);
 
 <div class="topbar">
   <span class="brand">DMC ⚡</span>
-  <span class="pair-tag">BTCUSD</span>
-  <div class="topbar-right">
+  <span class="pair">BTC/USD</span>
+  <div class="topbar-r">
     <span id="tb-price">—</span>
     <span id="tb-chg"></span>
-    <span class="dot loading" id="dot"></span>
+    <span class="dot" id="dot"></span>
   </div>
 </div>
 
-<!-- STATUS BAR -->
+<!-- STATUS -->
 
-<div class="status-bar">
-  <span id="status-txt">Connecting to CoinGecko...</span>
-  <span style="margin-left:auto" id="last-upd">—</span>
+<div class="statusbar">
+  <span id="status-txt">Connecting...</span>
+  <span id="last-upd"></span>
 </div>
 
 <!-- PAGE: SIGNAL -->
 
 <div class="page active" id="page-signal">
 
-  <!-- Hero overall signal -->
-
-  <div class="hero-card wait" id="hero-card">
+  <div class="hero wait" id="hero">
+    <div class="hero-glow"></div>
     <div class="hero-top">
       <div class="hero-dir" id="hero-dir">—</div>
-      <div class="hero-right">
+      <div class="hero-meta">
         <div class="hero-tfs" id="hero-tfs">0 / 5 TFs</div>
-        <div class="hero-strength" id="hero-strength">LOADING</div>
+        <div class="hero-conf" id="hero-conf">LOADING</div>
       </div>
     </div>
-    <div class="hero-reason" id="hero-reason">Fetching candle data from CoinGecko...</div>
+    <div class="hero-reason" id="hero-reason">Fetching candle data...</div>
   </div>
 
-  <!-- Next move pills -->
-
-  <div class="nm-row">
-    <div class="nm-pill">
-      <div class="nm-pill-lbl">Next Move (HTF)</div>
-      <div class="nm-pill-val UNCLEAR" id="nm-val">—</div>
-      <div class="nm-pill-sub" id="nm-sub">Analysing weekly + daily bodies...</div>
+  <div class="nm-card">
+    <div class="nm-left">
+      <div class="nm-lbl">Next Major Move · HTF</div>
+      <div class="nm-val UNCLEAR" id="nm-val">—</div>
+      <div class="nm-sub" id="nm-sub">Analysing weekly + daily bodies...</div>
     </div>
   </div>
 
-  <!-- TF breakdown label -->
-
-  <div class="sec-lbl" style="padding: 14px 16px 0; margin-bottom: 0;">Timeframe Breakdown</div>
-
-  <div style="padding: 10px 0 0;" id="tf-cards-wrap"></div>
+  <div class="sh">Timeframe Breakdown</div>
+  <div class="tf-cards" id="tf-cards"></div>
 
 </div>
 
@@ -374,400 +213,295 @@ border-bottom: 1px solid var(–border);
 <!-- PAGE: LEVELS -->
 
 <div class="page" id="page-levels">
-  <div class="page-header">Key Levels · Untested Candle Bodies</div>
-  <div id="lvl-list"></div>
+  <div class="sh">Key Levels · Untested Candle Bodies</div>
+  <div id="lvl-list"><div class="empty">Loading levels...</div></div>
 </div>
 
 <!-- PAGE: LOG -->
 
 <div class="page" id="page-log">
-  <div class="page-header">Signal Log</div>
+  <div class="sh">Signal Log</div>
   <div id="log-list">
-    <div class="log-item neutral">
-      <span class="log-time">--:--</span>
-      <span class="log-txt">Initialising DMC engine...</span>
-    </div>
+    <div class="log-item neutral"><span class="log-time">--:--</span><span class="log-txt">Initialising DMC engine...</span></div>
   </div>
 </div>
 
-<!-- REFRESH FAB -->
+<!-- FAB -->
 
-<button class="refresh-fab" id="refresh-fab" onclick="manualRefresh()" title="Refresh">↻</button>
+<button class="fab" id="fab" onclick="manualRefresh()">↻</button>
 
 <!-- BOTTOM NAV -->
 
-<nav class="bottom-nav">
-  <button class="nav-btn active" data-page="signal" onclick="switchPage('signal', this)">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-    Signal
+<nav class="bnav">
+  <button class="nb active" onclick="nav('signal',this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Signal
   </button>
-  <button class="nav-btn" data-page="chart" onclick="switchPage('chart', this)">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
-    Chart
+  <button class="nb" onclick="nav('chart',this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Chart
   </button>
-  <button class="nav-btn" data-page="levels" onclick="switchPage('levels', this)">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-    Levels
+  <button class="nb" onclick="nav('levels',this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>Levels
   </button>
-  <button class="nav-btn" data-page="log" onclick="switchPage('log', this)">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
-    Log
+  <button class="nb" onclick="nav('log',this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>Log
   </button>
 </nav>
 
 <script>
 'use strict';
+const COIN='bitcoin', CG='https://api.coingecko.com/api/v3', REFRESH=120000;
+const TFS=[{l:'1W',iv:'W',w:5},{l:'1D',iv:'D',w:4},{l:'4H',iv:'240',w:3},{l:'1H',iv:'60',w:2},{l:'15m',iv:'15',w:1}];
+let results={}, allLevels=[], log=[], running=false, timer=null, price=0, tvLoaded=false;
 
-// ═══════════════════════════════════════════════════════════
-// CONFIG
-// ═══════════════════════════════════════════════════════════
-const COIN_ID = 'bitcoin';
-const CG_BASE = 'https://api.coingecko.com/api/v3';
-const REFRESH  = 120000;
-
-const TFS = [
-  { label:'1W',  iv:'W',   weight:5 },
-  { label:'1D',  iv:'D',   weight:4 },
-  { label:'4H',  iv:'240', weight:3 },
-  { label:'1H',  iv:'60',  weight:2 },
-  { label:'15m', iv:'15',  weight:1 },
-];
-
-let results   = {};
-let allLevels = [];
-let signalLog = [];
-let isRunning = false;
-let timer     = null;
-let price     = 0;
-let tvLoaded  = false;
-
-// ═══════════════════════════════════════════════════════════
-// NAVIGATION
-// ═══════════════════════════════════════════════════════════
-function switchPage(id, btn) {
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('page-' + id).classList.add('active');
+// NAV
+function nav(id, btn) {
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
+  document.getElementById('page-'+id).classList.add('active');
   btn.classList.add('active');
-  if (id === 'chart' && !tvLoaded) { loadTV('240'); tvLoaded = true; }
+  if(id==='chart'&&!tvLoaded){loadTV('240');tvLoaded=true;}
 }
 
-// ═══════════════════════════════════════════════════════════
 // TRADINGVIEW
-// ═══════════════════════════════════════════════════════════
-function loadTV(iv) {
-  const wrap = document.getElementById('tv-wrap');
-  wrap.innerHTML = '<div style="width:100%;height:100%"></div>';
-  const s = document.createElement('script');
-  s.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
-  s.async = true;
-  s.textContent = JSON.stringify({
-    autosize: true, symbol: 'BINANCE:BTCUSDT', interval: iv,
-    timezone: 'Etc/UTC', theme: 'dark', style: '1', locale: 'en',
-    backgroundColor: '#07090d', hide_top_toolbar: false,
-    allow_symbol_change: false, save_image: false,
-    hide_side_toolbar: true
-  });
-  wrap.firstChild.appendChild(s);
+function loadTV(iv){
+  const w=document.getElementById('tv-wrap');
+  w.innerHTML='<div style="width:100%;height:100%"></div>';
+  const s=document.createElement('script');
+  s.src='https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
+  s.async=true;
+  s.textContent=JSON.stringify({autosize:true,symbol:'BINANCE:BTCUSDT',interval:iv,timezone:'Etc/UTC',theme:'dark',style:'1',locale:'en',backgroundColor:'#07090d',hide_top_toolbar:false,allow_symbol_change:false,save_image:false,hide_side_toolbar:true});
+  w.firstChild.appendChild(s);
 }
-
-document.getElementById('tf-bar').addEventListener('click', e => {
-  const btn = e.target.closest('.tf-btn');
-  if (!btn) return;
-  document.querySelectorAll('.tf-btn').forEach(b => b.classList.toggle('active', b === btn));
-  loadTV(btn.dataset.iv);
-  tvLoaded = true;
+document.getElementById('tf-bar').addEventListener('click',e=>{
+  const b=e.target.closest('.tf-btn'); if(!b)return;
+  document.querySelectorAll('.tf-btn').forEach(x=>x.classList.toggle('active',x===b));
+  loadTV(b.dataset.iv); tvLoaded=true;
 });
 
-// ═══════════════════════════════════════════════════════════
-// COINGECKO API
-// ═══════════════════════════════════════════════════════════
-async function getPrice() {
-  const r = await fetch(`${CG_BASE}/simple/price?ids=${COIN_ID}&vs_currencies=usd&include_24hr_change=true`);
-  if (!r.ok) throw new Error('Price: ' + r.status);
-  const d = await r.json();
-  return { price: d[COIN_ID].usd, change: d[COIN_ID].usd_24h_change };
+// API
+async function getPrice(){
+  const r=await fetch(`${CG}/simple/price?ids=${COIN}&vs_currencies=usd&include_24hr_change=true`);
+  if(!r.ok)throw new Error('Price: '+r.status);
+  const d=await r.json();
+  return{price:d[COIN].usd,change:d[COIN].usd_24h_change};
 }
-
-async function getOHLC(days) {
-  const r = await fetch(`${CG_BASE}/coins/${COIN_ID}/ohlc?vs_currency=usd&days=${days}`);
-  if (!r.ok) throw new Error(`OHLC ${days}d: ${r.status}`);
-  const raw = await r.json();
-  if (!Array.isArray(raw) || raw.length === 0) throw new Error(`OHLC ${days}d: empty`);
-  return raw.map(k => ({ t:k[0], o:k[1], h:k[2], l:k[3], c:k[4], bodyHigh:Math.max(k[1],k[4]), bodyLow:Math.min(k[1],k[4]) }));
+async function getOHLC(days){
+  const r=await fetch(`${CG}/coins/${COIN}/ohlc?vs_currency=usd&days=${days}`);
+  if(!r.ok)throw new Error(`OHLC ${days}: ${r.status}`);
+  const raw=await r.json();
+  if(!Array.isArray(raw)||!raw.length)throw new Error(`OHLC ${days}: empty`);
+  return raw.map(k=>({t:k[0],o:k[1],h:k[2],l:k[3],c:k[4],bh:Math.max(k[1],k[4]),bl:Math.min(k[1],k[4])}));
 }
-
-async function getMarketChart(days, intervalMinutes) {
-  const r = await fetch(`${CG_BASE}/coins/${COIN_ID}/market_chart?vs_currency=usd&days=${days}`);
-  if (!r.ok) throw new Error(`Chart ${days}d: ${r.status}`);
-  const d = await r.json();
-  const prices = d.prices;
-  if (!prices || prices.length < 4) throw new Error(`Chart ${days}d: insufficient`);
-  const bms = intervalMinutes * 60000;
-  const buckets = {};
-  for (const [ts, p] of prices) {
-    const b = Math.floor(ts / bms) * bms;
-    if (!buckets[b]) buckets[b] = { t:b, o:p, h:p, l:p, c:p };
-    else { buckets[b].h = Math.max(buckets[b].h, p); buckets[b].l = Math.min(buckets[b].l, p); buckets[b].c = p; }
-  }
-  return Object.values(buckets).sort((a,b)=>a.t-b.t).map(k => ({ ...k, bodyHigh:Math.max(k.o,k.c), bodyLow:Math.min(k.o,k.c) }));
+async function getChart(days,mins){
+  const r=await fetch(`${CG}/coins/${COIN}/market_chart?vs_currency=usd&days=${days}`);
+  if(!r.ok)throw new Error(`Chart ${days}: ${r.status}`);
+  const d=await r.json();
+  const prices=d.prices; if(!prices||prices.length<4)throw new Error(`Chart ${days}: empty`);
+  const bms=mins*60000, B={};
+  for(const[ts,p]of prices){const b=Math.floor(ts/bms)*bms;if(!B[b])B[b]={t:b,o:p,h:p,l:p,c:p};else{B[b].h=Math.max(B[b].h,p);B[b].l=Math.min(B[b].l,p);B[b].c=p;}}
+  return Object.values(B).sort((a,b)=>a.t-b.t).map(k=>({...k,bh:Math.max(k.o,k.c),bl:Math.min(k.o,k.c)}));
 }
-
-async function getCandles(tf) {
-  switch(tf.label) {
-    case '1W':
-      try { return await getOHLC('max'); }
-      catch(e) { return await getOHLC('365'); }
-    case '1D':  return getOHLC('90');
-    case '4H':  return getMarketChart('16', 240);
-    case '1H':  return getMarketChart('7', 60);
-    case '15m': return getMarketChart('2', 15);
+async function getCandles(tf){
+  switch(tf.l){
+    case'1W': try{return await getOHLC('max')}catch{return getOHLC('365')}
+    case'1D': return getOHLC('90');
+    case'4H': return getChart('16',240);
+    case'1H': return getChart('7',60);
+    case'15m':return getChart('2',15);
   }
 }
 
-// ═══════════════════════════════════════════════════════════
 // DMC ENGINE
-// ═══════════════════════════════════════════════════════════
-function calcATR(candles, p=14) {
-  const trs = candles.slice(1).map((c,i) => {
-    const prev = candles[i];
-    return Math.max(c.h-c.l, Math.abs(c.h-prev.c), Math.abs(c.l-prev.c));
-  });
-  return trs.slice(-p).reduce((s,v)=>s+v,0)/p;
-}
+function atr(c,p=14){const t=c.slice(1).map((x,i)=>Math.max(x.h-x.l,Math.abs(x.h-c[i].c),Math.abs(x.l-c[i].c)));return t.slice(-p).reduce((s,v)=>s+v,0)/p;}
 
-function findUntestedBodies(candles) {
-  const n = candles.length, levels = [];
-  for (let i=5; i<n-3; i++) {
-    const c = candles[i], sz = Math.abs(c.bodyHigh-c.bodyLow);
-    if (sz < 0.001) continue;
-    const isHigh = c.h >= Math.max(...candles.slice(i-3,i+4).map(x=>x.h)) - sz*0.1;
-    const isLow  = c.l <= Math.min(...candles.slice(i-3,i+4).map(x=>x.l)) + sz*0.1;
-    if (!isHigh && !isLow) continue;
-    const tested = candles.slice(i+1).some(f => f.bodyHigh>=c.bodyLow && f.bodyLow<=c.bodyHigh);
-    levels.push({ price:isHigh?c.bodyHigh:c.bodyLow, bodyHigh:c.bodyHigh, bodyLow:c.bodyLow, type:isHigh?'resistance':'support', tested, idx:i });
+function findLevels(c){
+  const n=c.length,L=[];
+  for(let i=5;i<n-3;i++){
+    const x=c[i],sz=Math.abs(x.bh-x.bl);if(sz<0.001)continue;
+    const isH=x.h>=Math.max(...c.slice(i-3,i+4).map(y=>y.h))-sz*0.1;
+    const isL=x.l<=Math.min(...c.slice(i-3,i+4).map(y=>y.l))+sz*0.1;
+    if(!isH&&!isL)continue;
+    const tested=c.slice(i+1).some(f=>f.bh>=x.bl&&f.bl<=x.bh);
+    L.push({price:isH?x.bh:x.bl,bh:x.bh,bl:x.bl,type:isH?'resistance':'support',tested,idx:i});
   }
-  return levels;
+  return L;
 }
 
-function detectDMCSignal(candles, atr) {
-  const n = candles.length;
-  if (n < 20) return { signal:'NEUTRAL', type:'NONE', reason:'Insufficient data' };
-  const tol = atr * 0.15;
-  const levels = findUntestedBodies(candles);
-  const rel = levels.filter(l => Math.abs(l.price - candles[n-1].c) < atr*8);
-
-  for (const lv of rel.filter(l=>l.type==='resistance')) {
-    for (let lb=2; lb<=6; lb++) {
-      if (n-lb<0) break;
-      const att=candles[n-lb], cur=candles[n-1];
-      if (att.bodyHigh>lv.price-tol && cur.bodyHigh<lv.price+tol && cur.c<lv.price && candles[n-lb-1]?.c<lv.price) {
-        // Target = origin of the move = lowest body low in the 60 candles before the attempt, must be BELOW current price
-        const lookbackCandles = candles.slice(Math.max(0, n-lb-60), n-lb);
-        const belowCurrent = lookbackCandles.filter(c => c.bodyLow < cur.c);
-        const target = belowCurrent.length > 0
-          ? Math.min(...belowCurrent.map(c => c.bodyLow))
-          : cur.c * 0.98;
-        return { signal:'SHORT', type:'FAIL_GAIN', level:lv.price, target, reason:`Failed to gain $${fmt(lv.price)} — body closed back below. Target: $${fmt(target)}`, strength:lb<=3?'high':'med', untested:!lv.tested };
+function dmc(c,a){
+  const n=c.length; if(n<20)return{sig:'NEUTRAL',type:'NONE',reason:'Insufficient data'};
+  const tol=a*0.15, levels=findLevels(c);
+  const rel=levels.filter(l=>Math.abs(l.price-c[n-1].c)<a*8);
+  // FAIL TO GAIN → SHORT
+  for(const lv of rel.filter(l=>l.type==='resistance')){
+    for(let lb=2;lb<=6;lb++){
+      if(n-lb<0)break;
+      const at=c[n-lb],cu=c[n-1];
+      if(at.bh>lv.price-tol&&cu.bh<lv.price+tol&&cu.c<lv.price&&c[n-lb-1]?.c<lv.price){
+        const lbC=c.slice(Math.max(0,n-lb-60),n-lb).filter(x=>x.bl<cu.c);
+        const tgt=lbC.length?Math.min(...lbC.map(x=>x.bl)):cu.c*0.98;
+        return{sig:'SHORT',type:'FAIL_GAIN',level:lv.price,target:tgt,reason:`Failed to gain $${fmt(lv.price)} — body closed back below. Target: $${fmt(tgt)}`,strength:lb<=3?'high':'med',untested:!lv.tested};
       }
     }
   }
-  for (const lv of rel.filter(l=>l.type==='support')) {
-    for (let lb=2; lb<=6; lb++) {
-      if (n-lb<0) break;
-      const att=candles[n-lb], cur=candles[n-1];
-      if (att.bodyLow<lv.price+tol && cur.bodyLow>lv.price-tol && cur.c>lv.price && candles[n-lb-1]?.c>lv.price) {
-        // Target = origin of the move = highest body high in the 60 candles before the attempt, must be ABOVE current price
-        const lookbackCandles = candles.slice(Math.max(0, n-lb-60), n-lb);
-        const aboveCurrent = lookbackCandles.filter(c => c.bodyHigh > cur.c);
-        const target = aboveCurrent.length > 0
-          ? Math.max(...aboveCurrent.map(c => c.bodyHigh))
-          : cur.c * 1.02;
-        return { signal:'LONG', type:'FAIL_LOSE', level:lv.price, target, reason:`Failed to lose $${fmt(lv.price)} — body closed back above. Target: $${fmt(target)}`, strength:lb<=3?'high':'med', untested:!lv.tested };
+  // FAIL TO LOSE → LONG
+  for(const lv of rel.filter(l=>l.type==='support')){
+    for(let lb=2;lb<=6;lb++){
+      if(n-lb<0)break;
+      const at=c[n-lb],cu=c[n-1];
+      if(at.bl<lv.price+tol&&cu.bl>lv.price-tol&&cu.c>lv.price&&c[n-lb-1]?.c>lv.price){
+        const lbC=c.slice(Math.max(0,n-lb-60),n-lb).filter(x=>x.bh>cu.c);
+        const tgt=lbC.length?Math.max(...lbC.map(x=>x.bh)):cu.c*1.02;
+        return{sig:'LONG',type:'FAIL_LOSE',level:lv.price,target:tgt,reason:`Failed to lose $${fmt(lv.price)} — body closed back above. Target: $${fmt(tgt)}`,strength:lb<=3?'high':'med',untested:!lv.tested};
       }
     }
   }
-  const nearest = rel.filter(l=>!l.tested).sort((a,b)=>Math.abs(a.price-candles[n-1].c)-Math.abs(b.price-candles[n-1].c))[0];
-  if (nearest && Math.abs(nearest.price-candles[n-1].c)<atr*1.5)
-    return { signal:'NEUTRAL', type:'AT_LEVEL', level:nearest.price, target:null, reason:`At untested ${nearest.type} $${fmt(nearest.price)} — watch for failure to ${nearest.type==='support'?'lose':'gain'}`, strength:'low', untested:true };
-  return { signal:'NEUTRAL', type:'NONE', reason:'No DMC setup — price between levels', strength:'none' };
+  // AT LEVEL
+  const near=rel.filter(l=>!l.tested).sort((a,b)=>Math.abs(a.price-c[n-1].c)-Math.abs(b.price-c[n-1].c))[0];
+  if(near&&Math.abs(near.price-c[n-1].c)<a*1.5)
+    return{sig:'NEUTRAL',type:'AT_LEVEL',level:near.price,target:null,reason:`At untested ${near.type} $${fmt(near.price)} — watch for failure to ${near.type==='support'?'lose':'gain'}`,strength:'low',untested:true};
+  return{sig:'NEUTRAL',type:'NONE',reason:'No DMC setup — price between levels',strength:'none'};
 }
 
-function detectNextMove(wC, dC) {
-  const wn=wC.length, dn=dC.length;
-  if (wn<10||dn<10) return { dir:'UNCLEAR', reason:'Insufficient HTF data' };
-  const wBull=wC[wn-1].bodyHigh>wC[wn-2].bodyHigh&&wC[wn-2].bodyHigh>wC[wn-3].bodyHigh;
-  const wBear=wC[wn-1].bodyLow<wC[wn-2].bodyLow&&wC[wn-2].bodyLow<wC[wn-3].bodyLow;
-  const dr=dC.slice(-5); let dG=0,dL=0;
-  for(let i=1;i<dr.length;i++){if(dr[i].bodyHigh>dr[i-1].bodyHigh)dG++;else dL++;}
-  const dFail=dC[dn-1].bodyHigh<dC[dn-2].bodyHigh&&dC[dn-2].bodyHigh>dC[dn-3].bodyHigh;
-  if(wBull&&dG>=3)return{dir:'UP',reason:`Weekly higher highs · Daily ${dG}/4 gaining`};
-  if(wBear&&dL>=3)return{dir:'DOWN',reason:`Weekly lower lows · Daily ${dL}/4 losing`};
-  if(dFail&&dL>=2)return{dir:'DOWN',reason:`Daily body failed to close above last high`};
-  if(wBull||dG>=3)return{dir:'UP',reason:`Weekly ${wBull?'bullish':'neutral'} · Daily gaining ${dG}/4`};
-  if(wBear||dL>=3)return{dir:'DOWN',reason:`Weekly ${wBear?'bearish':'neutral'} · Daily losing ${dL}/4`};
-  return{dir:'UNCLEAR',reason:'Mixed HTF — no clear body direction'};
+function nextMove(wC,dC){
+  const wn=wC.length,dn=dC.length;
+  if(wn<10||dn<10)return{dir:'UNCLEAR',reason:'Insufficient HTF data'};
+  const wB=wC[wn-1].bh>wC[wn-2].bh&&wC[wn-2].bh>wC[wn-3].bh;
+  const wBr=wC[wn-1].bl<wC[wn-2].bl&&wC[wn-2].bl<wC[wn-3].bl;
+  const dr=dC.slice(-5);let dG=0,dL=0;
+  for(let i=1;i<dr.length;i++){if(dr[i].bh>dr[i-1].bh)dG++;else dL++;}
+  const dF=dC[dn-1].bh<dC[dn-2].bh&&dC[dn-2].bh>dC[dn-3].bh;
+  if(wB&&dG>=3)return{dir:'UP',reason:`Weekly higher highs · Daily ${dG}/4 gaining`};
+  if(wBr&&dL>=3)return{dir:'DOWN',reason:`Weekly lower lows · Daily ${dL}/4 losing`};
+  if(dF&&dL>=2)return{dir:'DOWN',reason:`Daily body failed to close above last high`};
+  if(wB||dG>=3)return{dir:'UP',reason:`Weekly ${wB?'bullish':'neutral'} · Daily gaining ${dG}/4`};
+  if(wBr||dL>=3)return{dir:'DOWN',reason:`Weekly ${wBr?'bearish':'neutral'} · Daily losing ${dL}/4`};
+  return{dir:'UNCLEAR',reason:'Mixed HTF — no clear direction'};
 }
 
-function collectLevels(wC, dC, p) {
-  const wL=findUntestedBodies(wC).map(l=>({...l,tf:'1W'}));
-  const dL=findUntestedBodies(dC).map(l=>({...l,tf:'1D'}));
+function collectLevels(wC,dC,p){
+  const wL=findLevels(wC).map(l=>({...l,tf:'1W'}));
+  const dL=findLevels(dC).map(l=>({...l,tf:'1D'}));
   const all=[...wL,...dL].sort((a,b)=>b.price-a.price);
   const dd=[];
-  for(const l of all){const c=dd.find(d=>Math.abs(d.price-l.price)/l.price<0.005);if(!c)dd.push(l);}
+  for(const l of all){if(!dd.find(d=>Math.abs(d.price-l.price)/l.price<0.005))dd.push(l);}
   return[...dd.filter(l=>l.price>p).slice(0,5),...dd.filter(l=>l.price<p).slice(-5).reverse()];
 }
 
-// ═══════════════════════════════════════════════════════════
 // RENDER
-// ═══════════════════════════════════════════════════════════
 function fmt(n){return n>=1000?n.toLocaleString('en-US',{maximumFractionDigits:0}):n.toFixed(2);}
 
-function renderTopbar(t) {
-  price = t.price;
-  document.getElementById('tb-price').textContent = '$'+fmt(t.price);
-  const el = document.getElementById('tb-chg');
-  el.style.display = '';
-  el.textContent = (t.change>=0?'+':'')+t.change.toFixed(2)+'%';
-  el.style.background = t.change>=0?'var(--gdim)':'var(--rdim)';
-  el.style.color = t.change>=0?'var(--green)':'var(--red)';
+function renderTop(t){
+  price=t.price;
+  document.getElementById('tb-price').textContent='$'+fmt(t.price);
+  const el=document.getElementById('tb-chg');
+  el.style.display='';
+  el.textContent=(t.change>=0?'+':'')+t.change.toFixed(2)+'%';
+  el.style.background=t.change>=0?'rgba(0,230,118,.15)':'rgba(255,61,90,.15)';
+  el.style.color=t.change>=0?'#00e676':'#ff3d5a';
 }
 
-function renderHero() {
-  let wL=0,wS=0;
-  TFS.forEach(tf=>{const r=results[tf.label];if(!r)return;if(r.signal==='LONG')wL+=tf.weight;if(r.signal==='SHORT')wS+=tf.weight;});
-  const loaded=Object.keys(results).length, diff=wL-wS;
+function renderHero(){
+  let wL=0,wS=0,activeW=0;
+  TFS.forEach(tf=>{
+    const r=results[tf.l]; if(!r)return;
+    if(r.type!=='NONE')activeW+=tf.w;
+    if(r.sig==='LONG')wL+=tf.w;
+    if(r.sig==='SHORT')wS+=tf.w;
+  });
+  const loaded=Object.keys(results).length,diff=wL-wS;
   let sig,cls;
   if(diff>0&&loaded>=2){sig='LONG ▲';cls='long';}
   else if(diff<0&&loaded>=2){sig='SHORT ▼';cls='short';}
   else{sig='NEUTRAL';cls='neutral';}
-  document.getElementById('hero-card').className='hero-card '+cls;
+  const hero=document.getElementById('hero');
+  hero.className='hero '+cls;
   document.getElementById('hero-dir').textContent=sig;
   document.getElementById('hero-tfs').textContent=loaded+' / '+TFS.length+' TFs';
-  const best=[...TFS].sort((a,b)=>b.weight-a.weight).find(tf=>results[tf.label]&&results[tf.label].type!=='NONE');
-  document.getElementById('hero-reason').textContent=best?results[best.label].reason:'No active DMC setup across timeframes';
-  // Confidence = winning weight / total weight of TFs that have ANY signal (not just NONE)
-  const activeW=TFS.reduce((s,t)=>{const r=results[t.label];return r&&r.type!=='NONE'?s+t.weight:s;},0);
   const pct=activeW>0?Math.round(Math.max(wL,wS)/activeW*100):0;
-  const confLabel=pct>=80?'HIGH':pct>=50?'MED':'LOW';
-  document.getElementById('hero-strength').textContent=pct+'% · '+confLabel;
+  const confEl=document.getElementById('hero-conf');
+  const confLabel=pct>=75?'HIGH':pct>=50?'MED':'LOW';
+  confEl.textContent=pct+'% · '+confLabel;
+  confEl.className='hero-conf '+(pct>=75?'high':pct>=50?'med':'');
+  const best=[...TFS].sort((a,b)=>b.w-a.w).find(tf=>results[tf.l]&&results[tf.l].type!=='NONE');
+  document.getElementById('hero-reason').textContent=best?results[best.l].reason:'No active DMC setup across timeframes';
 }
 
-function renderNextMove(nm) {
+function renderNM(nm){
   const el=document.getElementById('nm-val');
-  el.className='nm-pill-val '+nm.dir;
+  el.className='nm-val '+nm.dir;
   el.textContent=nm.dir==='UP'?'UP ▲':nm.dir==='DOWN'?'DOWN ▼':'UNCLEAR';
   document.getElementById('nm-sub').textContent=nm.reason;
 }
 
-function renderTFCards() {
-  document.getElementById('tf-cards-wrap').innerHTML = TFS.map(tf => {
-    const r=results[tf.label];
-    if(!r) return `<div class="tf-card none"><div class="tf-card-head"><span class="tf-card-label">${tf.label}</span><span class="tf-card-type NONE">···</span><span class="tf-card-badge WAIT" style="margin-left:auto">—</span></div><div class="tf-card-reason"><span class="skel" style="width:180px;height:9px">&nbsp;</span></div></div>`;
-    const cls=r.signal==='LONG'?'long':r.signal==='SHORT'?'short':'neutral';
+function renderCards(){
+  document.getElementById('tf-cards').innerHTML=TFS.map(tf=>{
+    const r=results[tf.l];
+    if(!r)return`<div class="tfc none"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type NONE">···</span><span class="tfc-sig WAIT" style="margin-left:auto">—</span></div><div class="tfc-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div></div>`;
+    const cls=r.sig==='LONG'?'long':r.sig==='SHORT'?'short':'neutral';
     const tl=r.type==='FAIL_GAIN'?'FAIL TO GAIN':r.type==='FAIL_LOSE'?'FAIL TO LOSE':r.type==='AT_LEVEL'?'AT LEVEL':'NO SETUP';
-    return `<div class="tf-card ${cls}">
-      <div class="tf-card-head">
-        <span class="tf-card-label">${tf.label}</span>
-        <span class="tf-card-type ${r.type}">${tl}</span>
-        <span class="tf-card-badge ${r.signal}" style="margin-left:auto">${r.signal}</span>
-      </div>
-      <div class="tf-card-reason">${r.reason}</div>
-      ${r.level?`<div class="tf-card-prices">
-        <span class="tcp"><span class="tcp-lbl">LVL </span><span class="tcp-val">$${fmt(r.level)}</span></span>
-        ${r.target?`<span class="tcp"><span class="tcp-lbl">TGT </span><span class="tcp-val" style="color:${r.signal==='LONG'?'var(--green)':'var(--red)'}">$${fmt(r.target)}</span></span>`:''}
-        ${r.untested?`<span class="tcp" style="color:var(--amber)">UNTESTED ●</span>`:''}
-      </div>`:''}
-    </div>`;
+    return`<div class="tfc ${cls}"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type ${r.type}">${tl}</span><span class="tfc-sig ${r.sig}" style="margin-left:auto">${r.sig}</span></div><div class="tfc-reason">${r.reason}</div>${r.level?`<div class="tfc-prices"><span class="tcp"><span class="tcp-l">LVL</span>$${fmt(r.level)}</span>${r.target?`<span class="tcp"><span class="tcp-l">TGT</span><span style="color:${r.sig==='LONG'?'#00e676':'#ff3d5a'}">$${fmt(r.target)}</span></span>`:''}${r.untested?`<span class="tcp" style="color:#ffc107">UNTESTED ●</span>`:''}</div>`:''}</div>`;
   }).join('');
 }
 
-function renderLevels() {
-  if(!allLevels.length){document.getElementById('lvl-list').innerHTML='<div style="padding:20px 16px;font-family:var(--mono);font-size:10px;color:var(--muted)">No significant levels detected</div>';return;}
+function renderLevels(){
+  if(!allLevels.length){document.getElementById('lvl-list').innerHTML='<div class="empty">No significant levels detected</div>';return;}
   document.getElementById('lvl-list').innerHTML=allLevels.map(l=>{
     const isR=l.price>price,dist=((l.price-price)/price*100).toFixed(2),cls=isR?'R':'S';
-    return `<div class="lvl-item ${!l.tested?'untested':''}">
-      <span class="lvl-badge ${cls}">${isR?'RES':'SUP'}</span>
-      <div class="lvl-info">
-        <div class="lvl-tf">${l.tf}${!l.tested?'<span class="lvl-untested-tag">● UNTESTED</span>':''}</div>
-      </div>
-      <div class="lvl-price-wrap">
-        <div class="lvl-price ${cls}">$${fmt(l.price)}</div>
-        <div class="lvl-dist">${dist>0?'+':''}${dist}%</div>
-      </div>
-    </div>`;
+    return`<div class="lvl-item${!l.tested?' untested':''}"><span class="lvl-badge ${cls}">${isR?'RES':'SUP'}</span><div class="lvl-info"><div class="lvl-tf">${l.tf}${!l.tested?'<span class="lvl-untag">● UNTESTED</span>':''}</div></div><div class="lvl-right"><div class="lvl-price ${cls}">$${fmt(l.price)}</div><div class="lvl-dist">${dist>0?'+':''}${dist}%</div></div></div>`;
   }).join('');
 }
 
-function addLog(signal, tf, reason, type) {
-  if(type==='NONE') return;
+function addLog(sig,tf,reason,type){
+  if(type==='NONE')return;
   const time=new Date().toTimeString().slice(0,5);
-  const cls=signal==='LONG'?'long':signal==='SHORT'?'short':'neutral';
-  const col=signal==='LONG'?'var(--green)':signal==='SHORT'?'var(--red)':'var(--amber)';
-  signalLog.unshift(`<div class="log-item ${cls}"><span class="log-time">${time}</span><span class="log-txt"><strong style="color:${col}">${signal}</strong> [${tf}] ${reason.slice(0,80)}</span></div>`);
-  if(signalLog.length>20) signalLog.pop();
-  document.getElementById('log-list').innerHTML=signalLog.join('');
+  const cls=sig==='LONG'?'long':sig==='SHORT'?'short':'neutral';
+  const col=sig==='LONG'?'#00e676':sig==='SHORT'?'#ff3d5a':'#ffc107';
+  log.unshift(`<div class="log-item ${cls}"><span class="log-time">${time}</span><span class="log-txt"><strong style="color:${col}">${sig}</strong> [${tf}] ${reason.slice(0,80)}</span></div>`);
+  if(log.length>20)log.pop();
+  document.getElementById('log-list').innerHTML=log.join('');
 }
 
-function setStatus(state, txt) {
-  document.getElementById('dot').className='dot '+state;
-  document.getElementById('status-txt').textContent=txt;
+function setStatus(s,t){
+  document.getElementById('dot').className='dot '+(s==='ok'?'ok':s==='err'?'err':'');
+  document.getElementById('status-txt').textContent=t;
 }
 
-// ═══════════════════════════════════════════════════════════
 // MAIN
-// ═══════════════════════════════════════════════════════════
-async function run() {
-  if(isRunning) return;
-  isRunning=true;
-  const fab=document.getElementById('refresh-fab');
-  fab.classList.add('spinning');
+async function run(){
+  if(running)return; running=true;
+  const fab=document.getElementById('fab');
+  fab.classList.add('spin');
   setStatus('loading','Fetching data...');
-
-  try {
-    const tickerData = await getPrice();
-    renderTopbar(tickerData);
-
-    const klineResults = await Promise.allSettled(TFS.map(tf => getCandles(tf)));
-
-    klineResults.forEach((res,i)=>{
-      if(res.status==='rejected'){console.warn(TFS[i].label, res.reason);return;}
-      const c=res.value, atr=calcATR(c), dmc=detectDMCSignal(c,atr);
-      results[TFS[i].label]=dmc;
-      if(dmc.type!=='NONE'&&dmc.type!=='AT_LEVEL') addLog(dmc.signal,TFS[i].label,dmc.reason,dmc.type);
+  try{
+    const td=await getPrice();
+    renderTop(td);
+    const kR=await Promise.allSettled(TFS.map(tf=>getCandles(tf)));
+    kR.forEach((res,i)=>{
+      if(res.status==='rejected'){console.warn(TFS[i].l,res.reason);return;}
+      const c=res.value,a=atr(c),d=dmc(c,a);
+      results[TFS[i].l]=d;
+      if(d.type!=='NONE'&&d.type!=='AT_LEVEL')addLog(d.sig,TFS[i].l,d.reason,d.type);
     });
-
-    const wK=klineResults[0].status==='fulfilled'?klineResults[0].value:null;
-    const dK=klineResults[1].status==='fulfilled'?klineResults[1].value:null;
-    if(wK&&dK){renderNextMove(detectNextMove(wK,dK));allLevels=collectLevels(wK,dK,tickerData.price);}
-
-    renderHero();
-    renderTFCards();
-    renderLevels();
-
+    const wK=kR[0].status==='fulfilled'?kR[0].value:null;
+    const dK=kR[1].status==='fulfilled'?kR[1].value:null;
+    if(wK&&dK){renderNM(nextMove(wK,dK));allLevels=collectLevels(wK,dK,td.price);}
+    renderHero(); renderCards(); renderLevels();
     const now=new Date().toTimeString().slice(0,8);
     setStatus('ok','Live · '+now);
     document.getElementById('last-upd').textContent=now;
-
-  } catch(e) {
+  }catch(e){
     console.error(e);
     setStatus('err',e.message.slice(0,50));
     addLog('NEUTRAL','SYS',e.message,'ERR');
   }
-
-  isRunning=false;
-  fab.classList.remove('spinning');
+  running=false;
+  fab.classList.remove('spin');
 }
-
 function manualRefresh(){clearTimeout(timer);run().then(schedule);}
 function schedule(){timer=setTimeout(()=>run().then(schedule),REFRESH);}
 
 window.addEventListener('DOMContentLoaded',()=>{
-  document.getElementById('tf-cards-wrap').innerHTML=TFS.map(tf=>`
-    <div class="tf-card none">
-      <div class="tf-card-head"><span class="tf-card-label">${tf.label}</span><span class="tf-card-type NONE">···</span><span class="tf-card-badge WAIT" style="margin-left:auto">—</span></div>
-      <div class="tf-card-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div>
-    </div>`).join('');
+  document.getElementById('tf-cards').innerHTML=TFS.map(tf=>`<div class="tfc none"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type NONE">···</span><span class="tfc-sig WAIT" style="margin-left:auto">—</span></div><div class="tfc-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div></div>`).join('');
   run().then(schedule);
 });
 </script>
