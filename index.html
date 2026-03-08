@@ -337,7 +337,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 'use strict';
 const COIN='bitcoin', CG='https://api.coingecko.com/api/v3', REFRESH=120000;
 const TFS=[{l:'1W',iv:'W',w:5},{l:'1D',iv:'D',w:4},{l:'4H',iv:'240',w:3},{l:'1H',iv:'60',w:2},{l:'15m',iv:'15',w:1}];
-let results={}, allLevels=[], sigLog=[], running=false, timer=null, price=0, tvLoaded=false;
+let results={}, allLevels=[], sigLog=[], running=false, timer=null, price=0, tvLoaded=false, htfDir='UNCLEAR';
 // Track sent alerts to avoid repeats
 let sentAlerts={};
 
@@ -766,107 +766,141 @@ function calcRR(entry, target, level){
 }
 
 // ── MAIN DMS SIGNAL ───────────────────────────────────────
-function dms(c, a, dCandles, tf){
+// Fixed bugs:
+// 1. Max lookback reduced: 2 bars for daily, 3 for intraday (stale traps discarded)
+// 2. Signal expiry: if price rallied/fell significantly since trap → invalidated
+// 3. Level reclaim check: if any candle between trap and now reclaimed the level → dead
+// 4. PDH/PDL excluded from 1W (only relevant on daily and below)
+
+function dms(c, a, dCandles, tf, htfBias){
   const n = c.length;
   const minCandles = (tf==='1W'||tf==='1D') ? 10 : 20;
   if(n < minCandles) return {sig:'NEUTRAL',type:'NONE',reason:'Insufficient data ('+n+' candles)'};
 
-  const levels = findDMCLevels(c, dCandles, tf);
+  // PDH/PDL only relevant on 1D and lower timeframes
+  const usePDHL = (tf !== '1W');
+  const levels = findDMCLevels(c, usePDHL ? dCandles : null, tf);
   const cur    = c[n-1];
-  const tol    = a * 0.12; // tolerance for "at level"
+  const tol    = a * 0.10;
 
-  // Sort by proximity to current price
+  // Fresh trap only — max lookback per timeframe:
+  // 1D: 2 days, 4H: 3 bars (12h), 1H: 3 bars (3h), 15m: 3 bars (45min)
+  const maxLB = (tf==='1D'||tf==='1W') ? 2 : 3;
+
   const nearby = levels
     .filter(l=>Math.abs(l.price-cur.c) < a*14)
     .sort((a,b)=>Math.abs(a.price-cur.c)-Math.abs(b.price-cur.c));
 
-  // ── FAIL TO GAIN (Short setup) ────────────────────────
-  // Pattern: candle wick exceeded resistance but BODY closed back below it
+  // ── HTF STORY FILTER ─────────────────────────────────
+  // Only trade WITH the HTF direction. Chris Hunter: "define the story on 1H/4H first."
+  // If HTF is UP  → only LONG signals (no shorts)
+  // If HTF is DOWN → only SHORT signals (no longs)
+  // If UNCLEAR    → allow both but mark as lower confidence
+  const htfBlockShort = (htfBias === 'UP');
+  const htfBlockLong  = (htfBias === 'DOWN');
+
+  // ── FAIL TO GAIN → SHORT ──────────────────────────────
   for(const lv of nearby.filter(l=>l.type==='resistance')){
-    for(let lb=1; lb<=5; lb++){
-      if(n-1-lb < 0) break;
-      const trap = c[n-1-lb]; // the trap candle
-      const confirm = c[n-1];  // current candle (confirming the failure)
-
-      // Trap candle: wick poked above the level, body closed BELOW it
-      const wickedThrough = trap.h > lv.price + (tol*0.3);
-      const bodyClosed    = trap.bh < lv.price + tol; // body below level
-      const stillBelow    = confirm.bh < lv.price + tol*2; // still below level
-      const notRecovered  = confirm.bh < lv.price; // hasn't reclaimed
-
-      if(wickedThrough && bodyClosed && stillBelow && notRecovered){
-        const tgt = findNextLevel(levels, confirm.c, 'short');
-        const rr  = calcRR(confirm.c, tgt.price, lv.price);
-        const dist = ((lv.price - confirm.c)/confirm.c*100).toFixed(2);
-        return {
-          sig: 'SHORT', type: 'FAIL_GAIN',
-          level: lv.price, target: tgt.price, rr,
-          strength: lv.strength, score: lv.score,
-          reason: `${lv.source} $${fmt(lv.price)} · ${dist}% above · Failed ${lb} bar${lb>1?'s':''} ago${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)} (${tgt.source})`,
-          detail: `Wick: $${fmt(trap.h)} | Body close: $${fmt(trap.bh)} | Resistance: $${fmt(lv.price)}`,
-          untested: !lv.tested
-        };
-      }
-    }
-  }
-
-  // ── FAIL TO LOSE (Long setup) ─────────────────────────
-  // Pattern: candle wick broke below support but BODY closed back above it
-  for(const lv of nearby.filter(l=>l.type==='support')){
-    for(let lb=1; lb<=5; lb++){
+    for(let lb=1; lb<=maxLB; lb++){
       if(n-1-lb < 0) break;
       const trap    = c[n-1-lb];
       const confirm = c[n-1];
 
-      const wickedThrough = trap.l < lv.price - (tol*0.3);
-      const bodyClosed    = trap.bl > lv.price - tol;
-      const stillAbove    = confirm.bl > lv.price - tol*2;
-      const notDropped    = confirm.bl > lv.price;
+      // The trap candle: wick exceeded resistance, body closed back below
+      const wickedThrough = trap.h  > lv.price + (tol*0.2);
+      const bodyBelow     = trap.bh < lv.price + tol;
+      if(!wickedThrough || !bodyBelow) continue;
 
-      if(wickedThrough && bodyClosed && stillAbove && notDropped){
-        const tgt = findNextLevel(levels, confirm.c, 'long');
-        const rr  = calcRR(confirm.c, tgt.price, lv.price);
-        const dist = ((confirm.c - lv.price)/confirm.c*100).toFixed(2);
-        return {
-          sig: 'LONG', type: 'FAIL_LOSE',
-          level: lv.price, target: tgt.price, rr,
-          strength: lv.strength, score: lv.score,
-          reason: `${lv.source} $${fmt(lv.price)} · ${dist}% below · Failed ${lb} bar${lb>1?'s':''} ago${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)} (${tgt.source})`,
-          detail: `Wick: $${fmt(trap.l)} | Body close: $${fmt(trap.bl)} | Support: $${fmt(lv.price)}`,
-          untested: !lv.tested
-        };
-      }
+      // Signal invalidation — any of these = trade is over, skip it:
+      // A) Price rallied more than 0.7 ATR above the trap body close
+      const priceRallied   = confirm.bh > trap.bh + a * 0.7;
+      // B) Any candle after the trap reclaimed the level (body closed above it)
+      const levelReclaimed = c.slice(n-lb, n).some(k => k.bh > lv.price);
+      // C) Current candle body is above the level
+      const currentAbove   = confirm.bh > lv.price;
+
+      if(priceRallied || levelReclaimed || currentAbove) continue;
+      if(htfBlockShort) continue; // HTF says UP — don't short against the trend
+
+      const tgt = findNextLevel(levels, confirm.c, 'short');
+      const rr  = calcRR(confirm.c, tgt.price, lv.price);
+      const dist = ((lv.price - confirm.c)/confirm.c*100).toFixed(2);
+      return {
+        sig:'SHORT', type:'FAIL_GAIN',
+        level:lv.price, target:tgt.price, rr,
+        strength:lv.strength, score:lv.score,
+        reason:`${lv.source} $${fmt(lv.price)} · ${dist}% above · ${lb===1?'just now':lb+' bars ago'}${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)}`,
+        detail:`Wick: $${fmt(trap.h)} | Body: $${fmt(trap.bh)} | Resistance: $${fmt(lv.price)}`,
+        untested:!lv.tested
+      };
     }
   }
 
-  // ── AT LEVEL — watching zone ──────────────────────────
-  // Price is within ATR distance of an untested level
+  // ── FAIL TO LOSE → LONG ───────────────────────────────
+  for(const lv of nearby.filter(l=>l.type==='support')){
+    for(let lb=1; lb<=maxLB; lb++){
+      if(n-1-lb < 0) break;
+      const trap    = c[n-1-lb];
+      const confirm = c[n-1];
+
+      const wickedThrough = trap.l  < lv.price - (tol*0.2);
+      const bodyAbove     = trap.bl > lv.price - tol;
+      if(!wickedThrough || !bodyAbove) continue;
+
+      // Invalidation
+      const priceDropped   = confirm.bl < trap.bl - a * 0.7;
+      const levelReclaimed = c.slice(n-lb, n).some(k => k.bl < lv.price);
+      const currentBelow   = confirm.bl < lv.price;
+
+      if(priceDropped || levelReclaimed || currentBelow) continue;
+      if(htfBlockLong) continue; // HTF says DOWN — don't long against the trend
+
+      const tgt = findNextLevel(levels, confirm.c, 'long');
+      const rr  = calcRR(confirm.c, tgt.price, lv.price);
+      const dist = ((confirm.c - lv.price)/confirm.c*100).toFixed(2);
+      return {
+        sig:'LONG', type:'FAIL_LOSE',
+        level:lv.price, target:tgt.price, rr,
+        strength:lv.strength, score:lv.score,
+        reason:`${lv.source} $${fmt(lv.price)} · ${dist}% below · ${lb===1?'just now':lb+' bars ago'}${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)}`,
+        detail:`Wick: $${fmt(trap.l)} | Body: $${fmt(trap.bl)} | Support: $${fmt(lv.price)}`,
+        untested:!lv.tested
+      };
+    }
+  }
+
+  // ── AT LEVEL ─────────────────────────────────────────
   const atLevel = nearby.find(l=>
-    Math.abs(l.price-cur.c) < a * 1.5 &&
-    l.score >= 20
+    Math.abs(l.price-cur.c) < a * 1.5 && l.score >= 20
   );
   if(atLevel){
-    const dir = atLevel.type==='resistance' ? 'APPROACHING · no trap yet' : 'APPROACHING · no trap yet';
+    const dir = atLevel.type==='resistance'
+      ? 'RESISTANCE — watch for 15m wick + body close back below'
+      : 'SUPPORT — watch for 15m wick + body close back above';
     const dist = ((atLevel.price - cur.c)/cur.c*100).toFixed(2);
+    const blockedNote = (atLevel.type==='resistance' && htfBias==='UP')
+      ? ' · HTF UP — short would be counter-trend'
+      : (atLevel.type==='support' && htfBias==='DOWN')
+        ? ' · HTF DOWN — long would be counter-trend'
+        : '';
     return {
-      sig: 'NEUTRAL', type: 'AT_LEVEL',
-      level: atLevel.price, target: null,
-      strength: atLevel.strength, score: atLevel.score,
-      reason: `${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · ${dir}`,
-      detail: `Score: ${atLevel.score} · ${atLevel.strength} level · ${atLevel.tested?'tested':'UNTESTED'}`,
-      untested: !atLevel.tested
+      sig:'NEUTRAL', type:'AT_LEVEL',
+      level:atLevel.price, target:null,
+      strength:atLevel.strength, score:atLevel.score,
+      reason:`${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · ${dir}${blockedNote}`,
+      detail:`Score: ${atLevel.score} · ${atLevel.strength} · ${atLevel.tested?'tested':'UNTESTED'}`,
+      untested:!atLevel.tested
     };
   }
 
   // ── NO SETUP ─────────────────────────────────────────
-  // Show nearest levels as context
   const nearest = nearby.slice(0,2);
   const ctx = nearest.map(l=>`${l.type==='resistance'?'R':'S'} $${fmt(l.price)}`).join(' / ') || '—';
   return {
-    sig: 'NEUTRAL', type: 'NONE',
-    level: null, target: null,
-    reason: `Between levels — nearest: ${ctx}`,
-    detail: 'Wait for price to reach a key level'
+    sig:'NEUTRAL', type:'NONE',
+    level:null, target:null,
+    reason:`Between levels — nearest: ${ctx}`,
+    detail:'Wait for price to reach a key level'
   };
 }
 
@@ -1010,7 +1044,7 @@ function setStatus(s,t){
 function processTF(i, candles, dCandles){
   const tf = TFS[i];
   const a = atr(candles);
-  const d = dms(candles, a, dCandles, tf.l);
+  const d = dms(candles, a, dCandles, tf.l, htfDir);
   results[tf.l] = d;
   if(d.type!=='NONE'){
     maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr);
@@ -1048,12 +1082,12 @@ async function run(){
     const results2 = await Promise.all(fetches);
     const wEntry = results2.find(r=>r.i===0);
     if(wEntry?.c && dCandles){
-      renderNM(nextMove(wEntry.c, dCandles));
+      const nm=nextMove(wEntry.c, dCandles); htfDir=nm.dir; renderNM(nm);
       allLevels = collectLevels(wEntry.c, dCandles, td.price);
       renderLevels();
     } else if(dCandles){
       // Fallback: use daily-only for NM and levels
-      renderNM(nextMove(dCandles, dCandles));
+      const nmFb=nextMove(dCandles, dCandles); htfDir=nmFb.dir; renderNM(nmFb);
       allLevels = collectLevels(dCandles, dCandles, td.price);
       renderLevels();
     }
