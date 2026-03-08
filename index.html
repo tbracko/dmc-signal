@@ -12,21 +12,19 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{background:#07090d;color:#dce8f5;font-family:'Sora',system-ui,sans-serif;min-height:100%;-webkit-text-size-adjust:100%}
 body{padding-bottom:calc(68px + env(safe-area-inset-bottom,0px));overflow-x:hidden}
-
-/* GRID BG */
-body::before{content:’’;position:fixed;inset:0;background-image:linear-gradient(rgba(0,230,118,.015) 1px,transparent 1px),linear-gradient(90deg,rgba(0,230,118,.015) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0}
+body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,230,118,.015) 1px,transparent 1px),linear-gradient(90deg,rgba(0,230,118,.015) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0}
 
 /* TOP BAR */
-.topbar{position:sticky;top:0;z-index:100;background:#07090dF5;border-bottom:1px solid #1a2230;padding:calc(env(safe-area-inset-top,0px) + 10px) 16px 10px;display:flex;align-items:center;gap:10px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.topbar{position:sticky;top:0;z-index:100;background:#07090df5;border-bottom:1px solid #1a2230;padding:calc(env(safe-area-inset-top,0px) + 10px) 16px 10px;display:flex;align-items:center;gap:10px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
 .brand{font-family:‘Bebas Neue’,sans-serif;font-size:24px;letter-spacing:.1em;color:#00e676;line-height:1;flex-shrink:0}
-.pair{font-family:‘IBM Plex Mono’,monospace;font-size:10px;color:#5d7a99;background:#10151c;border:1px solid #1a2230;padding:3px 8px;border-radius:4px;letter-spacing:.06em}
+.pair{font-family:‘IBM Plex Mono’,monospace;font-size:10px;color:#5d7a99;background:#10151c;border:1px solid #1a2230;padding:3px 8px;border-radius:4px}
 .topbar-r{margin-left:auto;display:flex;align-items:center;gap:8px}
 #tb-price{font-family:‘IBM Plex Mono’,monospace;font-size:16px;font-weight:600;color:#dce8f5}
 #tb-chg{font-family:‘IBM Plex Mono’,monospace;font-size:11px;padding:3px 7px;border-radius:4px;display:none}
 .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:#ffc107}
-.dot.ok{background:#00e676;animation:pulse 2s infinite}
-.dot.err{background:#ff3d5a;animation:none}
-@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(0,230,118,.5)}50%{box-shadow:0 0 0 5px rgba(0,230,118,0)}}
+.dot.ok{background:#00e676;animation:dpulse 2s infinite}
+.dot.err{background:#ff3d5a}
+@keyframes dpulse{0%,100%{box-shadow:0 0 0 0 rgba(0,230,118,.5)}50%{box-shadow:0 0 0 5px rgba(0,230,118,0)}}
 
 /* STATUS */
 .statusbar{display:flex;align-items:center;gap:6px;padding:5px 16px;border-bottom:1px solid #1a2230;background:#0c0f14}
@@ -37,7 +35,7 @@ body::before{content:’’;position:fixed;inset:0;background-image:linear-gradi
 .page{display:none;position:relative;z-index:1}
 .page.active{display:block}
 
-/* HERO CARD */
+/* HERO */
 .hero{margin:14px 16px;border-radius:14px;padding:20px 18px;border:1px solid #243040;background:#10151c;position:relative;overflow:hidden;transition:background .4s,border-color .4s}
 .hero.long{background:#001f0e;border-color:rgba(0,230,118,.3)}
 .hero.short{background:#1a0008;border-color:rgba(255,61,90,.3)}
@@ -53,20 +51,18 @@ body::before{content:’’;position:fixed;inset:0;background-image:linear-gradi
 .hero.neutral .hero-dir{color:#ffc107}
 .hero-meta{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px;padding-top:4px;flex-shrink:0}
 .hero-tfs{font-family:‘IBM Plex Mono’,monospace;font-size:10px;color:#5d7a99;white-space:nowrap}
-.hero-conf{font-family:‘IBM Plex Mono’,monospace;font-size:10px;font-weight:600;padding:3px 8px;border-radius:5px;border:1px solid #243040;background:#0c0f14;color:#dce8f5;white-space:nowrap}
+.hero-conf{font-family:‘IBM Plex Mono’,monospace;font-size:11px;font-weight:600;padding:3px 9px;border-radius:5px;border:1px solid #243040;background:#0c0f14;color:#dce8f5;white-space:nowrap}
 .hero-conf.high{background:rgba(0,230,118,.12);border-color:rgba(0,230,118,.3);color:#00e676}
 .hero-conf.med{background:rgba(255,193,7,.1);border-color:rgba(255,193,7,.3);color:#ffc107}
-.hero-reason{font-family:‘IBM Plex Mono’,monospace;font-size:10px;color:#5d7a99;line-height:1.6;border-top:1px solid #1a2230;padding-top:10px;margin-top:2px}
+.hero-conflbl{font-family:‘IBM Plex Mono’,monospace;font-size:8px;letter-spacing:.15em;color:#3d5068;text-transform:uppercase}
+.hero-reason{font-family:‘IBM Plex Mono’,monospace;font-size:10px;color:#5d7a99;line-height:1.6;border-top:1px solid #1a2230;padding-top:10px}
 
 /* NEXT MOVE */
-.nm-card{margin:0 16px 14px;border-radius:10px;background:#0c0f14;border:1px solid #1a2230;padding:14px 16px;display:flex;align-items:center;gap:14px}
-.nm-left{flex:1}
+.nm-card{margin:0 16px 14px;border-radius:10px;background:#0c0f14;border:1px solid #1a2230;padding:14px 16px}
 .nm-lbl{font-family:‘IBM Plex Mono’,monospace;font-size:8px;letter-spacing:.2em;text-transform:uppercase;color:#3d5068;margin-bottom:4px}
-.nm-sub{font-family:‘IBM Plex Mono’,monospace;font-size:9px;color:#3d5068;line-height:1.5;margin-top:4px}
 .nm-val{font-family:‘Bebas Neue’,sans-serif;font-size:36px;letter-spacing:.06em;line-height:1;color:#5d7a99}
-.nm-val.UP{color:#00e676}
-.nm-val.DOWN{color:#ff3d5a}
-.nm-val.UNCLEAR{color:#ffc107}
+.nm-val.UP{color:#00e676}.nm-val.DOWN{color:#ff3d5a}.nm-val.UNCLEAR{color:#ffc107}
+.nm-sub{font-family:‘IBM Plex Mono’,monospace;font-size:9px;color:#3d5068;line-height:1.5;margin-top:4px}
 
 /* SECTION HEADER */
 .sh{padding:12px 16px 8px;font-family:‘IBM Plex Mono’,monospace;font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:#3d5068;display:flex;align-items:center;gap:6px}
@@ -80,7 +76,7 @@ body::before{content:’’;position:fixed;inset:0;background-image:linear-gradi
 .tfc.short::before{background:#ff3d5a}
 .tfc.neutral::before{background:#ffc107}
 .tfc-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
-.tfc-tf{font-family:‘IBM Plex Mono’,monospace;font-size:13px;font-weight:600;color:#dce8f5;min-width:30px}
+.tfc-tf{font-family:‘IBM Plex Mono’,monospace;font-size:13px;font-weight:600;color:#dce8f5;min-width:32px}
 .tfc-type{font-family:‘IBM Plex Mono’,monospace;font-size:9px;font-weight:700;letter-spacing:.07em;padding:3px 8px;border-radius:4px;white-space:nowrap}
 .tfc-type.FAIL_GAIN{background:rgba(255,61,90,.12);color:#ff3d5a;border:1px solid rgba(255,61,90,.25)}
 .tfc-type.FAIL_LOSE{background:rgba(0,230,118,.1);color:#00e676;border:1px solid rgba(0,230,118,.22)}
@@ -89,11 +85,11 @@ body::before{content:’’;position:fixed;inset:0;background-image:linear-gradi
 .tfc-sig{margin-left:auto;font-family:‘IBM Plex Mono’,monospace;font-size:13px;font-weight:700}
 .tfc-sig.LONG{color:#00e676}.tfc-sig.SHORT{color:#ff3d5a}.tfc-sig.NEUTRAL{color:#ffc107}.tfc-sig.WAIT{color:#3d5068}
 .tfc-reason{font-family:‘IBM Plex Mono’,monospace;font-size:9px;color:#5d7a99;line-height:1.55}
-.tfc-prices{display:flex;gap:14px;margin-top:8px;padding-top:8px;border-top:1px solid #1a2230}
+.tfc-prices{display:flex;gap:14px;margin-top:8px;padding-top:8px;border-top:1px solid #1a2230;flex-wrap:wrap}
 .tcp{font-family:‘IBM Plex Mono’,monospace;font-size:9px}
 .tcp-l{color:#3d5068;margin-right:4px}
 
-/* TF TAB BAR (chart) */
+/* TF TAB BAR */
 .tf-bar{display:flex;gap:6px;padding:10px 16px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid #1a2230;background:#0c0f14}
 .tf-bar::-webkit-scrollbar{display:none}
 .tf-btn{flex-shrink:0;font-family:‘IBM Plex Mono’,monospace;font-size:12px;font-weight:600;padding:8px 16px;border-radius:7px;border:1px solid #1a2230;background:transparent;color:#5d7a99;cursor:pointer;transition:all .15s;letter-spacing:.05em}
@@ -114,8 +110,7 @@ body::before{content:’’;position:fixed;inset:0;background-image:linear-gradi
 .lvl-untag{font-family:‘IBM Plex Mono’,monospace;font-size:8px;color:#ffc107;margin-left:5px}
 .lvl-right{text-align:right}
 .lvl-price{font-family:‘IBM Plex Mono’,monospace;font-size:14px;font-weight:600}
-.lvl-price.R{color:#ff3d5a}
-.lvl-price.S{color:#00e676}
+.lvl-price.R{color:#ff3d5a}.lvl-price.S{color:#00e676}
 .lvl-dist{font-family:‘IBM Plex Mono’,monospace;font-size:9px;color:#3d5068;margin-top:2px}
 
 /* LOG */
@@ -126,30 +121,71 @@ body::before{content:’’;position:fixed;inset:0;background-image:linear-gradi
 .log-time{font-family:‘IBM Plex Mono’,monospace;font-size:9px;color:#3d5068;flex-shrink:0;padding-top:1px;min-width:36px}
 .log-txt{font-family:‘IBM Plex Mono’,monospace;font-size:10px;color:#5d7a99;line-height:1.5}
 
+/* CHECKLIST */
+.cl-step{padding:16px;border-bottom:1px solid #1a2230;display:flex;gap:14px;align-items:flex-start}
+.cl-num{width:28px;height:28px;border-radius:50%;border:1px solid #243040;background:#0c0f14;display:flex;align-items:center;justify-content:center;font-family:‘IBM Plex Mono’,monospace;font-size:11px;font-weight:600;color:#3d5068;flex-shrink:0;transition:all .3s}
+.cl-num.active{background:#ffc107;border-color:#ffc107;color:#07090d}
+.cl-num.done{background:#00e676;border-color:#00e676;color:#07090d}
+.cl-body{flex:1}
+.cl-action{font-family:‘IBM Plex Mono’,monospace;font-size:11px;font-weight:600;color:#dce8f5;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px}
+.cl-desc{font-family:‘Sora’,sans-serif;font-size:12px;color:#5d7a99;line-height:1.55}
+.cl-answer{margin-top:10px;display:flex;gap:8px}
+.cl-btn{font-family:‘IBM Plex Mono’,monospace;font-size:10px;padding:7px 14px;border-radius:6px;border:1px solid #243040;background:#0c0f14;color:#5d7a99;cursor:pointer;transition:all .2s;letter-spacing:.05em}
+.cl-btn:active{transform:scale(.95)}
+.cl-btn.yes{border-color:rgba(0,230,118,.4);color:#00e676}
+.cl-btn.no{border-color:rgba(255,61,90,.4);color:#ff3d5a}
+.cl-btn.selected-yes{background:rgba(0,230,118,.15);border-color:#00e676;color:#00e676}
+.cl-btn.selected-no{background:rgba(255,61,90,.15);border-color:#ff3d5a;color:#ff3d5a}
+.cl-result{margin:14px 16px;padding:16px;border-radius:10px;border:1px solid #1a2230;background:#0c0f14;font-family:‘IBM Plex Mono’,monospace;font-size:11px;display:none}
+.cl-result.show{display:block}
+.cl-result.enter{background:rgba(0,230,118,.08);border-color:rgba(0,230,118,.3);color:#00e676}
+.cl-result.wait{background:rgba(255,193,7,.06);border-color:rgba(255,193,7,.25);color:#ffc107}
+.cl-result.skip{background:rgba(255,61,90,.08);border-color:rgba(255,61,90,.3);color:#ff3d5a}
+.cl-reset{display:block;margin:0 16px 20px;font-family:‘IBM Plex Mono’,monospace;font-size:10px;padding:10px;border-radius:7px;border:1px solid #243040;background:#0c0f14;color:#3d5068;cursor:pointer;text-align:center;letter-spacing:.08em;width:calc(100% - 32px)}
+
+/* SETTINGS */
+.setting-row{padding:16px;border-bottom:1px solid #1a2230}
+.setting-lbl{font-family:‘IBM Plex Mono’,monospace;font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:#3d5068;margin-bottom:8px}
+.setting-desc{font-family:‘Sora’,sans-serif;font-size:11px;color:#5d7a99;line-height:1.5;margin-bottom:10px}
+.setting-input{width:100%;background:#0c0f14;border:1px solid #243040;border-radius:7px;padding:10px 12px;font-family:‘IBM Plex Mono’,monospace;font-size:12px;color:#dce8f5;outline:none;transition:border-color .2s}
+.setting-input:focus{border-color:#00e676}
+.setting-input::placeholder{color:#3d5068}
+.setting-save{margin-top:8px;font-family:‘IBM Plex Mono’,monospace;font-size:10px;padding:9px 16px;border-radius:6px;border:1px solid rgba(0,230,118,.35);background:rgba(0,230,118,.1);color:#00e676;cursor:pointer;letter-spacing:.07em;transition:all .2s}
+.setting-save:active{transform:scale(.96)}
+.setting-status{font-family:‘IBM Plex Mono’,monospace;font-size:9px;color:#3d5068;margin-top:6px}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.toggle{position:relative;width:44px;height:26px;flex-shrink:0}
+.toggle input{opacity:0;width:0;height:0;position:absolute}
+.toggle-slider{position:absolute;inset:0;background:#1a2230;border-radius:13px;cursor:pointer;transition:.3s}
+.toggle-slider::before{content:’’;position:absolute;width:20px;height:20px;left:3px;top:3px;background:#3d5068;border-radius:50%;transition:.3s}
+.toggle input:checked+.toggle-slider{background:rgba(0,230,118,.25);border:1px solid rgba(0,230,118,.5)}
+.toggle input:checked+.toggle-slider::before{transform:translateX(18px);background:#00e676}
+
 /* BOTTOM NAV */
-.bnav{position:fixed;bottom:0;left:0;right:0;z-index:200;background:#07090dF5;border-top:1px solid #1a2230;display:flex;padding-bottom:env(safe-area-inset-bottom,0px);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
-.nb{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:10px 4px 12px;font-family:‘IBM Plex Mono’,monospace;font-size:9px;letter-spacing:.07em;color:#3d5068;background:none;border:none;cursor:pointer;transition:color .2s;text-transform:uppercase}
+.bnav{position:fixed;bottom:0;left:0;right:0;z-index:200;background:#07090df5;border-top:1px solid #1a2230;display:flex;padding-bottom:env(safe-area-inset-bottom,0px);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.nb{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:10px 4px 12px;font-family:‘IBM Plex Mono’,monospace;font-size:8px;letter-spacing:.06em;color:#3d5068;background:none;border:none;cursor:pointer;transition:color .2s;text-transform:uppercase}
 .nb.active{color:#00e676}
-.nb svg{width:21px;height:21px;stroke-width:1.5;flex-shrink:0}
+.nb svg{width:20px;height:20px;stroke-width:1.5;flex-shrink:0}
 
-/* REFRESH FAB */
-.fab{position:fixed;bottom:calc(80px + env(safe-area-inset-bottom,0px));right:16px;z-index:150;width:44px;height:44px;border-radius:50%;background:#10151c;border:1px solid #243040;color:#5d7a99;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(0,0,0,.5);transition:transform .15s,color .15s}
+/* FAB */
+.fab{position:fixed;bottom:calc(80px + env(safe-area-inset-bottom,0px));right:16px;z-index:150;width:44px;height:44px;border-radius:50%;background:#10151c;border:1px solid #243040;color:#5d7a99;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(0,0,0,.5);transition:transform .15s}
 .fab:active{transform:scale(.88)}
-.fab.spin{animation:spin 1s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
+.fab.spin{animation:fspin 1s linear infinite}
+@keyframes fspin{to{transform:rotate(360deg)}}
 
-/* SKEL */
+/* SKEL / EMPTY */
 .skel{background:linear-gradient(90deg,#1a2230 25%,#243040 50%,#1a2230 75%);background-size:200% 100%;animation:skel 1.5s infinite;border-radius:3px;display:inline-block}
 @keyframes skel{0%{background-position:200% center}100%{background-position:-200% center}}
-
-/* EMPTY */
 .empty{padding:24px 16px;font-family:‘IBM Plex Mono’,monospace;font-size:10px;color:#3d5068;text-align:center}
+
+/* ALERT TOAST */
+.toast{position:fixed;top:80px;left:16px;right:16px;z-index:300;background:#0c0f14;border:1px solid #00e676;border-radius:10px;padding:14px 16px;font-family:‘IBM Plex Mono’,monospace;font-size:11px;color:#00e676;box-shadow:0 8px 32px rgba(0,0,0,.6);transform:translateY(-20px);opacity:0;transition:all .3s;pointer-events:none}
+.toast.show{transform:translateY(0);opacity:1}
+.toast.short-alert{border-color:#ff3d5a;color:#ff3d5a}
 </style>
 
 </head>
 <body>
-
-<!-- TOP BAR -->
 
 <div class="topbar">
   <span class="brand">DMC ⚡</span>
@@ -160,41 +196,37 @@ body::before{content:’’;position:fixed;inset:0;background-image:linear-gradi
     <span class="dot" id="dot"></span>
   </div>
 </div>
-
-<!-- STATUS -->
-
 <div class="statusbar">
   <span id="status-txt">Connecting...</span>
   <span id="last-upd"></span>
 </div>
 
+<!-- TOAST -->
+
+<div class="toast" id="toast"></div>
+
 <!-- PAGE: SIGNAL -->
 
 <div class="page active" id="page-signal">
-
   <div class="hero wait" id="hero">
     <div class="hero-glow"></div>
     <div class="hero-top">
       <div class="hero-dir" id="hero-dir">—</div>
       <div class="hero-meta">
         <div class="hero-tfs" id="hero-tfs">0 / 5 TFs</div>
-        <div class="hero-conf" id="hero-conf">LOADING</div>
+        <div class="hero-conf" id="hero-conf">—</div>
+        <div class="hero-conflbl" id="hero-conflbl">confidence</div>
       </div>
     </div>
     <div class="hero-reason" id="hero-reason">Fetching candle data...</div>
   </div>
-
   <div class="nm-card">
-    <div class="nm-left">
-      <div class="nm-lbl">Next Major Move · HTF</div>
-      <div class="nm-val UNCLEAR" id="nm-val">—</div>
-      <div class="nm-sub" id="nm-sub">Analysing weekly + daily bodies...</div>
-    </div>
+    <div class="nm-lbl">Next Major Move · HTF</div>
+    <div class="nm-val UNCLEAR" id="nm-val">—</div>
+    <div class="nm-sub" id="nm-sub">Analysing weekly + daily bodies...</div>
   </div>
-
   <div class="sh">Timeframe Breakdown</div>
   <div class="tf-cards" id="tf-cards"></div>
-
 </div>
 
 <!-- PAGE: CHART -->
@@ -213,11 +245,159 @@ body::before{content:’’;position:fixed;inset:0;background-image:linear-gradi
 <!-- PAGE: LEVELS -->
 
 <div class="page" id="page-levels">
-  <div class="sh">Key Levels · Untested Candle Bodies</div>
+  <div class="sh">Key Levels · H1 + Daily (PDH/PDL + V-Peaks)</div>
   <div id="lvl-list"><div class="empty">Loading levels...</div></div>
 </div>
 
-<!-- PAGE: LOG -->
+<!-- PAGE: CHECKLIST -->
+
+<div class="page" id="page-checklist">
+  <div class="sh">DMC Trade Checklist · Chris Hunter</div>
+
+  <div class="cl-step" id="cl-1">
+    <div class="cl-num active" id="cn-1">1</div>
+    <div class="cl-body">
+      <div class="cl-action">Scan</div>
+      <div class="cl-desc">Identify the 2 most obvious levels on H1 or Daily. Look for V-peaks (sharp reversals), Previous Day High/Low. If you have to squint, it's not a DMC level.</div>
+      <div class="cl-answer">
+        <button class="cl-btn yes" onclick="clAnswer(1,'yes')">Level found ✓</button>
+        <button class="cl-btn no" onclick="clAnswer(1,'no')">No clear level</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="cl-step" id="cl-2" style="opacity:.35">
+    <div class="cl-num" id="cn-2">2</div>
+    <div class="cl-body">
+      <div class="cl-action">Wait</div>
+      <div class="cl-desc">Do nothing until price touches one of those levels. Do not enter early. Patience is the edge.</div>
+      <div class="cl-answer">
+        <button class="cl-btn yes" onclick="clAnswer(2,'yes')">Price at level ✓</button>
+        <button class="cl-btn no" onclick="clAnswer(2,'no')">Not there yet</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="cl-step" id="cl-3" style="opacity:.35">
+    <div class="cl-num" id="cn-3">3</div>
+    <div class="cl-body">
+      <div class="cl-action">Observe</div>
+      <div class="cl-desc">Watch the 15m candle. Did it wick through the level but close back inside? That is The Trap — the only candle that matters.</div>
+      <div class="cl-answer">
+        <button class="cl-btn yes" onclick="clAnswer(3,'yes')">15m closed back inside ✓</button>
+        <button class="cl-btn no" onclick="clAnswer(3,'no')">Closed through level</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="cl-step" id="cl-4" style="opacity:.35">
+    <div class="cl-num" id="cn-4">4</div>
+    <div class="cl-body">
+      <div class="cl-action">Enter</div>
+      <div class="cl-desc">Market order immediately at the close of that 15m trap candle. No limit orders. Enter in the direction of the fake-out rejection.</div>
+      <div class="cl-answer">
+        <button class="cl-btn yes" onclick="clAnswer(4,'yes')">Entered ✓</button>
+        <button class="cl-btn no" onclick="clAnswer(4,'no')">Missed it</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="cl-step" id="cl-5" style="opacity:.35">
+    <div class="cl-num" id="cn-5">5</div>
+    <div class="cl-body">
+      <div class="cl-action">Target</div>
+      <div class="cl-desc">Target = the next obvious level in the opposite direction. Exit manually if a 15m candle closes decisively against your trade.</div>
+      <div class="cl-answer">
+        <button class="cl-btn yes" onclick="clAnswer(5,'yes')">Target set ✓</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="cl-result" id="cl-result"></div>
+  <button class="cl-reset" onclick="clReset()">↺ RESET CHECKLIST</button>
+</div>
+
+<!-- PAGE: SETTINGS -->
+
+<div class="page" id="page-settings">
+  <div class="sh">Notifications · Telegram</div>
+
+  <div class="setting-row">
+    <div class="setting-lbl">Setup Guide</div>
+    <div class="setting-desc">
+      1. Open Telegram → search <strong style="color:#dce8f5">@BotFather</strong><br>
+      2. Send <strong style="color:#dce8f5">/newbot</strong> → follow prompts → copy the token<br>
+      3. Search <strong style="color:#dce8f5">@userinfobot</strong> → send /start → copy your Chat ID<br>
+      4. Paste both below and tap Save
+    </div>
+  </div>
+
+  <div class="setting-row">
+    <div class="setting-lbl">Bot Token</div>
+    <input class="setting-input" id="tg-token" type="text" placeholder="1234567890:AAFxyz..." autocomplete="off" autocorrect="off" spellcheck="false">
+  </div>
+
+  <div class="setting-row">
+    <div class="setting-lbl">Your Chat ID</div>
+    <input class="setting-input" id="tg-chatid" type="text" placeholder="123456789" autocomplete="off" autocorrect="off" spellcheck="false">
+    <button class="setting-save" onclick="saveTelegram()">SAVE &amp; TEST</button>
+    <div class="setting-status" id="tg-status"></div>
+  </div>
+
+  <div class="setting-row">
+    <div class="setting-lbl">Alert Settings</div>
+    <div style="display:flex;flex-direction:column;gap:12px;margin-top:4px">
+
+```
+  <div class="toggle-row">
+    <div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:2px">FAIL TO GAIN (Short signal)</div>
+      <div style="font-family:'Sora',sans-serif;font-size:11px;color:#3d5068">Send alert when short setup fires</div>
+    </div>
+    <label class="toggle"><input type="checkbox" id="alert-short" checked><span class="toggle-slider"></span></label>
+  </div>
+
+  <div class="toggle-row">
+    <div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:2px">FAIL TO LOSE (Long signal)</div>
+      <div style="font-family:'Sora',sans-serif;font-size:11px;color:#3d5068">Send alert when long setup fires</div>
+    </div>
+    <label class="toggle"><input type="checkbox" id="alert-long" checked><span class="toggle-slider"></span></label>
+  </div>
+
+  <div class="toggle-row">
+    <div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:2px">AT LEVEL (Watch zone)</div>
+      <div style="font-family:'Sora',sans-serif;font-size:11px;color:#3d5068">Send alert when price reaches a key level</div>
+    </div>
+    <label class="toggle"><input type="checkbox" id="alert-atlevel"><span class="toggle-slider"></span></label>
+  </div>
+
+  <div class="toggle-row">
+    <div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:2px">H1 + Daily only</div>
+      <div style="font-family:'Sora',sans-serif;font-size:11px;color:#3d5068">Only alert on H1 and Daily signals (no noise from 15m/1H)</div>
+    </div>
+    <label class="toggle"><input type="checkbox" id="alert-htfonly" checked><span class="toggle-slider"></span></label>
+  </div>
+</div>
+```
+
+  </div>
+
+  <div class="setting-row">
+    <div class="setting-lbl">In-App Alerts</div>
+    <div class="toggle-row">
+      <div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:2px">Visual toast notifications</div>
+        <div style="font-family:'Sora',sans-serif;font-size:11px;color:#3d5068">Show banner in app when signal fires</div>
+      </div>
+      <label class="toggle"><input type="checkbox" id="alert-toast" checked><span class="toggle-slider"></span></label>
+    </div>
+  </div>
+</div>
+
+<!-- LOG PAGE -->
 
 <div class="page" id="page-log">
   <div class="sh">Signal Log</div>
@@ -226,11 +406,7 @@ body::before{content:’’;position:fixed;inset:0;background-image:linear-gradi
   </div>
 </div>
 
-<!-- FAB -->
-
 <button class="fab" id="fab" onclick="manualRefresh()">↻</button>
-
-<!-- BOTTOM NAV -->
 
 <nav class="bnav">
   <button class="nb active" onclick="nav('signal',this)">
@@ -242,8 +418,11 @@ body::before{content:’’;position:fixed;inset:0;background-image:linear-gradi
   <button class="nb" onclick="nav('levels',this)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>Levels
   </button>
-  <button class="nb" onclick="nav('log',this)">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>Log
+  <button class="nb" onclick="nav('checklist',this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Check
+  </button>
+  <button class="nb" onclick="nav('settings',this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Alerts
   </button>
 </nav>
 
@@ -251,10 +430,94 @@ body::before{content:’’;position:fixed;inset:0;background-image:linear-gradi
 'use strict';
 const COIN='bitcoin', CG='https://api.coingecko.com/api/v3', REFRESH=120000;
 const TFS=[{l:'1W',iv:'W',w:5},{l:'1D',iv:'D',w:4},{l:'4H',iv:'240',w:3},{l:'1H',iv:'60',w:2},{l:'15m',iv:'15',w:1}];
-let results={}, allLevels=[], log=[], running=false, timer=null, price=0, tvLoaded=false;
+let results={}, allLevels=[], sigLog=[], running=false, timer=null, price=0, tvLoaded=false;
+// Track sent alerts to avoid repeats
+let sentAlerts={};
 
-// NAV
-function nav(id, btn) {
+// ── SETTINGS ──────────────────────────────────────────────
+function loadSettings(){
+  document.getElementById('tg-token').value  = localStorage.getItem('tg_token')||'';
+  document.getElementById('tg-chatid').value = localStorage.getItem('tg_chatid')||'';
+  document.getElementById('alert-short').checked   = localStorage.getItem('alert_short')!=='false';
+  document.getElementById('alert-long').checked    = localStorage.getItem('alert_long')!=='false';
+  document.getElementById('alert-atlevel').checked = localStorage.getItem('alert_atlevel')==='true';
+  document.getElementById('alert-htfonly').checked = localStorage.getItem('alert_htfonly')!=='false';
+  document.getElementById('alert-toast').checked   = localStorage.getItem('alert_toast')!=='false';
+}
+function saveTelegram(){
+  const token  = document.getElementById('tg-token').value.trim();
+  const chatid = document.getElementById('tg-chatid').value.trim();
+  if(!token||!chatid){document.getElementById('tg-status').textContent='⚠ Please enter both token and chat ID';return;}
+  localStorage.setItem('tg_token', token);
+  localStorage.setItem('tg_chatid', chatid);
+  localStorage.setItem('alert_short',  document.getElementById('alert-short').checked);
+  localStorage.setItem('alert_long',   document.getElementById('alert-long').checked);
+  localStorage.setItem('alert_atlevel',document.getElementById('alert-atlevel').checked);
+  localStorage.setItem('alert_htfonly',document.getElementById('alert-htfonly').checked);
+  localStorage.setItem('alert_toast',  document.getElementById('alert-toast').checked);
+  document.getElementById('tg-status').textContent='Saving...';
+  sendTelegram('✅ DMC Signal alerts are active!\ntbracko.github.io/dmc-signal').then(ok=>{
+    document.getElementById('tg-status').textContent = ok ? '✓ Test message sent! Check Telegram.' : '✗ Failed — check token and chat ID';
+  });
+}
+
+// ── TELEGRAM ──────────────────────────────────────────────
+async function sendTelegram(msg){
+  const token  = localStorage.getItem('tg_token');
+  const chatid = localStorage.getItem('tg_chatid');
+  if(!token||!chatid) return false;
+  try{
+    const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({chat_id:chatid, text:msg, parse_mode:'HTML'})
+    });
+    return r.ok;
+  }catch{return false;}
+}
+
+function maybeAlert(sig, tf, type, level, target){
+  const alertKey = `${tf}_${type}_${Math.round(level)}`;
+  if(sentAlerts[alertKey]) return; // don't spam
+  sentAlerts[alertKey] = Date.now();
+  // Clean old alerts (older than 4 hours)
+  const now=Date.now();
+  Object.keys(sentAlerts).forEach(k=>{if(now-sentAlerts[k]>14400000)delete sentAlerts[k];});
+
+  const htfOnly = localStorage.getItem('alert_htfonly')!=='false';
+  if(htfOnly && tf!=='1D' && tf!=='1H') return;
+
+  const wantShort = localStorage.getItem('alert_short')!=='false';
+  const wantLong  = localStorage.getItem('alert_long')!=='false';
+  const wantLevel = localStorage.getItem('alert_atlevel')==='true';
+  const wantToast = localStorage.getItem('alert_toast')!=='false';
+
+  if(type==='FAIL_GAIN' && !wantShort) return;
+  if(type==='FAIL_LOSE' && !wantLong)  return;
+  if(type==='AT_LEVEL'  && !wantLevel) return;
+
+  const icon = sig==='LONG'?'🟢':sig==='SHORT'?'🔴':'🟡';
+  const emoji = type==='FAIL_GAIN'?'📉 FAIL TO GAIN':type==='FAIL_LOSE'?'📈 FAIL TO LOSE':'👁 AT LEVEL';
+  const tgtLine = target ? `\nTarget: <b>$${fmt(target)}</b>` : '';
+  const msg = `${icon} <b>DMC ${sig}</b> [${tf}]\n${emoji}\nLevel: <b>$${fmt(level)}</b>${tgtLine}\n\n<a href="https://tbracko.github.io/dmc-signal">Open Dashboard</a>`;
+
+  // In-app toast
+  if(wantToast) showToast(`${icon} ${sig} [${tf}] — $${fmt(level)}`, sig==='SHORT');
+
+  // Telegram
+  sendTelegram(msg);
+}
+
+function showToast(msg, isShort=false){
+  const el=document.getElementById('toast');
+  el.textContent=msg;
+  el.className='toast'+(isShort?' short-alert':'');
+  requestAnimationFrame(()=>{el.classList.add('show');});
+  setTimeout(()=>{el.classList.remove('show');}, 4000);
+}
+
+// ── NAV ───────────────────────────────────────────────────
+function nav(id, btn){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
   document.getElementById('page-'+id).classList.add('active');
@@ -262,7 +525,7 @@ function nav(id, btn) {
   if(id==='chart'&&!tvLoaded){loadTV('240');tvLoaded=true;}
 }
 
-// TRADINGVIEW
+// ── TRADINGVIEW ────────────────────────────────────────────
 function loadTV(iv){
   const w=document.getElementById('tv-wrap');
   w.innerHTML='<div style="width:100%;height:100%"></div>';
@@ -273,12 +536,12 @@ function loadTV(iv){
   w.firstChild.appendChild(s);
 }
 document.getElementById('tf-bar').addEventListener('click',e=>{
-  const b=e.target.closest('.tf-btn'); if(!b)return;
+  const b=e.target.closest('.tf-btn');if(!b)return;
   document.querySelectorAll('.tf-btn').forEach(x=>x.classList.toggle('active',x===b));
-  loadTV(b.dataset.iv); tvLoaded=true;
+  loadTV(b.dataset.iv);tvLoaded=true;
 });
 
-// API
+// ── API ───────────────────────────────────────────────────
 async function getPrice(){
   const r=await fetch(`${CG}/simple/price?ids=${COIN}&vs_currencies=usd&include_24hr_change=true`);
   if(!r.ok)throw new Error('Price: '+r.status);
@@ -296,69 +559,124 @@ async function getChart(days,mins){
   const r=await fetch(`${CG}/coins/${COIN}/market_chart?vs_currency=usd&days=${days}`);
   if(!r.ok)throw new Error(`Chart ${days}: ${r.status}`);
   const d=await r.json();
-  const prices=d.prices; if(!prices||prices.length<4)throw new Error(`Chart ${days}: empty`);
-  const bms=mins*60000, B={};
+  const prices=d.prices;if(!prices||prices.length<4)throw new Error(`Chart ${days}: empty`);
+  const bms=mins*60000,B={};
   for(const[ts,p]of prices){const b=Math.floor(ts/bms)*bms;if(!B[b])B[b]={t:b,o:p,h:p,l:p,c:p};else{B[b].h=Math.max(B[b].h,p);B[b].l=Math.min(B[b].l,p);B[b].c=p;}}
   return Object.values(B).sort((a,b)=>a.t-b.t).map(k=>({...k,bh:Math.max(k.o,k.c),bl:Math.min(k.o,k.c)}));
 }
 async function getCandles(tf){
   switch(tf.l){
-    case'1W': try{return await getOHLC('max')}catch{return getOHLC('365')}
-    case'1D': return getOHLC('90');
-    case'4H': return getChart('16',240);
-    case'1H': return getChart('7',60);
+    case'1W':try{return await getOHLC('max')}catch{return getOHLC('365')}
+    case'1D':return getOHLC('90');
+    case'4H':return getChart('16',240);
+    case'1H':return getChart('7',60);
     case'15m':return getChart('2',15);
   }
 }
 
-// DMC ENGINE
-function atr(c,p=14){const t=c.slice(1).map((x,i)=>Math.max(x.h-x.l,Math.abs(x.h-c[i].c),Math.abs(x.l-c[i].c)));return t.slice(-p).reduce((s,v)=>s+v,0)/p;}
+// ── DMC ENGINE v2 ─────────────────────────────────────────
+// Refined: V-peaks (sharp reversals) + Previous Day H/L
+// Target: next obvious level in opposite direction (not origin)
 
-function findLevels(c){
-  const n=c.length,L=[];
-  for(let i=5;i<n-3;i++){
-    const x=c[i],sz=Math.abs(x.bh-x.bl);if(sz<0.001)continue;
-    const isH=x.h>=Math.max(...c.slice(i-3,i+4).map(y=>y.h))-sz*0.1;
-    const isL=x.l<=Math.min(...c.slice(i-3,i+4).map(y=>y.l))+sz*0.1;
-    if(!isH&&!isL)continue;
-    const tested=c.slice(i+1).some(f=>f.bh>=x.bl&&f.bl<=x.bh);
-    L.push({price:isH?x.bh:x.bl,bh:x.bh,bl:x.bl,type:isH?'resistance':'support',tested,idx:i});
+function atr(c,p=14){
+  const t=c.slice(1).map((x,i)=>Math.max(x.h-x.l,Math.abs(x.h-c[i].c),Math.abs(x.l-c[i].c)));
+  return t.slice(-p).reduce((s,v)=>s+v,0)/p;
+}
+
+// V-peaks: sharp reversal candles (price hit point and immediately bounced)
+// More selective than general swing — requires strong rejection
+function findVPeaks(c){
+  const n=c.length, L=[];
+  for(let i=4;i<n-2;i++){
+    const x=c[i], sz=Math.abs(x.bh-x.bl);
+    if(sz<0.001)continue;
+    // V-peak high: new high vs neighbours but body closes back well below the wick high
+    // Requires: candle wick significantly above body (rejection wick)
+    const wickUp   = x.h - x.bh; // wick above body
+    const wickDown = x.bl - x.l; // wick below body
+    const isVHigh = x.h > Math.max(c[i-1].h,c[i-2].h,c[i+1].h,c[i+2].h) && wickUp > sz*0.4;
+    const isVLow  = x.l < Math.min(c[i-1].l,c[i-2].l,c[i+1].l,c[i+2].l) && wickDown > sz*0.4;
+    if(!isVHigh && !isVLow) continue;
+    const tested = c.slice(i+1).some(f=>f.bh>=x.bl&&f.bl<=x.bh);
+    L.push({
+      price:isVHigh?x.bh:x.bl,
+      bh:x.bh, bl:x.bl,
+      type:isVHigh?'resistance':'support',
+      tested, idx:i, source:'V-peak'
+    });
   }
   return L;
 }
 
-function dmc(c,a){
+// PDH/PDL from daily candles — previous day high and low
+function findPDHL(dCandles){
+  if(!dCandles||dCandles.length<2) return [];
+  const prev = dCandles[dCandles.length-2];
+  return [
+    {price:prev.h, bh:prev.h, bl:prev.bh, type:'resistance', tested:false, source:'PDH'},
+    {price:prev.l, bh:prev.bl, bl:prev.l,  type:'support',    tested:false, source:'PDL'},
+  ];
+}
+
+// All DMC levels = V-peaks + PDH/PDL
+function findDMCLevels(c, dCandles){
+  const vp = findVPeaks(c);
+  const pdhl = dCandles ? findPDHL(dCandles) : [];
+  return [...vp, ...pdhl];
+}
+
+// Find the next obvious level in opposite direction = target
+function findNextLevel(levels, currentPrice, direction){
+  // direction 'long' = find next resistance above price
+  // direction 'short' = find next support below price
+  if(direction==='long'){
+    const above = levels.filter(l=>l.price>currentPrice && l.type==='resistance')
+      .sort((a,b)=>a.price-b.price);
+    return above[0]?.price || currentPrice*1.02;
+  } else {
+    const below = levels.filter(l=>l.price<currentPrice && l.type==='support')
+      .sort((a,b)=>b.price-a.price);
+    return below[0]?.price || currentPrice*0.98;
+  }
+}
+
+function dmc(c, a, dCandles){
   const n=c.length; if(n<20)return{sig:'NEUTRAL',type:'NONE',reason:'Insufficient data'};
-  const tol=a*0.15, levels=findLevels(c);
-  const rel=levels.filter(l=>Math.abs(l.price-c[n-1].c)<a*8);
+  const tol=a*0.15;
+  const levels=findDMCLevels(c, dCandles);
+  const rel=levels.filter(l=>Math.abs(l.price-c[n-1].c)<a*10);
+
   // FAIL TO GAIN → SHORT
   for(const lv of rel.filter(l=>l.type==='resistance')){
-    for(let lb=2;lb<=6;lb++){
+    for(let lb=2;lb<=4;lb++){
       if(n-lb<0)break;
-      const at=c[n-lb],cu=c[n-1];
-      if(at.bh>lv.price-tol&&cu.bh<lv.price+tol&&cu.c<lv.price&&c[n-lb-1]?.c<lv.price){
-        const lbC=c.slice(Math.max(0,n-lb-60),n-lb).filter(x=>x.bl<cu.c);
-        const tgt=lbC.length?Math.min(...lbC.map(x=>x.bl)):cu.c*0.98;
-        return{sig:'SHORT',type:'FAIL_GAIN',level:lv.price,target:tgt,reason:`Failed to gain $${fmt(lv.price)} — body closed back below. Target: $${fmt(tgt)}`,strength:lb<=3?'high':'med',untested:!lv.tested};
+      const at=c[n-lb], cu=c[n-1];
+      // 15m candle wicked above but body closed back below
+      if(at.h>lv.price && at.bh<lv.price+tol && cu.c<lv.price){
+        const target=findNextLevel(levels, cu.c, 'short');
+        return{sig:'SHORT',type:'FAIL_GAIN',level:lv.price,target,reason:`${lv.source}: Failed to gain $${fmt(lv.price)} — wick through, body closed back below. Target: $${fmt(target)}`,strength:lb<=2?'high':'med',untested:!lv.tested};
       }
     }
   }
+
   // FAIL TO LOSE → LONG
   for(const lv of rel.filter(l=>l.type==='support')){
-    for(let lb=2;lb<=6;lb++){
+    for(let lb=2;lb<=4;lb++){
       if(n-lb<0)break;
-      const at=c[n-lb],cu=c[n-1];
-      if(at.bl<lv.price+tol&&cu.bl>lv.price-tol&&cu.c>lv.price&&c[n-lb-1]?.c>lv.price){
-        const lbC=c.slice(Math.max(0,n-lb-60),n-lb).filter(x=>x.bh>cu.c);
-        const tgt=lbC.length?Math.max(...lbC.map(x=>x.bh)):cu.c*1.02;
-        return{sig:'LONG',type:'FAIL_LOSE',level:lv.price,target:tgt,reason:`Failed to lose $${fmt(lv.price)} — body closed back above. Target: $${fmt(tgt)}`,strength:lb<=3?'high':'med',untested:!lv.tested};
+      const at=c[n-lb], cu=c[n-1];
+      // 15m candle wicked below but body closed back above
+      if(at.l<lv.price && at.bl>lv.price-tol && cu.c>lv.price){
+        const target=findNextLevel(levels, cu.c, 'long');
+        return{sig:'LONG',type:'FAIL_LOSE',level:lv.price,target,reason:`${lv.source}: Failed to lose $${fmt(lv.price)} — wick through, body closed back above. Target: $${fmt(target)}`,strength:lb<=2?'high':'med',untested:!lv.tested};
       }
     }
   }
-  // AT LEVEL
-  const near=rel.filter(l=>!l.tested).sort((a,b)=>Math.abs(a.price-c[n-1].c)-Math.abs(b.price-c[n-1].c))[0];
-  if(near&&Math.abs(near.price-c[n-1].c)<a*1.5)
-    return{sig:'NEUTRAL',type:'AT_LEVEL',level:near.price,target:null,reason:`At untested ${near.type} $${fmt(near.price)} — watch for failure to ${near.type==='support'?'lose':'gain'}`,strength:'low',untested:true};
+
+  // AT LEVEL — price approaching but no failure yet
+  const near=rel.sort((a,b)=>Math.abs(a.price-c[n-1].c)-Math.abs(b.price-c[n-1].c))[0];
+  if(near&&Math.abs(near.price-c[n-1].c)<a*1.2)
+    return{sig:'NEUTRAL',type:'AT_LEVEL',level:near.price,target:null,reason:`At ${near.source} $${fmt(near.price)} — watch 15m candle for trap`,strength:'low',untested:!near.tested};
+
   return{sig:'NEUTRAL',type:'NONE',reason:'No DMC setup — price between levels',strength:'none'};
 }
 
@@ -379,55 +697,46 @@ function nextMove(wC,dC){
 }
 
 function collectLevels(wC,dC,p){
-  const wL=findLevels(wC).map(l=>({...l,tf:'1W'}));
-  const dL=findLevels(dC).map(l=>({...l,tf:'1D'}));
-  const all=[...wL,...dL].sort((a,b)=>b.price-a.price);
+  const wL=findVPeaks(wC).map(l=>({...l,tf:'1W'}));
+  const dL=findVPeaks(dC).map(l=>({...l,tf:'1D'}));
+  const pdhl=findPDHL(dC).map(l=>({...l,tf:'PDH/PDL'}));
+  const all=[...wL,...dL,...pdhl].sort((a,b)=>b.price-a.price);
   const dd=[];
-  for(const l of all){if(!dd.find(d=>Math.abs(d.price-l.price)/l.price<0.005))dd.push(l);}
-  return[...dd.filter(l=>l.price>p).slice(0,5),...dd.filter(l=>l.price<p).slice(-5).reverse()];
+  for(const l of all){if(!dd.find(d=>Math.abs(d.price-l.price)/l.price<0.004))dd.push(l);}
+  return[...dd.filter(l=>l.price>p).slice(0,6),...dd.filter(l=>l.price<p).slice(-6).reverse()];
 }
 
-// RENDER
+// ── RENDER ────────────────────────────────────────────────
 function fmt(n){return n>=1000?n.toLocaleString('en-US',{maximumFractionDigits:0}):n.toFixed(2);}
 
 function renderTop(t){
   price=t.price;
   document.getElementById('tb-price').textContent='$'+fmt(t.price);
   const el=document.getElementById('tb-chg');
-  el.style.display='';
-  el.textContent=(t.change>=0?'+':'')+t.change.toFixed(2)+'%';
+  el.style.display='';el.textContent=(t.change>=0?'+':'')+t.change.toFixed(2)+'%';
   el.style.background=t.change>=0?'rgba(0,230,118,.15)':'rgba(255,61,90,.15)';
   el.style.color=t.change>=0?'#00e676':'#ff3d5a';
 }
 
 function renderHero(){
   let wL=0,wS=0,activeW=0;
-  TFS.forEach(tf=>{
-    const r=results[tf.l]; if(!r)return;
-    if(r.type!=='NONE')activeW+=tf.w;
-    if(r.sig==='LONG')wL+=tf.w;
-    if(r.sig==='SHORT')wS+=tf.w;
-  });
+  TFS.forEach(tf=>{const r=results[tf.l];if(!r)return;if(r.type!=='NONE')activeW+=tf.w;if(r.sig==='LONG')wL+=tf.w;if(r.sig==='SHORT')wS+=tf.w;});
   const loaded=Object.keys(results).length,diff=wL-wS;
   let sig,cls;
   if(diff>0&&loaded>=2){sig='LONG ▲';cls='long';}
   else if(diff<0&&loaded>=2){sig='SHORT ▼';cls='short';}
   else{sig='NEUTRAL';cls='neutral';}
-  const hero=document.getElementById('hero');
-  hero.className='hero '+cls;
+  document.getElementById('hero').className='hero '+cls;
   document.getElementById('hero-dir').textContent=sig;
   document.getElementById('hero-tfs').textContent=loaded+' / '+TFS.length+' TFs';
   const pct=activeW>0?Math.round(Math.max(wL,wS)/activeW*100):0;
+  const label=pct>=75?'HIGH':pct>=50?'MED':'LOW';
   const confEl=document.getElementById('hero-conf');
-  const confLabel=pct>=75?'HIGH':pct>=50?'MED':'LOW';
   confEl.textContent=pct+'%';
   confEl.className='hero-conf '+(pct>=75?'high':pct>=50?'med':'');
-  // show label separately below
-  let lblEl=document.getElementById('hero-conflbl');
-  if(!lblEl){lblEl=document.createElement('div');lblEl.id='hero-conflbl';lblEl.style.cssText='font-family:IBM Plex Mono,monospace;font-size:8px;letter-spacing:.15em;text-transform:uppercase;color:#3d5068;text-align:right;margin-top:-2px';document.getElementById('hero-conf').after(lblEl);}
-  lblEl.textContent=confLabel;
+  document.getElementById('hero-conflbl').textContent=label+' CONF';
   const best=[...TFS].sort((a,b)=>b.w-a.w).find(tf=>results[tf.l]&&results[tf.l].type!=='NONE');
-  document.getElementById('hero-reason').textContent=best?results[best.l].reason:'No active DMC setup across timeframes';
+  document.getElementById('hero-reason').textContent=best?results[best.l].reason:'No active DMC setup';
 }
 
 function renderNM(nm){
@@ -443,15 +752,15 @@ function renderCards(){
     if(!r)return`<div class="tfc none"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type NONE">···</span><span class="tfc-sig WAIT" style="margin-left:auto">—</span></div><div class="tfc-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div></div>`;
     const cls=r.sig==='LONG'?'long':r.sig==='SHORT'?'short':'neutral';
     const tl=r.type==='FAIL_GAIN'?'FAIL TO GAIN':r.type==='FAIL_LOSE'?'FAIL TO LOSE':r.type==='AT_LEVEL'?'AT LEVEL':'NO SETUP';
-    return`<div class="tfc ${cls}"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type ${r.type}">${tl}</span><span class="tfc-sig ${r.sig}" style="margin-left:auto">${r.sig}</span></div><div class="tfc-reason">${r.reason}</div>${r.level?`<div class="tfc-prices"><span class="tcp"><span class="tcp-l">LVL</span>$${fmt(r.level)}</span>${r.target?`<span class="tcp"><span class="tcp-l">TGT</span><span style="color:${r.sig==='LONG'?'#00e676':'#ff3d5a'}">$${fmt(r.target)}</span></span>`:''}${r.untested?`<span class="tcp" style="color:#ffc107">UNTESTED ●</span>`:''}</div>`:''}</div>`;
+    return`<div class="tfc ${cls}"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type ${r.type}">${tl}</span><span class="tfc-sig ${r.sig}" style="margin-left:auto">${r.sig}</span></div><div class="tfc-reason">${r.reason}</div>${r.level?`<div class="tfc-prices"><span class="tcp"><span class="tcp-l">LVL</span>$${fmt(r.level)}</span>${r.target?`<span class="tcp"><span class="tcp-l">TGT</span><span style="color:${r.sig==='LONG'?'#00e676':'#ff3d5a'}">$${fmt(r.target)}</span></span>`:''}</div>`:''}</div>`;
   }).join('');
 }
 
 function renderLevels(){
-  if(!allLevels.length){document.getElementById('lvl-list').innerHTML='<div class="empty">No significant levels detected</div>';return;}
+  if(!allLevels.length){document.getElementById('lvl-list').innerHTML='<div class="empty">No levels found</div>';return;}
   document.getElementById('lvl-list').innerHTML=allLevels.map(l=>{
     const isR=l.price>price,dist=((l.price-price)/price*100).toFixed(2),cls=isR?'R':'S';
-    return`<div class="lvl-item${!l.tested?' untested':''}"><span class="lvl-badge ${cls}">${isR?'RES':'SUP'}</span><div class="lvl-info"><div class="lvl-tf">${l.tf}${!l.tested?'<span class="lvl-untag">● UNTESTED</span>':''}</div></div><div class="lvl-right"><div class="lvl-price ${cls}">$${fmt(l.price)}</div><div class="lvl-dist">${dist>0?'+':''}${dist}%</div></div></div>`;
+    return`<div class="lvl-item${!l.tested?' untested':''}"><span class="lvl-badge ${cls}">${isR?'RES':'SUP'}</span><div class="lvl-info"><div class="lvl-tf">${l.tf||'—'} · ${l.source||''}${!l.tested?'<span class="lvl-untag">● UNTESTED</span>':''}</div></div><div class="lvl-right"><div class="lvl-price ${cls}">$${fmt(l.price)}</div><div class="lvl-dist">${dist>0?'+':''}${dist}%</div></div></div>`;
   }).join('');
 }
 
@@ -460,9 +769,9 @@ function addLog(sig,tf,reason,type){
   const time=new Date().toTimeString().slice(0,5);
   const cls=sig==='LONG'?'long':sig==='SHORT'?'short':'neutral';
   const col=sig==='LONG'?'#00e676':sig==='SHORT'?'#ff3d5a':'#ffc107';
-  log.unshift(`<div class="log-item ${cls}"><span class="log-time">${time}</span><span class="log-txt"><strong style="color:${col}">${sig}</strong> [${tf}] ${reason.slice(0,80)}</span></div>`);
-  if(log.length>20)log.pop();
-  document.getElementById('log-list').innerHTML=log.join('');
+  sigLog.unshift(`<div class="log-item ${cls}"><span class="log-time">${time}</span><span class="log-txt"><strong style="color:${col}">${sig}</strong> [${tf}] ${reason.slice(0,80)}</span></div>`);
+  if(sigLog.length>25)sigLog.pop();
+  document.getElementById('log-list').innerHTML=sigLog.join('');
 }
 
 function setStatus(s,t){
@@ -470,9 +779,63 @@ function setStatus(s,t){
   document.getElementById('status-txt').textContent=t;
 }
 
-// MAIN
+// ── CHECKLIST ─────────────────────────────────────────────
+let clState={step:1, answers:{}};
+function clAnswer(step, ans){
+  clState.answers[step]=ans;
+  // Visual update
+  const numEl=document.getElementById('cn-'+step);
+  numEl.classList.add('done');
+  numEl.textContent='✓';
+  // Mark button selected
+  const stepEl=document.getElementById('cl-'+step);
+  stepEl.querySelectorAll('.cl-btn').forEach(b=>{
+    b.classList.remove('selected-yes','selected-no');
+    if((ans==='yes'&&b.classList.contains('yes'))||(ans==='no'&&b.classList.contains('no')))
+      b.classList.add(ans==='yes'?'selected-yes':'selected-no');
+  });
+  // Check result conditions
+  if(ans==='no'){
+    showResult(step, 'no');
+    return;
+  }
+  const next=step+1;
+  if(next<=5){
+    const nextEl=document.getElementById('cl-'+next);
+    nextEl.style.opacity='1';
+    document.getElementById('cn-'+next).classList.add('active');
+    clState.step=next;
+  } else if(step===5){
+    showResult(5,'yes');
+  }
+}
+function showResult(step, ans){
+  const res=document.getElementById('cl-result');
+  res.classList.add('show');
+  if(step===1&&ans==='no'){res.className='cl-result show skip';res.innerHTML='❌ <strong>No trade.</strong> No obvious level visible. Come back when a clear V-peak or PDH/PDL is within range.';}
+  else if(step===2&&ans==='no'){res.className='cl-result show wait';res.innerHTML='⏳ <strong>Wait.</strong> Price not at the level yet. Set an alert and check back when price touches it.';}
+  else if(step===3&&ans==='no'){res.className='cl-result show skip';res.innerHTML='❌ <strong>No trade.</strong> Candle closed through the level — breakout confirmed, no setup here.';}
+  else if(step===4&&ans==='no'){res.className='cl-result show wait';res.innerHTML='⏳ <strong>Missed entry.</strong> Wait for the next clear setup. Never chase.';}
+  else if(step===5){res.className='cl-result show enter';res.innerHTML='✅ <strong>Trade active.</strong> Entry taken, target set. Monitor manually — exit if a 15m candle closes decisively against you.';}
+}
+function clReset(){
+  clState={step:1, answers:{}};
+  for(let i=1;i<=5;i++){
+    const n=document.getElementById('cn-'+i);
+    n.className='cl-num'+(i===1?' active':'');
+    n.textContent=i;
+    const s=document.getElementById('cl-'+i);
+    s.style.opacity=i===1?'1':'0.35';
+    s.querySelectorAll('.cl-btn').forEach(b=>b.classList.remove('selected-yes','selected-no'));
+  }
+  const res=document.getElementById('cl-result');
+  res.className='cl-result';
+  res.innerHTML='';
+}
+
+// ── MAIN ──────────────────────────────────────────────────
 async function run(){
-  if(running)return; running=true;
+  if(running)return;running=true;
   const fab=document.getElementById('fab');
   fab.classList.add('spin');
   setStatus('loading','Fetching data...');
@@ -480,31 +843,35 @@ async function run(){
     const td=await getPrice();
     renderTop(td);
     const kR=await Promise.allSettled(TFS.map(tf=>getCandles(tf)));
+    const dCandles=kR[1].status==='fulfilled'?kR[1].value:null; // daily candles for PDH/PDL context
     kR.forEach((res,i)=>{
       if(res.status==='rejected'){console.warn(TFS[i].l,res.reason);return;}
-      const c=res.value,a=atr(c),d=dmc(c,a);
+      const c=res.value,a=atr(c),d=dmc(c,a,dCandles);
       results[TFS[i].l]=d;
-      if(d.type!=='NONE'&&d.type!=='AT_LEVEL')addLog(d.sig,TFS[i].l,d.reason,d.type);
+      // Fire alerts for active signals
+      if(d.type!=='NONE'){
+        maybeAlert(d.sig,TFS[i].l,d.type,d.level,d.target);
+        if(d.type!=='AT_LEVEL')addLog(d.sig,TFS[i].l,d.reason,d.type);
+      }
     });
     const wK=kR[0].status==='fulfilled'?kR[0].value:null;
-    const dK=kR[1].status==='fulfilled'?kR[1].value:null;
-    if(wK&&dK){renderNM(nextMove(wK,dK));allLevels=collectLevels(wK,dK,td.price);}
-    renderHero(); renderCards(); renderLevels();
+    if(wK&&dCandles){renderNM(nextMove(wK,dCandles));allLevels=collectLevels(wK,dCandles,td.price);}
+    renderHero();renderCards();renderLevels();
     const now=new Date().toTimeString().slice(0,8);
     setStatus('ok','Live · '+now);
     document.getElementById('last-upd').textContent=now;
   }catch(e){
     console.error(e);
     setStatus('err',e.message.slice(0,50));
-    addLog('NEUTRAL','SYS',e.message,'ERR');
   }
   running=false;
   fab.classList.remove('spin');
 }
-function manualRefresh(){clearTimeout(timer);run().then(schedule);}
+function manualRefresh(){clearTimeout(timer);sentAlerts={};run().then(schedule);}
 function schedule(){timer=setTimeout(()=>run().then(schedule),REFRESH);}
 
 window.addEventListener('DOMContentLoaded',()=>{
+  loadSettings();
   document.getElementById('tf-cards').innerHTML=TFS.map(tf=>`<div class="tfc none"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type NONE">···</span><span class="tfc-sig WAIT" style="margin-left:auto">—</span></div><div class="tfc-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div></div>`).join('');
   run().then(schedule);
 });
