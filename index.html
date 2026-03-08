@@ -383,11 +383,10 @@ async function sendTelegram(msg){
   }catch{return false;}
 }
 
-function maybeAlert(sig, tf, type, level, target){
+function maybeAlert(sig, tf, type, level, target, rr){
   const alertKey = `${tf}_${type}_${Math.round(level)}`;
-  if(sentAlerts[alertKey]) return; // don't spam
+  if(sentAlerts[alertKey]) return;
   sentAlerts[alertKey] = Date.now();
-  // Clean old alerts (older than 4 hours)
   const now=Date.now();
   Object.keys(sentAlerts).forEach(k=>{if(now-sentAlerts[k]>14400000)delete sentAlerts[k];});
 
@@ -403,24 +402,50 @@ function maybeAlert(sig, tf, type, level, target){
   if(type==='FAIL_LOSE' && !wantLong)  return;
   if(type==='AT_LEVEL'  && !wantLevel) return;
 
-  const icon = sig==='LONG'?'🟢':sig==='SHORT'?'🔴':'🟡';
-  const emoji = type==='FAIL_GAIN'?'📉 FAIL TO GAIN':type==='FAIL_LOSE'?'📈 FAIL TO LOSE':'👁 AT LEVEL';
-  const tgtLine = target ? `\nTarget: <b>$${fmt(target)}</b>` : '';
-  const msg = `${icon} <b>DMC ${sig}</b> [${tf}]\n${emoji}\nLevel: <b>$${fmt(level)}</b>${tgtLine}\n\n<a href="https://tbracko.github.io/dmc-signal">Open Dashboard</a>`;
+  const icon  = sig==='LONG'?'🟢':sig==='SHORT'?'🔴':'🟡';
+  const dir   = type==='FAIL_GAIN'?'FAIL TO GAIN':type==='FAIL_LOSE'?'FAIL TO LOSE':'AT LEVEL';
+  const rrTxt = rr ? ` · R:R ${rr}` : '';
 
-  // In-app toast
-  if(wantToast) showToast(`${icon} ${sig} [${tf}] — $${fmt(level)}`, sig==='SHORT');
+  // ── In-app toast (2 lines: signal + entry/TP) ──
+  if(wantToast){
+    const line1 = `${icon} ${sig} [${tf}]${rrTxt}`;
+    const line2 = target
+      ? `Entry: $${fmt(price)} · TP: $${fmt(target)}`
+      : `Level: $${fmt(level)}`;
+    showToast(line1, line2, sig==='SHORT');
+  }
 
-  // Telegram
-  sendTelegram(msg);
+  // ── Telegram message ──
+  if(type==='AT_LEVEL'){
+    const msg = `${icon} <b>DMS AT LEVEL</b> [${tf}]
+👁 Approaching $${fmt(level)} — watch 15m candle
+
+<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
+    sendTelegram(msg);
+  } else {
+    const rrLine  = rr    ? `
+R:R <b>${rr}</b>` : '';
+    const tpLine  = target? `
+Take Profit: <b>$${fmt(target)}</b>` : '';
+    const msg = `${icon} <b>DMS ${sig}</b> [${tf}]
+${dir}
+
+Entry now: <b>$${fmt(price)}</b>
+Level: <b>$${fmt(level)}</b>${tpLine}${rrLine}
+
+<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
+    sendTelegram(msg);
+  }
 }
 
-function showToast(msg, isShort=false){
+function showToast(line1, line2='', isShort=false){
   const el=document.getElementById('toast');
-  el.textContent=msg;
+  el.innerHTML = line2
+    ? `<div style="font-weight:600;margin-bottom:4px">${line1}</div><div style="opacity:.75;font-size:10px">${line2}</div>`
+    : line1;
   el.className='toast'+(isShort?' short-alert':'');
   requestAnimationFrame(()=>{el.classList.add('show');});
-  setTimeout(()=>{el.classList.remove('show');}, 4000);
+  setTimeout(()=>{el.classList.remove('show');}, 5000);
 }
 
 // ── NAV ───────────────────────────────────────────────────
@@ -987,7 +1012,7 @@ function processTF(i, candles, dCandles){
   const d = dms(candles, a, dCandles, tf.l);
   results[tf.l] = d;
   if(d.type!=='NONE'){
-    maybeAlert(d.sig, tf.l, d.type, d.level, d.target);
+    maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr);
     if(d.type!=='AT_LEVEL') addLog(d.sig, tf.l, d.reason, d.type);
   }
   renderHero();
