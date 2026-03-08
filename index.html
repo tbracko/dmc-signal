@@ -471,10 +471,38 @@ async function getChart(days,mins){
   for(const[ts,p]of prices){const b=Math.floor(ts/bms)*bms;if(!B[b])B[b]={t:b,o:p,h:p,l:p,c:p};else{B[b].h=Math.max(B[b].h,p);B[b].l=Math.min(B[b].l,p);B[b].c=p;}}
   return Object.values(B).sort((a,b)=>a.t-b.t).map(k=>({...k,bh:Math.max(k.o,k.c),bl:Math.min(k.o,k.c)}));
 }
+// Aggregate price ticks into candles of minWidth ms
+function aggregateCandles(prices, msPerCandle){
+  const B={};
+  for(const[ts,p]of prices){
+    const b=Math.floor(ts/msPerCandle)*msPerCandle;
+    if(!B[b])B[b]={t:b,o:p,h:p,l:p,c:p};
+    else{B[b].h=Math.max(B[b].h,p);B[b].l=Math.min(B[b].l,p);B[b].c=p;}
+  }
+  return Object.values(B)
+    .sort((a,b)=>a.t-b.t)
+    .map(k=>({...k,bh:Math.max(k.o,k.c),bl:Math.min(k.o,k.c)}));
+}
+
 async function getCandles(tf){
+  const MS_MIN=60000, MS_H=3600000, MS_D=86400000, MS_W=604800000;
   switch(tf.l){
-    case'1W':try{return await getOHLC('max')}catch{return getOHLC('365')}
-    case'1D':return getOHLC('90');
+    case'1W':{
+      // Use 730 days of price ticks → aggregate into weekly candles
+      const r=await fetch(`${CG}/coins/${COIN}/market_chart?vs_currency=usd&days=730`);
+      if(!r.ok)throw new Error('1W fetch: '+r.status);
+      const d=await r.json();
+      if(!d.prices?.length)throw new Error('1W: empty');
+      return aggregateCandles(d.prices, MS_W);
+    }
+    case'1D':{
+      // Use 180 days of price ticks → aggregate into daily candles
+      const r=await fetch(`${CG}/coins/${COIN}/market_chart?vs_currency=usd&days=180`);
+      if(!r.ok)throw new Error('1D fetch: '+r.status);
+      const d=await r.json();
+      if(!d.prices?.length)throw new Error('1D: empty');
+      return aggregateCandles(d.prices, MS_D);
+    }
     case'4H':return getChart('16',240);
     case'1H':return getChart('7',60);
     case'15m':return getChart('2',15);
@@ -710,7 +738,8 @@ function calcRR(entry, target, level){
 // ── MAIN DMS SIGNAL ───────────────────────────────────────
 function dms(c, a, dCandles, tf){
   const n = c.length;
-  if(n < 25) return {sig:'NEUTRAL',type:'NONE',reason:'Insufficient data'};
+  const minCandles = (tf==='1W'||tf==='1D') ? 10 : 20;
+  if(n < minCandles) return {sig:'NEUTRAL',type:'NONE',reason:'Insufficient data ('+n+' candles)'};
 
   const levels = findDMCLevels(c, dCandles, tf);
   const cur    = c[n-1];
@@ -951,8 +980,12 @@ async function run(){
   try{
     const td=await getPrice();
     renderTop(td);
-    const kR=await Promise.allSettled(TFS.map(tf=>getCandles(tf)));
-    const dCandles=kR[1].status==='fulfilled'?kR[1].value:null; // daily candles for PDH/PDL context
+    // Fetch all TF candles + a dedicated daily set for PDH/PDL context
+    const [kR, dCandlesResult] = await Promise.all([
+      Promise.allSettled(TFS.map(tf=>getCandles(tf))),
+      getCandles({l:'1D'}).catch(()=>null)
+    ]);
+    const dCandles = dCandlesResult; // dedicated daily, never undefined due to 1D being its own signal
     kR.forEach((res,i)=>{
       if(res.status==='rejected'){console.warn(TFS[i].l,res.reason);return;}
       const c=res.value,a=atr(c),d=dms(c,a,dCandles,TFS[i].l);
