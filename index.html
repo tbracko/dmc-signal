@@ -114,12 +114,23 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 .lvl-dist{font-family:‘IBM Plex Mono’,monospace;font-size:9px;color:#3d5068;margin-top:2px}
 
 /* LOG */
-.log-item{display:flex;gap:10px;padding:12px 16px;border-bottom:1px solid #1a2230;border-left:3px solid transparent}
-.log-item.long{border-left-color:#00e676}
-.log-item.short{border-left-color:#ff3d5a}
+.log-item{padding:13px 16px;border-bottom:1px solid #1a2230;border-left:3px solid transparent}
+.log-item.long{border-left-color:#00e676;background:rgba(0,230,118,.02)}
+.log-item.short{border-left-color:#ff3d5a;background:rgba(255,61,90,.02)}
 .log-item.neutral{border-left-color:#ffc107}
-.log-time{font-family:‘IBM Plex Mono’,monospace;font-size:9px;color:#3d5068;flex-shrink:0;padding-top:1px;min-width:36px}
-.log-txt{font-family:‘IBM Plex Mono’,monospace;font-size:10px;color:#5d7a99;line-height:1.5}
+.log-head{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+.log-sig{font-family:‘IBM Plex Mono’,monospace;font-size:13px;font-weight:700}
+.log-sig.LONG{color:#00e676}.log-sig.SHORT{color:#ff3d5a}.log-sig.NEUTRAL{color:#ffc107}
+.log-tf{font-family:‘IBM Plex Mono’,monospace;font-size:10px;color:#3d5068;background:#10151c;border:1px solid #1a2230;padding:2px 7px;border-radius:4px}
+.log-time2{font-family:‘IBM Plex Mono’,monospace;font-size:9px;color:#3d5068;margin-left:auto}
+.log-prices{display:flex;gap:14px;margin-top:6px;flex-wrap:wrap}
+.log-p{font-family:‘IBM Plex Mono’,monospace;font-size:10px}
+.log-pl{color:#3d5068;margin-right:3px;font-size:9px}
+.log-status{font-family:‘IBM Plex Mono’,monospace;font-size:8px;padding:2px 7px;border-radius:4px;margin-left:auto;align-self:flex-start}
+.log-status.open{background:rgba(255,193,7,.1);color:#ffc107;border:1px solid rgba(255,193,7,.2)}
+.log-status.hit{background:rgba(0,230,118,.1);color:#00e676;border:1px solid rgba(0,230,118,.2)}
+.log-status.stopped{background:rgba(255,61,90,.1);color:#ff3d5a;border:1px solid rgba(255,61,90,.2)}
+.log-reason{font-family:‘IBM Plex Mono’,monospace;font-size:9px;color:#3d5068;margin-top:4px;line-height:1.5}
 
 /* SETTINGS */
 .setting-row{padding:16px;border-bottom:1px solid #1a2230}
@@ -310,10 +321,14 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <!-- LOG PAGE -->
 
 <div class="page" id="page-log">
-  <div class="sh">Signal Log</div>
-  <div id="log-list">
-    <div class="log-item neutral"><span class="log-time">--:--</span><span class="log-txt">Initialising DMC engine...</span></div>
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px 4px">
+    <div class="sh" style="padding:0">Signal History</div>
+    <button onclick="clearLog()" style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#3d5068;background:none;border:1px solid #1a2230;border-radius:5px;padding:5px 10px;cursor:pointer;letter-spacing:.06em">CLEAR</button>
   </div>
+  <div style="padding:4px 16px 10px;font-family:'IBM Plex Mono',monospace;font-size:9px;color:#3d5068">
+    Persists across sessions · last 50 signals
+  </div>
+  <div id="log-list"><div class="empty">No signals logged yet</div></div>
 </div>
 
 <button class="fab" id="fab" onclick="manualRefresh()">↻</button>
@@ -1026,14 +1041,90 @@ function renderLevels(){
   }).join('');
 }
 
-function addLog(sig,tf,reason,type){
-  if(type==='NONE')return;
-  const time=new Date().toTimeString().slice(0,5);
-  const cls=sig==='LONG'?'long':sig==='SHORT'?'short':'neutral';
-  const col=sig==='LONG'?'#00e676':sig==='SHORT'?'#ff3d5a':'#ffc107';
-  sigLog.unshift(`<div class="log-item ${cls}"><span class="log-time">${time}</span><span class="log-txt"><strong style="color:${col}">${sig}</strong> [${tf}] ${reason.slice(0,80)}</span></div>`);
-  if(sigLog.length>25)sigLog.pop();
-  document.getElementById('log-list').innerHTML=sigLog.join('');
+// ── SIGNAL LOG (persisted to localStorage) ───────────────
+const LOG_KEY = 'dms_signal_log';
+const MAX_LOG = 50;
+
+function loadLog(){
+  try{ return JSON.parse(localStorage.getItem(LOG_KEY)||'[]'); }catch{ return []; }
+}
+function saveLog(entries){ localStorage.setItem(LOG_KEY, JSON.stringify(entries)); }
+
+function addLog(sig, tf, reason, type, level, target, rr){
+  if(type==='NONE') return;
+  const entries = loadLog();
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-GB',{day:'2-digit',month:'short'});
+  const timeStr = now.toTimeString().slice(0,5);
+
+  // Avoid duplicate: same sig+tf+level within last 2 hours
+  const recent = entries[0];
+  if(recent && recent.sig===sig && recent.tf===tf && Math.abs((recent.level||0)-(level||0))<10
+     && (now - new Date(recent.ts)) < 7200000) return;
+
+  const entry = {
+    id: now.getTime(),
+    ts: now.toISOString(),
+    date: dateStr,
+    time: timeStr,
+    sig, tf, type, level, target, rr,
+    reason: reason.slice(0,120),
+    entryPrice: price,
+    status: 'open' // open | hit | stopped
+  };
+  entries.unshift(entry);
+  if(entries.length > MAX_LOG) entries.pop();
+  saveLog(entries);
+  renderLog();
+}
+
+function updateLogStatus(id, status){
+  const entries = loadLog();
+  const e = entries.find(x=>x.id===id);
+  if(e){ e.status=status; saveLog(entries); renderLog(); }
+}
+
+function clearLog(){
+  if(!confirm('Clear all signal history?')) return;
+  localStorage.removeItem(LOG_KEY);
+  renderLog();
+}
+
+function renderLog(){
+  const entries = loadLog();
+  const el = document.getElementById('log-list');
+  if(!entries.length){ el.innerHTML='<div class="empty">No signals logged yet</div>'; return; }
+
+  el.innerHTML = entries.map(e=>{
+    const cls = e.sig==='LONG'?'long':e.sig==='SHORT'?'short':'neutral';
+    const statusBadge = `<span class="log-status ${e.status}">${e.status.toUpperCase()}</span>`;
+    const rrBadge = e.rr ? `<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#ffc107">R:R ${e.rr}</span>` : '';
+    const prices = [
+      e.entryPrice ? `<span class="log-p"><span class="log-pl">ENTRY</span>$${fmt(e.entryPrice)}</span>` : '',
+      e.level      ? `<span class="log-p"><span class="log-pl">LVL</span>$${fmt(e.level)}</span>` : '',
+      e.target     ? `<span class="log-p"><span class="log-pl">TP</span><span style="color:${e.sig==='LONG'?'#00e676':'#ff3d5a'}">$${fmt(e.target)}</span></span>` : '',
+    ].filter(Boolean).join('');
+
+    // Status update buttons (only for open trades)
+    const btns = e.status==='open' ? `
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button onclick="updateLogStatus(${e.id},'hit')" style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:4px 10px;border-radius:5px;border:1px solid rgba(0,230,118,.3);background:rgba(0,230,118,.08);color:#00e676;cursor:pointer">✓ TP HIT</button>
+        <button onclick="updateLogStatus(${e.id},'stopped')" style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:4px 10px;border-radius:5px;border:1px solid rgba(255,61,90,.3);background:rgba(255,61,90,.08);color:#ff3d5a;cursor:pointer">✗ STOPPED</button>
+      </div>` : '';
+
+    return `<div class="log-item ${cls}">
+      <div class="log-head">
+        <span class="log-sig ${e.sig}">${e.sig}</span>
+        <span class="log-tf">${e.tf}</span>
+        ${rrBadge}
+        ${statusBadge}
+        <span class="log-time2">${e.date} ${e.time}</span>
+      </div>
+      <div class="log-prices">${prices}</div>
+      <div class="log-reason">${e.reason}</div>
+      ${btns}
+    </div>`;
+  }).join('');
 }
 
 function setStatus(s,t){
@@ -1053,7 +1144,7 @@ function processTF(i, candles, dCandles){
   results[tf.l] = d;
   if(d.type!=='NONE'){
     maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr);
-    if(d.type!=='AT_LEVEL') addLog(d.sig, tf.l, d.reason, d.type);
+    if(d.type!=='AT_LEVEL') addLog(d.sig, tf.l, d.reason, d.type, d.level, d.target, d.rr);
   }
   renderHero();
   renderCards();
@@ -1112,6 +1203,7 @@ function schedule(){timer=setTimeout(()=>run().then(schedule),REFRESH);}
 
 window.addEventListener('DOMContentLoaded',()=>{
   loadSettings();
+  renderLog();
   document.getElementById('tf-cards').innerHTML=TFS.map(tf=>`<div class="tfc none"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type NONE">···</span><span class="tfc-sig WAIT" style="margin-left:auto">—</span></div><div class="tfc-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div></div>`).join('');
   run().then(schedule);
 });
