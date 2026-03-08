@@ -972,39 +972,67 @@ function setStatus(s,t){
 }
 
 // ── MAIN ──────────────────────────────────────────────────
+// Progressive: each TF renders as soon as its data arrives.
+// Daily fetched first (fast) → used for PDH/PDL context on all TFs.
+// Weekly fetched in parallel but renders independently.
+
+function processTF(i, candles, dCandles){
+  const tf = TFS[i];
+  const a = atr(candles);
+  const d = dms(candles, a, dCandles, tf.l);
+  results[tf.l] = d;
+  if(d.type!=='NONE'){
+    maybeAlert(d.sig, tf.l, d.type, d.level, d.target);
+    if(d.type!=='AT_LEVEL') addLog(d.sig, tf.l, d.reason, d.type);
+  }
+  renderHero();
+  renderCards();
+}
+
 async function run(){
-  if(running)return;running=true;
+  if(running)return; running=true;
   const fab=document.getElementById('fab');
   fab.classList.add('spin');
-  setStatus('loading','Fetching data...');
+  setStatus('loading','Fetching...');
   try{
-    const td=await getPrice();
+    const td = await getPrice();
     renderTop(td);
-    // Fetch all TF candles + a dedicated daily set for PDH/PDL context
-    const [kR, dCandlesResult] = await Promise.all([
-      Promise.allSettled(TFS.map(tf=>getCandles(tf))),
-      getCandles({l:'1D'}).catch(()=>null)
-    ]);
-    const dCandles = dCandlesResult; // dedicated daily, never undefined due to 1D being its own signal
-    kR.forEach((res,i)=>{
-      if(res.status==='rejected'){console.warn(TFS[i].l,res.reason);return;}
-      const c=res.value,a=atr(c),d=dms(c,a,dCandles,TFS[i].l);
-      results[TFS[i].l]=d;
-      // Fire alerts for active signals
-      if(d.type!=='NONE'){
-        maybeAlert(d.sig,TFS[i].l,d.type,d.level,d.target);
-        if(d.type!=='AT_LEVEL')addLog(d.sig,TFS[i].l,d.reason,d.type);
-      }
-    });
-    const wK=kR[0].status==='fulfilled'?kR[0].value:null;
-    if(wK&&dCandles){renderNM(nextMove(wK,dCandles));allLevels=collectLevels(wK,dCandles,td.price);}
-    renderHero();renderCards();renderLevels();
-    const now=new Date().toTimeString().slice(0,8);
+
+    // Step 1: fetch daily first (fastest, needed as PDH/PDL context for all TFs)
+    let dCandles = null;
+    try{
+      dCandles = await getCandles({l:'1D'});
+      processTF(1, dCandles, dCandles); // render 1D immediately
+    }catch(e){ console.warn('1D failed:', e.message); }
+
+    // Step 2: fetch remaining TFs in parallel, render each as it arrives
+    const remaining = [0,2,3,4]; // 1W, 4H, 1H, 15m  (1D already done at index 1)
+    const fetches = remaining.map(i =>
+      getCandles(TFS[i])
+        .then(c => { processTF(i, c, dCandles); return {i, c}; })
+        .catch(e => { console.warn(TFS[i].l, e.message); return {i, c:null}; })
+    );
+
+    // Render Next Major Move as soon as both weekly + daily are ready
+    const results2 = await Promise.all(fetches);
+    const wEntry = results2.find(r=>r.i===0);
+    if(wEntry?.c && dCandles){
+      renderNM(nextMove(wEntry.c, dCandles));
+      allLevels = collectLevels(wEntry.c, dCandles, td.price);
+      renderLevels();
+    } else if(dCandles){
+      // Fallback: use daily-only for NM and levels
+      renderNM(nextMove(dCandles, dCandles));
+      allLevels = collectLevels(dCandles, dCandles, td.price);
+      renderLevels();
+    }
+
+    const now = new Date().toTimeString().slice(0,8);
     setStatus('ok','Live · '+now);
     document.getElementById('last-upd').textContent=now;
   }catch(e){
     console.error(e);
-    setStatus('err',e.message.slice(0,50));
+    setStatus('err', e.message.slice(0,50));
   }
   running=false;
   fab.classList.remove('spin');
