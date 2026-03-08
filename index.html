@@ -954,7 +954,8 @@ function renderHero(){
   confEl.className='hero-conf '+(pct>=75?'high':pct>=50?'med':'');
   document.getElementById('hero-conflbl').textContent=label+' CONF';
   const best=[...TFS].sort((a,b)=>b.w-a.w).find(tf=>results[tf.l]&&results[tf.l].type!=='NONE');
-  document.getElementById('hero-reason').textContent=best?results[best.l].reason:'No active DMC setup';
+  const confPfx = activeW>0 ? `[${pct}% conf · ${label}] ` : '';
+  document.getElementById('hero-reason').textContent=best?(confPfx+results[best.l].reason):'No active DMC setup';
 }
 
 function renderNM(nm){
