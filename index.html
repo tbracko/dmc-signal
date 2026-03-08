@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>DMC Signal · BTC</title>
+<title>DMS Signal · BTC</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;600&family=Sora:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -121,28 +121,6 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 .log-time{font-family:‘IBM Plex Mono’,monospace;font-size:9px;color:#3d5068;flex-shrink:0;padding-top:1px;min-width:36px}
 .log-txt{font-family:‘IBM Plex Mono’,monospace;font-size:10px;color:#5d7a99;line-height:1.5}
 
-/* CHECKLIST */
-.cl-step{padding:16px;border-bottom:1px solid #1a2230;display:flex;gap:14px;align-items:flex-start}
-.cl-num{width:28px;height:28px;border-radius:50%;border:1px solid #243040;background:#0c0f14;display:flex;align-items:center;justify-content:center;font-family:‘IBM Plex Mono’,monospace;font-size:11px;font-weight:600;color:#3d5068;flex-shrink:0;transition:all .3s}
-.cl-num.active{background:#ffc107;border-color:#ffc107;color:#07090d}
-.cl-num.done{background:#00e676;border-color:#00e676;color:#07090d}
-.cl-body{flex:1}
-.cl-action{font-family:‘IBM Plex Mono’,monospace;font-size:11px;font-weight:600;color:#dce8f5;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px}
-.cl-desc{font-family:‘Sora’,sans-serif;font-size:12px;color:#5d7a99;line-height:1.55}
-.cl-answer{margin-top:10px;display:flex;gap:8px}
-.cl-btn{font-family:‘IBM Plex Mono’,monospace;font-size:10px;padding:7px 14px;border-radius:6px;border:1px solid #243040;background:#0c0f14;color:#5d7a99;cursor:pointer;transition:all .2s;letter-spacing:.05em}
-.cl-btn:active{transform:scale(.95)}
-.cl-btn.yes{border-color:rgba(0,230,118,.4);color:#00e676}
-.cl-btn.no{border-color:rgba(255,61,90,.4);color:#ff3d5a}
-.cl-btn.selected-yes{background:rgba(0,230,118,.15);border-color:#00e676;color:#00e676}
-.cl-btn.selected-no{background:rgba(255,61,90,.15);border-color:#ff3d5a;color:#ff3d5a}
-.cl-result{margin:14px 16px;padding:16px;border-radius:10px;border:1px solid #1a2230;background:#0c0f14;font-family:‘IBM Plex Mono’,monospace;font-size:11px;display:none}
-.cl-result.show{display:block}
-.cl-result.enter{background:rgba(0,230,118,.08);border-color:rgba(0,230,118,.3);color:#00e676}
-.cl-result.wait{background:rgba(255,193,7,.06);border-color:rgba(255,193,7,.25);color:#ffc107}
-.cl-result.skip{background:rgba(255,61,90,.08);border-color:rgba(255,61,90,.3);color:#ff3d5a}
-.cl-reset{display:block;margin:0 16px 20px;font-family:‘IBM Plex Mono’,monospace;font-size:10px;padding:10px;border-radius:7px;border:1px solid #243040;background:#0c0f14;color:#3d5068;cursor:pointer;text-align:center;letter-spacing:.08em;width:calc(100% - 32px)}
-
 /* SETTINGS */
 .setting-row{padding:16px;border-bottom:1px solid #1a2230}
 .setting-lbl{font-family:‘IBM Plex Mono’,monospace;font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:#3d5068;margin-bottom:8px}
@@ -188,7 +166,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <body>
 
 <div class="topbar">
-  <span class="brand">DMC ⚡</span>
+  <span class="brand">DMS ⚡</span>
   <span class="pair">BTC/USD</span>
   <div class="topbar-r">
     <span id="tb-price">—</span>
@@ -245,108 +223,8 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <!-- PAGE: LEVELS -->
 
 <div class="page" id="page-levels">
-  <div class="sh">Key Levels · H1 + Daily (PDH/PDL + V-Peaks)</div>
+  <div class="sh">Key Levels · Weekly + Daily (V-Peaks + PDH/PDL)</div>
   <div id="lvl-list"><div class="empty">Loading levels...</div></div>
-</div>
-
-<!-- PAGE: CHECKLIST -->
-
-<div class="page" id="page-checklist">
-  <div class="sh">DMC Trade Checklist · Chris Hunter</div>
-
-  <div style="margin:0 16px 14px;padding:14px 16px;background:#0c0f14;border:1px solid #1a2230;border-left:3px solid #ffc107;border-radius:10px">
-    <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;letter-spacing:.2em;color:#3d5068;margin-bottom:6px">KEY PRINCIPLE</div>
-    <div style="font-family:'Sora',sans-serif;font-size:12px;color:#ffc107;line-height:1.6;font-style:italic">"If it can't go higher, it must go lower. If it succeeds it must continue, if it fails it must reverse."</div>
-    <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#3d5068;margin-top:4px">— Chris Hunter</div>
-  </div>
-
-  <div style="margin:0 16px 12px;display:flex;gap:6px">
-    <div style="flex:1;padding:10px;background:#0c0f14;border:1px solid #1a2230;border-radius:8px;text-align:center">
-      <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;color:#3d5068;margin-bottom:3px">PHASE 1 · DRAW</div>
-      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#5d7a99">Monthly/Weekly/Daily</div>
-    </div>
-    <div style="flex:1;padding:10px;background:#0c0f14;border:1px solid #1a2230;border-radius:8px;text-align:center">
-      <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;color:#3d5068;margin-bottom:3px">PHASE 2 · STORY</div>
-      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#5d7a99">1H / 4H</div>
-    </div>
-    <div style="flex:1;padding:10px;background:#0c0f14;border:1px solid #1a2230;border-radius:8px;text-align:center">
-      <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;color:#3d5068;margin-bottom:3px">PHASE 3 · EXEC</div>
-      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#5d7a99">15m / 5m / 1m</div>
-    </div>
-  </div>
-
-  <div class="cl-step" id="cl-1">
-    <div class="cl-num active" id="cn-1">1</div>
-    <div class="cl-body">
-      <div class="cl-action">Scan · Monthly → Weekly → Daily</div>
-      <div class="cl-desc">Draw levels top-down using <strong style="color:#dce8f5">candle bodies only</strong> (not wicks). Look for V-shapes and PDH/PDL — places so obvious any beginner can see them. If you have to squint, it's not a DMC level.</div>
-      <div class="cl-answer">
-        <button class="cl-btn yes" onclick="clAnswer(1,'yes')">Level found ✓</button>
-        <button class="cl-btn no" onclick="clAnswer(1,'no')">No clear level</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="cl-step" id="cl-2" style="opacity:.35">
-    <div class="cl-num" id="cn-2">2</div>
-    <div class="cl-body">
-      <div class="cl-action">Wait · Define the Story on 1H / 4H</div>
-      <div class="cl-desc">Wait for price to reach the level. While waiting, use 1H/4H to determine the "story": is price <strong style="color:#00e676">gaining</strong> levels (continuation) or <strong style="color:#ff3d5a">failing</strong> to hold them (reversal)? Do not enter early.</div>
-      <div class="cl-answer">
-        <button class="cl-btn yes" onclick="clAnswer(2,'yes')">Price at level ✓</button>
-        <button class="cl-btn no" onclick="clAnswer(2,'no')">Not there yet</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="cl-step" id="cl-3" style="opacity:.35">
-    <div class="cl-num" id="cn-3">3</div>
-    <div class="cl-body">
-      <div class="cl-action">Observe</div>
-      <div class="cl-desc">Watch the 15m candle. Did it wick through the level but close back inside? That is The Trap — the only candle that matters.</div>
-      <div class="cl-answer">
-        <button class="cl-btn yes" onclick="clAnswer(3,'yes')">15m closed back inside ✓</button>
-        <button class="cl-btn no" onclick="clAnswer(3,'no')">Closed through level</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="cl-step" id="cl-4" style="opacity:.35">
-    <div class="cl-num" id="cn-4">4</div>
-    <div class="cl-body">
-      <div class="cl-action">Enter</div>
-      <div class="cl-desc"><strong style="color:#dce8f5">Market order only</strong> — at the exact close of the 15m trap candle. No limit orders, no waiting. Enter immediately in the direction of the rejection. If you missed the close, skip the trade.</div>
-      <div class="cl-answer">
-        <button class="cl-btn yes" onclick="clAnswer(4,'yes')">Entered at close ✓</button>
-        <button class="cl-btn no" onclick="clAnswer(4,'no')">Missed the close</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="cl-step" id="cl-5" style="opacity:.35">
-    <div class="cl-num" id="cn-5">5</div>
-    <div class="cl-body">
-      <div class="cl-action">Target</div>
-      <div class="cl-desc">Target = the <strong style="color:#dce8f5">next obvious H1 level</strong> in the opposite direction. Not a fixed pip target — the next landmark any beginner can see.</div>
-      <div class="cl-answer">
-        <button class="cl-btn yes" onclick="clAnswer(5,'yes')">Target identified ✓</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="cl-step" id="cl-6" style="opacity:.35">
-    <div class="cl-num" id="cn-6">6</div>
-    <div class="cl-body">
-      <div class="cl-action">Manage</div>
-      <div class="cl-desc"><strong style="color:#dce8f5">No hard stop loss.</strong> Use a mental exit: if a 15m candle closes decisively back through your entry level — manual close immediately. Use small size so a wick doesn't blow the account before the candle closes.</div>
-      <div class="cl-answer">
-        <button class="cl-btn yes" onclick="clAnswer(6,'yes')">Understood — trade active ✓</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="cl-result" id="cl-result"></div>
-  <button class="cl-reset" onclick="clReset()">↺ RESET CHECKLIST</button>
 </div>
 
 <!-- PAGE: SETTINGS -->
@@ -449,9 +327,6 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   </button>
   <button class="nb" onclick="nav('levels',this)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>Levels
-  </button>
-  <button class="nb" onclick="nav('checklist',this)">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Check
   </button>
   <button class="nb" onclick="nav('settings',this)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Alerts
@@ -606,136 +481,388 @@ async function getCandles(tf){
   }
 }
 
-// ── DMC ENGINE v2 ─────────────────────────────────────────
-// Refined: V-peaks (sharp reversals) + Previous Day H/L
-// Target: next obvious level in opposite direction (not origin)
+// ── DMS ENGINE v3 ─────────────────────────────────────────
+// Chris Hunter DMC: candle BODIES only, obvious V-peaks + PDH/PDL
+// Three phases: Draw (M/W/D) → Story (1H/4H) → Execute (15m)
+// Signal = wick through level, 15m BODY closes back inside = The Trap
 
-function atr(c,p=14){
-  const t=c.slice(1).map((x,i)=>Math.max(x.h-x.l,Math.abs(x.h-c[i].c),Math.abs(x.l-c[i].c)));
-  return t.slice(-p).reduce((s,v)=>s+v,0)/p;
+// ── UTILITIES ─────────────────────────────────────────────
+function atr(c, p=14){
+  const tr = c.slice(1).map((x,i)=>Math.max(x.h-x.l, Math.abs(x.h-c[i].c), Math.abs(x.l-c[i].c)));
+  return tr.slice(-p).reduce((s,v)=>s+v, 0) / p;
 }
 
-// V-peaks: sharp reversal candles (price hit point and immediately bounced)
-// More selective than general swing — requires strong rejection
-function findVPeaks(c){
-  const n=c.length, L=[];
-  for(let i=4;i<n-2;i++){
-    const x=c[i], sz=Math.abs(x.bh-x.bl);
-    if(sz<0.001)continue;
-    // V-peak high: new high vs neighbours but body closes back well below the wick high
-    // Requires: candle wick significantly above body (rejection wick)
-    const wickUp   = x.h - x.bh; // wick above body
-    const wickDown = x.bl - x.l; // wick below body
-    const isVHigh = x.h > Math.max(c[i-1].h,c[i-2].h,c[i+1].h,c[i+2].h) && wickUp > sz*0.4;
-    const isVLow  = x.l < Math.min(c[i-1].l,c[i-2].l,c[i+1].l,c[i+2].l) && wickDown > sz*0.4;
-    if(!isVHigh && !isVLow) continue;
-    const tested = c.slice(i+1).some(f=>f.bh>=x.bl&&f.bl<=x.bh);
-    L.push({
-      price:isVHigh?x.bh:x.bl,
-      bh:x.bh, bl:x.bl,
-      type:isVHigh?'resistance':'support',
-      tested, idx:i, source:'V-peak'
-    });
+// Candle body size
+function bodySize(k){ return Math.abs(k.bh - k.bl); }
+
+// Is this a significant swing high? Pure body-based, N bars lookback each side
+function isSwingHigh(c, i, N=3){
+  const bh = c[i].bh;
+  for(let j=i-N; j<=i+N; j++){
+    if(j===i || j<0 || j>=c.length) continue;
+    if(c[j].bh >= bh) return false;
+  }
+  return true;
+}
+function isSwingLow(c, i, N=3){
+  const bl = c[i].bl;
+  for(let j=i-N; j<=i+N; j++){
+    if(j===i || j<0 || j>=c.length) continue;
+    if(c[j].bl <= bl) return false;
+  }
+  return true;
+}
+
+// ── V-PEAK DETECTION ──────────────────────────────────────
+// Requires: local body extreme AND rejection wick (price wicked past but body rejected)
+// This is the core "Dumb Money" landmark — so obvious a beginner can see it
+function findVPeaks(c, tf){
+  const n = c.length, L = [];
+  const lookback = tf==='1W'||tf==='1D' ? 3 : 4;
+  const wickRatio = 0.35; // wick must be at least 35% of candle range for rejection
+
+  for(let i=lookback; i<n-lookback; i++){
+    const x = c[i];
+    const range = x.h - x.l;
+    if(range < 1) continue; // skip tiny candles
+
+    const wickUp   = x.h  - x.bh;
+    const wickDown = x.bl - x.l;
+
+    // V-HIGH: body high is local swing high AND upper wick shows rejection
+    if(isSwingHigh(c, i, lookback)){
+      const score = scoreLevel(c, i, 'resistance');
+      const tested = isLevelTested(c, i+1, x.bh, x.bl, 'resistance');
+      const strength = classifyStrength(score, range, wickUp);
+      if(strength !== 'weak'){
+        L.push({
+          price: x.bh,
+          bh: x.bh, bl: x.bh * 0.999, // tight zone at body top
+          type: 'resistance',
+          wickSize: wickUp,
+          score, strength, tested,
+          idx: i, tf,
+          source: `V-High${wickUp > range*wickRatio ? ' (wick reject)' : ''}`
+        });
+      }
+    }
+
+    // V-LOW: body low is local swing low AND lower wick shows rejection
+    if(isSwingLow(c, i, lookback)){
+      const score = scoreLevel(c, i, 'support');
+      const tested = isLevelTested(c, i+1, x.bh, x.bl, 'support');
+      const strength = classifyStrength(score, range, wickDown);
+      if(strength !== 'weak'){
+        L.push({
+          price: x.bl,
+          bh: x.bl * 1.001, bl: x.bl,
+          type: 'support',
+          wickSize: wickDown,
+          score, strength, tested,
+          idx: i, tf,
+          source: `V-Low${wickDown > range*wickRatio ? ' (wick reject)' : ''}`
+        });
+      }
+    }
   }
   return L;
 }
 
-// PDH/PDL from daily candles — previous day high and low
-function findPDHL(dCandles){
-  if(!dCandles||dCandles.length<2) return [];
-  const prev = dCandles[dCandles.length-2];
-  return [
-    {price:prev.h, bh:prev.h, bl:prev.bh, type:'resistance', tested:false, source:'PDH'},
-    {price:prev.l, bh:prev.bl, bl:prev.l,  type:'support',    tested:false, source:'PDL'},
-  ];
-}
+// Score a level: higher = more obvious = better DMC level
+// Considers: sharpness of reversal, how fast price left, # times respected
+function scoreLevel(c, i, type){
+  let score = 0;
+  const x = c[i];
+  const range = x.h - x.l;
 
-// All DMC levels = V-peaks + PDH/PDL
-function findDMCLevels(c, dCandles){
-  const vp = findVPeaks(c);
-  const pdhl = dCandles ? findPDHL(dCandles) : [];
-  return [...vp, ...pdhl];
-}
-
-// Find the next obvious level in opposite direction = target
-function findNextLevel(levels, currentPrice, direction){
-  // direction 'long' = find next resistance above price
-  // direction 'short' = find next support below price
-  if(direction==='long'){
-    const above = levels.filter(l=>l.price>currentPrice && l.type==='resistance')
-      .sort((a,b)=>a.price-b.price);
-    return above[0]?.price || currentPrice*1.02;
+  // 1. Velocity of departure (how fast price left = strong rejection)
+  const nextCandles = c.slice(i+1, i+4);
+  if(type==='resistance'){
+    const drop = nextCandles.reduce((s,k)=>s+(x.bh-k.bl),0)/Math.max(nextCandles.length,1);
+    score += Math.min(drop/range, 2) * 30;
   } else {
-    const below = levels.filter(l=>l.price<currentPrice && l.type==='support')
-      .sort((a,b)=>b.price-a.price);
-    return below[0]?.price || currentPrice*0.98;
+    const rise = nextCandles.reduce((s,k)=>s+(k.bh-x.bl),0)/Math.max(nextCandles.length,1);
+    score += Math.min(rise/range, 2) * 30;
   }
+
+  // 2. Wick rejection at the level
+  const wickUp = x.h - x.bh, wickDown = x.bl - x.l;
+  const rejection = type==='resistance' ? wickUp : wickDown;
+  score += Math.min(rejection/range, 1) * 20;
+
+  // 3. Prior touches without breaking (confluence)
+  const prevCandles = c.slice(Math.max(0,i-20), i);
+  const zone = range * 0.15;
+  const touches = prevCandles.filter(k=>
+    type==='resistance'
+      ? (k.h >= x.bh - zone && k.h <= x.bh + zone)
+      : (k.l <= x.bl + zone && k.l >= x.bl - zone)
+  ).length;
+  score += Math.min(touches, 3) * 15;
+
+  // 4. Clean approach (no consolidation = clear level)
+  const approach = c.slice(Math.max(0,i-3),i);
+  const directional = type==='resistance'
+    ? approach.every((k,j)=>j===0||k.bh>approach[j-1].bh)
+    : approach.every((k,j)=>j===0||k.bl<approach[j-1].bl);
+  if(directional) score += 10;
+
+  return Math.round(score);
 }
 
-function dmc(c, a, dCandles){
-  const n=c.length; if(n<20)return{sig:'NEUTRAL',type:'NONE',reason:'Insufficient data'};
-  const tol=a*0.15;
-  const levels=findDMCLevels(c, dCandles);
-  const rel=levels.filter(l=>Math.abs(l.price-c[n-1].c)<a*10);
+function classifyStrength(score, range, wick){
+  if(score >= 45) return 'strong';
+  if(score >= 20) return 'med';
+  return 'weak';
+}
 
-  // FAIL TO GAIN → SHORT
-  for(const lv of rel.filter(l=>l.type==='resistance')){
-    for(let lb=2;lb<=4;lb++){
-      if(n-lb<0)break;
-      const at=c[n-lb], cu=c[n-1];
-      // 15m candle wicked above but body closed back below
-      if(at.h>lv.price && at.bh<lv.price+tol && cu.c<lv.price){
-        const target=findNextLevel(levels, cu.c, 'short');
-        return{sig:'SHORT',type:'FAIL_GAIN',level:lv.price,target,reason:`${lv.source}: Failed to gain $${fmt(lv.price)} — wick through, body closed back below. Target: $${fmt(target)}`,strength:lb<=2?'high':'med',untested:!lv.tested};
+// Has this level been revisited by a body after it was formed?
+function isLevelTested(c, startIdx, bh, bl, type){
+  const zone = (bh - bl) * 0.5 + (bh * 0.002); // small tolerance
+  return c.slice(startIdx).some(k =>
+    type==='resistance'
+      ? k.bh >= bl - zone && k.bl <= bh + zone
+      : k.bl <= bh + zone && k.bh >= bl - zone
+  );
+}
+
+// ── PDH / PDL ─────────────────────────────────────────────
+// Previous Day High/Low — primary retail cluster zone
+function findPDHL(dCandles){
+  if(!dCandles || dCandles.length < 3) return [];
+  const prev = dCandles[dCandles.length-2];
+  const prev2 = dCandles[dCandles.length-3];
+  const levels = [];
+
+  // PDH — previous day HIGH (body high, not wick)
+  levels.push({
+    price: prev.bh, bh: prev.h, bl: prev.bh,
+    type: 'resistance', strength: 'strong',
+    tested: false, source: 'PDH', score: 70, tf: 'PDH/PDL'
+  });
+
+  // PDL — previous day LOW (body low)
+  levels.push({
+    price: prev.bl, bh: prev.bl, bl: prev.l,
+    type: 'support', strength: 'strong',
+    tested: false, source: 'PDL', score: 70, tf: 'PDH/PDL'
+  });
+
+  // Also add the day before if it formed a clear swing
+  if(Math.abs(prev2.bh - prev.bh)/prev.bh > 0.005){
+    levels.push({
+      price: prev2.bh, bh: prev2.h, bl: prev2.bh,
+      type: 'resistance', strength: 'med',
+      tested: false, source: 'PDH-2', score: 50, tf: 'PDH/PDL'
+    });
+  }
+  if(Math.abs(prev2.bl - prev.bl)/prev.bl > 0.005){
+    levels.push({
+      price: prev2.bl, bh: prev2.bl, bl: prev2.l,
+      type: 'support', strength: 'med',
+      tested: false, source: 'PDL-2', score: 50, tf: 'PDH/PDL'
+    });
+  }
+  return levels;
+}
+
+// ── COMBINE + DEDUPE + RANK ───────────────────────────────
+function findDMCLevels(c, dCandles, tf){
+  const vp = findVPeaks(c, tf);
+  const pdhl = dCandles ? findPDHL(dCandles) : [];
+  const all = [...vp, ...pdhl];
+
+  // Dedupe: merge levels within 0.3% of each other, keep highest score
+  const merged = [];
+  for(const l of all.sort((a,b)=>b.score-a.score)){
+    const dup = merged.find(m=>Math.abs(m.price-l.price)/l.price < 0.003);
+    if(!dup) merged.push(l);
+    else if(l.score > dup.score) Object.assign(dup, l); // upgrade with higher score
+  }
+  return merged;
+}
+
+// ── TARGET: next obvious level in opposite direction ──────
+function findNextLevel(levels, currentPrice, direction){
+  const sorted = [...levels].sort((a,b)=>a.price-b.price);
+  if(direction==='long'){
+    // Next resistance above current price
+    const candidates = sorted.filter(l=>l.price > currentPrice * 1.002 && l.type==='resistance');
+    if(candidates.length) return {price:candidates[0].price, source:candidates[0].source};
+  } else {
+    // Next support below current price
+    const candidates = sorted.filter(l=>l.price < currentPrice * 0.998 && l.type==='support');
+    if(candidates.length){ const c2=candidates[candidates.length-1]; return {price:c2.price, source:c2.source}; }
+  }
+  // Fallback: use ATR extension
+  return {price: direction==='long' ? currentPrice*1.025 : currentPrice*0.975, source:'ATR est.'};
+}
+
+// ── RR RATIO ──────────────────────────────────────────────
+function calcRR(entry, target, level){
+  // Stop = level + small buffer (where the trade is invalidated)
+  const risk   = Math.abs(entry - level) * 1.05;
+  const reward = Math.abs(entry - target);
+  if(risk < 1) return null;
+  return (reward / risk).toFixed(1);
+}
+
+// ── MAIN DMS SIGNAL ───────────────────────────────────────
+function dms(c, a, dCandles, tf){
+  const n = c.length;
+  if(n < 25) return {sig:'NEUTRAL',type:'NONE',reason:'Insufficient data'};
+
+  const levels = findDMCLevels(c, dCandles, tf);
+  const cur    = c[n-1];
+  const tol    = a * 0.12; // tolerance for "at level"
+
+  // Sort by proximity to current price
+  const nearby = levels
+    .filter(l=>Math.abs(l.price-cur.c) < a*14)
+    .sort((a,b)=>Math.abs(a.price-cur.c)-Math.abs(b.price-cur.c));
+
+  // ── FAIL TO GAIN (Short setup) ────────────────────────
+  // Pattern: candle wick exceeded resistance but BODY closed back below it
+  for(const lv of nearby.filter(l=>l.type==='resistance')){
+    for(let lb=1; lb<=5; lb++){
+      if(n-1-lb < 0) break;
+      const trap = c[n-1-lb]; // the trap candle
+      const confirm = c[n-1];  // current candle (confirming the failure)
+
+      // Trap candle: wick poked above the level, body closed BELOW it
+      const wickedThrough = trap.h > lv.price + (tol*0.3);
+      const bodyClosed    = trap.bh < lv.price + tol; // body below level
+      const stillBelow    = confirm.bh < lv.price + tol*2; // still below level
+      const notRecovered  = confirm.bh < lv.price; // hasn't reclaimed
+
+      if(wickedThrough && bodyClosed && stillBelow && notRecovered){
+        const tgt = findNextLevel(levels, confirm.c, 'short');
+        const rr  = calcRR(confirm.c, tgt.price, lv.price);
+        const dist = ((lv.price - confirm.c)/confirm.c*100).toFixed(2);
+        return {
+          sig: 'SHORT', type: 'FAIL_GAIN',
+          level: lv.price, target: tgt.price, rr,
+          strength: lv.strength, score: lv.score,
+          reason: `${lv.source} $${fmt(lv.price)} · ${dist}% above · Failed ${lb} bar${lb>1?'s':''} ago${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)} (${tgt.source})`,
+          detail: `Wick: $${fmt(trap.h)} | Body close: $${fmt(trap.bh)} | Resistance: $${fmt(lv.price)}`,
+          untested: !lv.tested
+        };
       }
     }
   }
 
-  // FAIL TO LOSE → LONG
-  for(const lv of rel.filter(l=>l.type==='support')){
-    for(let lb=2;lb<=4;lb++){
-      if(n-lb<0)break;
-      const at=c[n-lb], cu=c[n-1];
-      // 15m candle wicked below but body closed back above
-      if(at.l<lv.price && at.bl>lv.price-tol && cu.c>lv.price){
-        const target=findNextLevel(levels, cu.c, 'long');
-        return{sig:'LONG',type:'FAIL_LOSE',level:lv.price,target,reason:`${lv.source}: Failed to lose $${fmt(lv.price)} — wick through, body closed back above. Target: $${fmt(target)}`,strength:lb<=2?'high':'med',untested:!lv.tested};
+  // ── FAIL TO LOSE (Long setup) ─────────────────────────
+  // Pattern: candle wick broke below support but BODY closed back above it
+  for(const lv of nearby.filter(l=>l.type==='support')){
+    for(let lb=1; lb<=5; lb++){
+      if(n-1-lb < 0) break;
+      const trap    = c[n-1-lb];
+      const confirm = c[n-1];
+
+      const wickedThrough = trap.l < lv.price - (tol*0.3);
+      const bodyClosed    = trap.bl > lv.price - tol;
+      const stillAbove    = confirm.bl > lv.price - tol*2;
+      const notDropped    = confirm.bl > lv.price;
+
+      if(wickedThrough && bodyClosed && stillAbove && notDropped){
+        const tgt = findNextLevel(levels, confirm.c, 'long');
+        const rr  = calcRR(confirm.c, tgt.price, lv.price);
+        const dist = ((confirm.c - lv.price)/confirm.c*100).toFixed(2);
+        return {
+          sig: 'LONG', type: 'FAIL_LOSE',
+          level: lv.price, target: tgt.price, rr,
+          strength: lv.strength, score: lv.score,
+          reason: `${lv.source} $${fmt(lv.price)} · ${dist}% below · Failed ${lb} bar${lb>1?'s':''} ago${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)} (${tgt.source})`,
+          detail: `Wick: $${fmt(trap.l)} | Body close: $${fmt(trap.bl)} | Support: $${fmt(lv.price)}`,
+          untested: !lv.tested
+        };
       }
     }
   }
 
-  // AT LEVEL — price approaching but no failure yet
-  const near=rel.sort((a,b)=>Math.abs(a.price-c[n-1].c)-Math.abs(b.price-c[n-1].c))[0];
-  if(near&&Math.abs(near.price-c[n-1].c)<a*1.2)
-    return{sig:'NEUTRAL',type:'AT_LEVEL',level:near.price,target:null,reason:`At ${near.source} $${fmt(near.price)} — watch 15m candle for trap`,strength:'low',untested:!near.tested};
+  // ── AT LEVEL — watching zone ──────────────────────────
+  // Price is within ATR distance of an untested level
+  const atLevel = nearby.find(l=>
+    Math.abs(l.price-cur.c) < a * 1.5 &&
+    l.score >= 20
+  );
+  if(atLevel){
+    const dir = atLevel.type==='resistance' ? 'Watch for SHORT trap' : 'Watch for LONG trap';
+    const dist = ((atLevel.price - cur.c)/cur.c*100).toFixed(2);
+    return {
+      sig: 'NEUTRAL', type: 'AT_LEVEL',
+      level: atLevel.price, target: null,
+      strength: atLevel.strength, score: atLevel.score,
+      reason: `${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · ${dir}`,
+      detail: `Score: ${atLevel.score} · ${atLevel.strength} level · ${atLevel.tested?'tested':'UNTESTED'}`,
+      untested: !atLevel.tested
+    };
+  }
 
-  return{sig:'NEUTRAL',type:'NONE',reason:'No DMC setup — price between levels',strength:'none'};
+  // ── NO SETUP ─────────────────────────────────────────
+  // Show nearest levels as context
+  const nearest = nearby.slice(0,2);
+  const ctx = nearest.map(l=>`${l.type==='resistance'?'R':'S'} $${fmt(l.price)}`).join(' / ') || '—';
+  return {
+    sig: 'NEUTRAL', type: 'NONE',
+    level: null, target: null,
+    reason: `Between levels — nearest: ${ctx}`,
+    detail: 'Wait for price to reach a key level'
+  };
 }
 
-function nextMove(wC,dC){
-  const wn=wC.length,dn=dC.length;
-  if(wn<10||dn<10)return{dir:'UNCLEAR',reason:'Insufficient HTF data'};
-  const wB=wC[wn-1].bh>wC[wn-2].bh&&wC[wn-2].bh>wC[wn-3].bh;
-  const wBr=wC[wn-1].bl<wC[wn-2].bl&&wC[wn-2].bl<wC[wn-3].bl;
-  const dr=dC.slice(-5);let dG=0,dL=0;
-  for(let i=1;i<dr.length;i++){if(dr[i].bh>dr[i-1].bh)dG++;else dL++;}
-  const dF=dC[dn-1].bh<dC[dn-2].bh&&dC[dn-2].bh>dC[dn-3].bh;
-  if(wB&&dG>=3)return{dir:'UP',reason:`Weekly higher highs · Daily ${dG}/4 gaining`};
-  if(wBr&&dL>=3)return{dir:'DOWN',reason:`Weekly lower lows · Daily ${dL}/4 losing`};
-  if(dF&&dL>=2)return{dir:'DOWN',reason:`Daily body failed to close above last high`};
-  if(wB||dG>=3)return{dir:'UP',reason:`Weekly ${wB?'bullish':'neutral'} · Daily gaining ${dG}/4`};
-  if(wBr||dL>=3)return{dir:'DOWN',reason:`Weekly ${wBr?'bearish':'neutral'} · Daily losing ${dL}/4`};
-  return{dir:'UNCLEAR',reason:'Mixed HTF — no clear direction'};
+// ── HTF STORY (1H + 4H analysis) ─────────────────────────
+// Determines if market is "gaining" or "failing" at key levels
+function nextMove(wC, dC){
+  const wn=wC.length, dn=dC.length;
+  if(wn<10||dn<10) return {dir:'UNCLEAR',reason:'Insufficient HTF data'};
+
+  // Weekly structure: consecutive body highs = bullish HTF
+  const wLast3 = wC.slice(-4);
+  const wGaining = wLast3.every((k,i)=>i===0||k.bh>wLast3[i-1].bh);
+  const wFailing = wLast3.every((k,i)=>i===0||k.bl<wLast3[i-1].bl);
+
+  // Daily: recent bodies gaining or losing?
+  const dLast = dC.slice(-6);
+  let dBullCount=0, dBearCount=0;
+  for(let i=1;i<dLast.length;i++){
+    if(dLast[i].bh > dLast[i-1].bh) dBullCount++;
+    else dBearCount++;
+  }
+
+  // Daily failed to close above prior high = bearish story
+  const dn1=dC[dn-1], dn2=dC[dn-2], dn3=dC[dn-3];
+  const dailyFailedHigh = dn1.bh < dn2.bh && dn2.bh > dn3.bh; // dn2 was local high, dn1 failed
+  const dailyFailedLow  = dn1.bl > dn2.bl && dn2.bl < dn3.bl;
+
+  // Score
+  if(wGaining && dBullCount>=4) return {dir:'UP',reason:`Weekly + daily bodies gaining — ${dBullCount}/5 days bullish`};
+  if(wFailing  && dBearCount>=4) return {dir:'DOWN',reason:`Weekly + daily bodies losing — ${dBearCount}/5 days bearish`};
+  if(dailyFailedHigh && dBearCount>=3) return {dir:'DOWN',reason:`Daily failed to close above last high · ${dBearCount}/5 days losing`};
+  if(dailyFailedLow  && dBullCount>=3) return {dir:'UP',reason:`Daily failed to close below last low · ${dBullCount}/5 days gaining`};
+  if(wGaining) return {dir:'UP',reason:`Weekly bullish structure · Daily mixed (${dBullCount}b/${dBearCount}bear)`};
+  if(wFailing)  return {dir:'DOWN',reason:`Weekly bearish structure · Daily mixed (${dBearCount}b/${dBullCount}bull)`};
+  return {dir:'UNCLEAR',reason:'No clear HTF direction — both sides contested'};
 }
 
-function collectLevels(wC,dC,p){
-  const wL=findVPeaks(wC).map(l=>({...l,tf:'1W'}));
-  const dL=findVPeaks(dC).map(l=>({...l,tf:'1D'}));
-  const pdhl=findPDHL(dC).map(l=>({...l,tf:'PDH/PDL'}));
-  const all=[...wL,...dL,...pdhl].sort((a,b)=>b.price-a.price);
-  const dd=[];
-  for(const l of all){if(!dd.find(d=>Math.abs(d.price-l.price)/l.price<0.004))dd.push(l);}
-  return[...dd.filter(l=>l.price>p).slice(0,6),...dd.filter(l=>l.price<p).slice(-6).reverse()];
+// ── COLLECT ALL LEVELS FOR LEVELS PAGE ───────────────────
+function collectLevels(wC, dC, p){
+  const wLvls = findVPeaks(wC,'1W').map(l=>({...l,tf:'1W'}));
+  const dLvls = findVPeaks(dC,'1D').map(l=>({...l,tf:'1D'}));
+  const pdhl  = findPDHL(dC).map(l=>({...l,tf:'PDH/PDL'}));
+
+  const all = [...wLvls,...dLvls,...pdhl].sort((a,b)=>b.price-a.price);
+
+  // Dedupe within 0.4%
+  const dd = [];
+  for(const l of all){
+    if(!dd.find(d=>Math.abs(d.price-l.price)/l.price<0.004)) dd.push(l);
+  }
+
+  // Return 8 above + 8 below current price, sorted by proximity
+  const above = dd.filter(l=>l.price>p).slice(0,8);
+  const below = dd.filter(l=>l.price<p).slice(-8).reverse();
+  return [...above,...below].sort((a,b)=>b.price-a.price);
 }
 
 // ── RENDER ────────────────────────────────────────────────
@@ -784,7 +911,10 @@ function renderCards(){
     if(!r)return`<div class="tfc none"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type NONE">···</span><span class="tfc-sig WAIT" style="margin-left:auto">—</span></div><div class="tfc-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div></div>`;
     const cls=r.sig==='LONG'?'long':r.sig==='SHORT'?'short':'neutral';
     const tl=r.type==='FAIL_GAIN'?'FAIL TO GAIN':r.type==='FAIL_LOSE'?'FAIL TO LOSE':r.type==='AT_LEVEL'?'AT LEVEL':'NO SETUP';
-    return`<div class="tfc ${cls}"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type ${r.type}">${tl}</span><span class="tfc-sig ${r.sig}" style="margin-left:auto">${r.sig}</span></div><div class="tfc-reason">${r.reason}</div>${r.level?`<div class="tfc-prices"><span class="tcp"><span class="tcp-l">LVL</span>$${fmt(r.level)}</span>${r.target?`<span class="tcp"><span class="tcp-l">TGT</span><span style="color:${r.sig==='LONG'?'#00e676':'#ff3d5a'}">$${fmt(r.target)}</span></span>`:''}</div>`:''}</div>`;
+    const rrBadge=r.rr?`<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:2px 6px;border-radius:4px;background:rgba(255,193,7,.1);color:#ffc107;border:1px solid rgba(255,193,7,.2);margin-left:auto">R:R ${r.rr}</span>`:'';
+    const lvlScore=r.score?`<span style="font-family:'IBM Plex Mono',monospace;font-size:8px;color:#3d5068;margin-left:6px">score ${r.score}</span>`:'';
+    return`<div class="tfc ${cls}"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type ${r.type}">${tl}</span>${rrBadge}</div><div class="tfc-head" style="margin-top:5px;margin-bottom:0">${r.sig!=='NEUTRAL'?`<span class="tfc-sig ${r.sig}">${r.sig}</span>`:''}<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:${r.strength==='strong'?'#00e676':r.strength==='med'?'#ffc107':'#3d5068'};margin-left:4px">${r.strength||''}</span>${lvlScore}</div><div class="tfc-reason" style="margin-top:6px">${r.reason}</div>${r.detail?`<div class="tfc-reason" style="color:#3d5068;margin-top:3px;font-size:8px">${r.detail}</div>`:''
+    }${r.level?`<div class="tfc-prices"><span class="tcp"><span class="tcp-l">LVL</span>$${fmt(r.level)}</span>${r.target?`<span class="tcp"><span class="tcp-l">TGT</span><span style="color:${r.sig==='LONG'?'#00e676':'#ff3d5a'}">$${fmt(r.target)}</span></span>`:''}</div>`:''}</div>`;
   }).join('');
 }
 
@@ -792,7 +922,8 @@ function renderLevels(){
   if(!allLevels.length){document.getElementById('lvl-list').innerHTML='<div class="empty">No levels found</div>';return;}
   document.getElementById('lvl-list').innerHTML=allLevels.map(l=>{
     const isR=l.price>price,dist=((l.price-price)/price*100).toFixed(2),cls=isR?'R':'S';
-    return`<div class="lvl-item${!l.tested?' untested':''}"><span class="lvl-badge ${cls}">${isR?'RES':'SUP'}</span><div class="lvl-info"><div class="lvl-tf">${l.tf||'—'} · ${l.source||''}${!l.tested?'<span class="lvl-untag">● UNTESTED</span>':''}</div></div><div class="lvl-right"><div class="lvl-price ${cls}">$${fmt(l.price)}</div><div class="lvl-dist">${dist>0?'+':''}${dist}%</div></div></div>`;
+    const strengthCol=l.strength==='strong'?'#00e676':l.strength==='med'?'#ffc107':'#5d7a99';
+    return`<div class="lvl-item${!l.tested?' untested':''}"><span class="lvl-badge ${cls}">${isR?'RES':'SUP'}</span><div class="lvl-info"><div class="lvl-tf">${l.tf||'—'} · ${l.source||''}${!l.tested?'<span class="lvl-untag">● UNTESTED</span>':''}</div></div><div class="lvl-right"><div class="lvl-price ${cls}">$${fmt(l.price)}</div><div class="lvl-dist">${dist>0?'+':''}${dist}% · <span style='color:${strengthCol}'>${l.strength||''}</span></div></div></div>`;
   }).join('');
 }
 
@@ -811,53 +942,6 @@ function setStatus(s,t){
   document.getElementById('status-txt').textContent=t;
 }
 
-// ── CHECKLIST ─────────────────────────────────────────────
-function clReset(){
-  clState={step:1, answers:{}};
-  for(let i=1;i<=6;i++){
-    const n=document.getElementById('cn-'+i);
-    n.className='cl-num'+(i===1?' active':'');
-    n.textContent=i;
-    const s=document.getElementById('cl-'+i);
-    s.style.opacity=i===1?'1':'0.35';
-    s.querySelectorAll('.cl-btn').forEach(b=>b.classList.remove('selected-yes','selected-no'));
-  }
-  const res=document.getElementById('cl-result');
-  res.className='cl-result';
-  res.innerHTML='';
-}
-function clAnswer(step, ans){
-  clState.answers[step]=ans;
-  const numEl=document.getElementById('cn-'+step);
-  numEl.classList.add('done');
-  numEl.textContent='✓';
-  const stepEl=document.getElementById('cl-'+step);
-  stepEl.querySelectorAll('.cl-btn').forEach(b=>{
-    b.classList.remove('selected-yes','selected-no');
-    if((ans==='yes'&&b.classList.contains('yes'))||(ans==='no'&&b.classList.contains('no')))
-      b.classList.add(ans==='yes'?'selected-yes':'selected-no');
-  });
-  if(ans==='no'){showResult(step,'no');return;}
-  const next=step+1;
-  if(next<=6){
-    const nextEl=document.getElementById('cl-'+next);
-    nextEl.style.opacity='1';
-    document.getElementById('cn-'+next).classList.add('active');
-    clState.step=next;
-  } else if(step===6){
-    showResult(6,'yes');
-  }
-}
-function showResult(step, ans){
-  const res=document.getElementById('cl-result');
-  res.classList.add('show');
-  if(step===1&&ans==='no'){res.className='cl-result show skip';res.innerHTML='❌ <strong>No trade.</strong> No obvious level visible. Come back when a clear V-peak or PDH/PDL is within range.';}
-  else if(step===2&&ans==='no'){res.className='cl-result show wait';res.innerHTML='⏳ <strong>Wait.</strong> Price not at the level yet. Set an alert and check back when price touches it.';}
-  else if(step===3&&ans==='no'){res.className='cl-result show skip';res.innerHTML='❌ <strong>No trade.</strong> Candle closed through the level — breakout confirmed, no setup here.';}
-  else if(step===4&&ans==='no'){res.className='cl-result show wait';res.innerHTML='⏳ <strong>Missed the entry.</strong> Never chase. Wait and reset — the next setup will come.';}
-  else if(step===6){res.className='cl-result show enter';res.innerHTML='✅ <strong>Trade active.</strong> You are in. Monitor the 15m candles — if one closes decisively back through your level, exit manually immediately. Target is the next obvious H1 level.';}
-}
-
 // ── MAIN ──────────────────────────────────────────────────
 async function run(){
   if(running)return;running=true;
@@ -871,7 +955,7 @@ async function run(){
     const dCandles=kR[1].status==='fulfilled'?kR[1].value:null; // daily candles for PDH/PDL context
     kR.forEach((res,i)=>{
       if(res.status==='rejected'){console.warn(TFS[i].l,res.reason);return;}
-      const c=res.value,a=atr(c),d=dmc(c,a,dCandles);
+      const c=res.value,a=atr(c),d=dms(c,a,dCandles,TFS[i].l);
       results[TFS[i].l]=d;
       // Fire alerts for active signals
       if(d.type!=='NONE'){
