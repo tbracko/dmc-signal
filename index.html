@@ -744,12 +744,12 @@ function findDMCLevels(c, dCandles, tf){
 function findNextLevel(levels, currentPrice, direction){
   const sorted = [...levels].sort((a,b)=>a.price-b.price);
   if(direction==='long'){
-    // Next resistance above current price
-    const candidates = sorted.filter(l=>l.price > currentPrice * 1.002 && l.type==='resistance');
+    // Next level above current price (any type — nearest resistance above)
+    const candidates = sorted.filter(l=>l.price > currentPrice * 1.002);
     if(candidates.length) return {price:candidates[0].price, source:candidates[0].source};
   } else {
-    // Next support below current price
-    const candidates = sorted.filter(l=>l.price < currentPrice * 0.998 && l.type==='support');
+    // Next level below current price (any type — nearest support below)
+    const candidates = sorted.filter(l=>l.price < currentPrice * 0.998);
     if(candidates.length){ const c2=candidates[candidates.length-1]; return {price:c2.price, source:c2.source}; }
   }
   // Fallback: use ATR extension
@@ -894,12 +894,17 @@ function dms(c, a, dCandles, tf, htfBias){
   }
 
   // ── NO SETUP ─────────────────────────────────────────
-  const nearest = nearby.slice(0,2);
-  const ctx = nearest.map(l=>`${l.type==='resistance'?'R':'S'} $${fmt(l.price)}`).join(' / ') || '—';
+  // Show nearest level above and nearest level below current price
+  const above = nearby.filter(l=>l.price > cur.c).sort((a,b)=>a.price-b.price)[0];
+  const below = nearby.filter(l=>l.price < cur.c).sort((a,b)=>b.price-a.price)[0];
+  const ctx = [
+    above ? `R $${fmt(above.price)}` : null,
+    below ? `S $${fmt(below.price)}` : null
+  ].filter(Boolean).join(' / ') || '—';
   return {
     sig:'NEUTRAL', type:'NONE',
     level:null, target:null,
-    reason:`Between levels — nearest: ${ctx}`,
+    reason:`Between levels — ${ctx}`,
     detail:'Wait for price to reach a key level'
   };
 }
