@@ -821,7 +821,7 @@ function dms(c, a, dCandles, tf){
     l.score >= 20
   );
   if(atLevel){
-    const dir = atLevel.type==='resistance' ? 'Watch for SHORT trap' : 'Watch for LONG trap';
+    const dir = atLevel.type==='resistance' ? 'APPROACHING · no trap yet' : 'APPROACHING · no trap yet';
     const dist = ((atLevel.price - cur.c)/cur.c*100).toFixed(2);
     return {
       sig: 'NEUTRAL', type: 'AT_LEVEL',
