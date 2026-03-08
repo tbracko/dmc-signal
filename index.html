@@ -488,12 +488,17 @@ async function getCandles(tf){
   const MS_MIN=60000, MS_H=3600000, MS_D=86400000, MS_W=604800000;
   switch(tf.l){
     case'1W':{
-      // Use 730 days of price ticks → aggregate into weekly candles
-      const r=await fetch(`${CG}/coins/${COIN}/market_chart?vs_currency=usd&days=730`);
-      if(!r.ok)throw new Error('1W fetch: '+r.status);
-      const d=await r.json();
-      if(!d.prices?.length)throw new Error('1W: empty');
-      return aggregateCandles(d.prices, MS_W);
+      // 365 days → ~52 weekly candles, faster than 730d
+      const ctrl=new AbortController();
+      const tid=setTimeout(()=>ctrl.abort(),12000); // 12s timeout
+      try{
+        const r=await fetch(`${CG}/coins/${COIN}/market_chart?vs_currency=usd&days=365`,{signal:ctrl.signal});
+        clearTimeout(tid);
+        if(!r.ok)throw new Error('1W fetch: '+r.status);
+        const d=await r.json();
+        if(!d.prices?.length)throw new Error('1W: empty');
+        return aggregateCandles(d.prices, MS_W);
+      }catch(e){clearTimeout(tid);throw e;}
     }
     case'1D':{
       // Use 180 days of price ticks → aggregate into daily candles
