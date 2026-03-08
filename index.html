@@ -254,11 +254,32 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <div class="page" id="page-checklist">
   <div class="sh">DMC Trade Checklist · Chris Hunter</div>
 
+  <div style="margin:0 16px 14px;padding:14px 16px;background:#0c0f14;border:1px solid #1a2230;border-left:3px solid #ffc107;border-radius:10px">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;letter-spacing:.2em;color:#3d5068;margin-bottom:6px">KEY PRINCIPLE</div>
+    <div style="font-family:'Sora',sans-serif;font-size:12px;color:#ffc107;line-height:1.6;font-style:italic">"If it can't go higher, it must go lower. If it succeeds it must continue, if it fails it must reverse."</div>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#3d5068;margin-top:4px">— Chris Hunter</div>
+  </div>
+
+  <div style="margin:0 16px 12px;display:flex;gap:6px">
+    <div style="flex:1;padding:10px;background:#0c0f14;border:1px solid #1a2230;border-radius:8px;text-align:center">
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;color:#3d5068;margin-bottom:3px">PHASE 1 · DRAW</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#5d7a99">Monthly/Weekly/Daily</div>
+    </div>
+    <div style="flex:1;padding:10px;background:#0c0f14;border:1px solid #1a2230;border-radius:8px;text-align:center">
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;color:#3d5068;margin-bottom:3px">PHASE 2 · STORY</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#5d7a99">1H / 4H</div>
+    </div>
+    <div style="flex:1;padding:10px;background:#0c0f14;border:1px solid #1a2230;border-radius:8px;text-align:center">
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;color:#3d5068;margin-bottom:3px">PHASE 3 · EXEC</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#5d7a99">15m / 5m / 1m</div>
+    </div>
+  </div>
+
   <div class="cl-step" id="cl-1">
     <div class="cl-num active" id="cn-1">1</div>
     <div class="cl-body">
-      <div class="cl-action">Scan</div>
-      <div class="cl-desc">Identify the 2 most obvious levels on H1 or Daily. Look for V-peaks (sharp reversals), Previous Day High/Low. If you have to squint, it's not a DMC level.</div>
+      <div class="cl-action">Scan · Monthly → Weekly → Daily</div>
+      <div class="cl-desc">Draw levels top-down using <strong style="color:#dce8f5">candle bodies only</strong> (not wicks). Look for V-shapes and PDH/PDL — places so obvious any beginner can see them. If you have to squint, it's not a DMC level.</div>
       <div class="cl-answer">
         <button class="cl-btn yes" onclick="clAnswer(1,'yes')">Level found ✓</button>
         <button class="cl-btn no" onclick="clAnswer(1,'no')">No clear level</button>
@@ -269,8 +290,8 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   <div class="cl-step" id="cl-2" style="opacity:.35">
     <div class="cl-num" id="cn-2">2</div>
     <div class="cl-body">
-      <div class="cl-action">Wait</div>
-      <div class="cl-desc">Do nothing until price touches one of those levels. Do not enter early. Patience is the edge.</div>
+      <div class="cl-action">Wait · Define the Story on 1H / 4H</div>
+      <div class="cl-desc">Wait for price to reach the level. While waiting, use 1H/4H to determine the "story": is price <strong style="color:#00e676">gaining</strong> levels (continuation) or <strong style="color:#ff3d5a">failing</strong> to hold them (reversal)? Do not enter early.</div>
       <div class="cl-answer">
         <button class="cl-btn yes" onclick="clAnswer(2,'yes')">Price at level ✓</button>
         <button class="cl-btn no" onclick="clAnswer(2,'no')">Not there yet</button>
@@ -294,10 +315,10 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
     <div class="cl-num" id="cn-4">4</div>
     <div class="cl-body">
       <div class="cl-action">Enter</div>
-      <div class="cl-desc">Market order immediately at the close of that 15m trap candle. No limit orders. Enter in the direction of the fake-out rejection.</div>
+      <div class="cl-desc"><strong style="color:#dce8f5">Market order only</strong> — at the exact close of the 15m trap candle. No limit orders, no waiting. Enter immediately in the direction of the rejection. If you missed the close, skip the trade.</div>
       <div class="cl-answer">
-        <button class="cl-btn yes" onclick="clAnswer(4,'yes')">Entered ✓</button>
-        <button class="cl-btn no" onclick="clAnswer(4,'no')">Missed it</button>
+        <button class="cl-btn yes" onclick="clAnswer(4,'yes')">Entered at close ✓</button>
+        <button class="cl-btn no" onclick="clAnswer(4,'no')">Missed the close</button>
       </div>
     </div>
   </div>
@@ -306,9 +327,20 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
     <div class="cl-num" id="cn-5">5</div>
     <div class="cl-body">
       <div class="cl-action">Target</div>
-      <div class="cl-desc">Target = the next obvious level in the opposite direction. Exit manually if a 15m candle closes decisively against your trade.</div>
+      <div class="cl-desc">Target = the <strong style="color:#dce8f5">next obvious H1 level</strong> in the opposite direction. Not a fixed pip target — the next landmark any beginner can see.</div>
       <div class="cl-answer">
-        <button class="cl-btn yes" onclick="clAnswer(5,'yes')">Target set ✓</button>
+        <button class="cl-btn yes" onclick="clAnswer(5,'yes')">Target identified ✓</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="cl-step" id="cl-6" style="opacity:.35">
+    <div class="cl-num" id="cn-6">6</div>
+    <div class="cl-body">
+      <div class="cl-action">Manage</div>
+      <div class="cl-desc"><strong style="color:#dce8f5">No hard stop loss.</strong> Use a mental exit: if a 15m candle closes decisively back through your entry level — manual close immediately. Use small size so a wick doesn't blow the account before the candle closes.</div>
+      <div class="cl-answer">
+        <button class="cl-btn yes" onclick="clAnswer(6,'yes')">Understood — trade active ✓</button>
       </div>
     </div>
   </div>
@@ -780,47 +812,9 @@ function setStatus(s,t){
 }
 
 // ── CHECKLIST ─────────────────────────────────────────────
-let clState={step:1, answers:{}};
-function clAnswer(step, ans){
-  clState.answers[step]=ans;
-  // Visual update
-  const numEl=document.getElementById('cn-'+step);
-  numEl.classList.add('done');
-  numEl.textContent='✓';
-  // Mark button selected
-  const stepEl=document.getElementById('cl-'+step);
-  stepEl.querySelectorAll('.cl-btn').forEach(b=>{
-    b.classList.remove('selected-yes','selected-no');
-    if((ans==='yes'&&b.classList.contains('yes'))||(ans==='no'&&b.classList.contains('no')))
-      b.classList.add(ans==='yes'?'selected-yes':'selected-no');
-  });
-  // Check result conditions
-  if(ans==='no'){
-    showResult(step, 'no');
-    return;
-  }
-  const next=step+1;
-  if(next<=5){
-    const nextEl=document.getElementById('cl-'+next);
-    nextEl.style.opacity='1';
-    document.getElementById('cn-'+next).classList.add('active');
-    clState.step=next;
-  } else if(step===5){
-    showResult(5,'yes');
-  }
-}
-function showResult(step, ans){
-  const res=document.getElementById('cl-result');
-  res.classList.add('show');
-  if(step===1&&ans==='no'){res.className='cl-result show skip';res.innerHTML='❌ <strong>No trade.</strong> No obvious level visible. Come back when a clear V-peak or PDH/PDL is within range.';}
-  else if(step===2&&ans==='no'){res.className='cl-result show wait';res.innerHTML='⏳ <strong>Wait.</strong> Price not at the level yet. Set an alert and check back when price touches it.';}
-  else if(step===3&&ans==='no'){res.className='cl-result show skip';res.innerHTML='❌ <strong>No trade.</strong> Candle closed through the level — breakout confirmed, no setup here.';}
-  else if(step===4&&ans==='no'){res.className='cl-result show wait';res.innerHTML='⏳ <strong>Missed entry.</strong> Wait for the next clear setup. Never chase.';}
-  else if(step===5){res.className='cl-result show enter';res.innerHTML='✅ <strong>Trade active.</strong> Entry taken, target set. Monitor manually — exit if a 15m candle closes decisively against you.';}
-}
 function clReset(){
   clState={step:1, answers:{}};
-  for(let i=1;i<=5;i++){
+  for(let i=1;i<=6;i++){
     const n=document.getElementById('cn-'+i);
     n.className='cl-num'+(i===1?' active':'');
     n.textContent=i;
@@ -831,6 +825,37 @@ function clReset(){
   const res=document.getElementById('cl-result');
   res.className='cl-result';
   res.innerHTML='';
+}
+function clAnswer(step, ans){
+  clState.answers[step]=ans;
+  const numEl=document.getElementById('cn-'+step);
+  numEl.classList.add('done');
+  numEl.textContent='✓';
+  const stepEl=document.getElementById('cl-'+step);
+  stepEl.querySelectorAll('.cl-btn').forEach(b=>{
+    b.classList.remove('selected-yes','selected-no');
+    if((ans==='yes'&&b.classList.contains('yes'))||(ans==='no'&&b.classList.contains('no')))
+      b.classList.add(ans==='yes'?'selected-yes':'selected-no');
+  });
+  if(ans==='no'){showResult(step,'no');return;}
+  const next=step+1;
+  if(next<=6){
+    const nextEl=document.getElementById('cl-'+next);
+    nextEl.style.opacity='1';
+    document.getElementById('cn-'+next).classList.add('active');
+    clState.step=next;
+  } else if(step===6){
+    showResult(6,'yes');
+  }
+}
+function showResult(step, ans){
+  const res=document.getElementById('cl-result');
+  res.classList.add('show');
+  if(step===1&&ans==='no'){res.className='cl-result show skip';res.innerHTML='❌ <strong>No trade.</strong> No obvious level visible. Come back when a clear V-peak or PDH/PDL is within range.';}
+  else if(step===2&&ans==='no'){res.className='cl-result show wait';res.innerHTML='⏳ <strong>Wait.</strong> Price not at the level yet. Set an alert and check back when price touches it.';}
+  else if(step===3&&ans==='no'){res.className='cl-result show skip';res.innerHTML='❌ <strong>No trade.</strong> Candle closed through the level — breakout confirmed, no setup here.';}
+  else if(step===4&&ans==='no'){res.className='cl-result show wait';res.innerHTML='⏳ <strong>Missed the entry.</strong> Never chase. Wait and reset — the next setup will come.';}
+  else if(step===6){res.className='cl-result show enter';res.innerHTML='✅ <strong>Trade active.</strong> You are in. Monitor the 15m candles — if one closes decisively back through your level, exit manually immediately. Target is the next obvious H1 level.';}
 }
 
 // ── MAIN ──────────────────────────────────────────────────
