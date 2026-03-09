@@ -606,6 +606,25 @@ function isSwingLow(c, i, N=3){
 // ── V-PEAK DETECTION ──────────────────────────────────────
 // Requires: local body extreme AND rejection wick (price wicked past but body rejected)
 // This is the core "Dumb Money" landmark — so obvious a beginner can see it
+// Detect if a level has been flipped by a clean body close on the other side
+// Returns: 'resistance' | 'support' | original type (if no flip detected)
+function detectFlippedLevel(c, formationIdx, originalType, levelPrice){
+  // Look at all candles after the level was formed
+  const subsequent = c.slice(formationIdx + 1);
+  const tol = levelPrice * 0.003; // 0.3% tolerance
+  
+  if(originalType === 'resistance'){
+    // Flips to support if: a candle body cleanly closed ABOVE the level
+    const broke = subsequent.some(k => k.bl > levelPrice - tol && k.bh > levelPrice + tol);
+    if(broke) return 'flipped_support'; // was resistance, now acts as support
+  } else {
+    // Flips to resistance if: a candle body cleanly closed BELOW the level
+    const broke = subsequent.some(k => k.bh < levelPrice + tol && k.bl < levelPrice - tol);
+    if(broke) return 'flipped_resistance'; // was support, now acts as resistance
+  }
+  return originalType; // no flip
+}
+
 function findVPeaks(c, tf){
   const n = c.length, L = [];
   const lookback = tf==='1W'||tf==='1D' ? 3 : 4;
@@ -629,10 +648,12 @@ function findVPeaks(c, tf){
       else if(testCount === 1) score = Math.round(score * 0.75);
       const strength = classifyStrength(score, range, wickUp);
       if(strength !== 'weak'){
+        const flippedTypeR = detectFlippedLevel(c, i, 'resistance', x.bh);
         L.push({
           price: x.bh,
           bh: x.bh, bl: x.bh * 0.999,
           type: 'resistance',
+          flippedType: flippedTypeR, // 'flipped_support' if price broke above it
           wickSize: wickUp,
           score, strength, tested, testCount,
           idx: i, tf,
@@ -650,10 +671,12 @@ function findVPeaks(c, tf){
       else if(testCount === 1) score = Math.round(score * 0.75);
       const strength = classifyStrength(score, range, wickDown);
       if(strength !== 'weak'){
+        const flippedTypeS = detectFlippedLevel(c, i, 'support', x.bl);
         L.push({
           price: x.bl,
           bh: x.bl * 1.001, bl: x.bl,
           type: 'support',
+          flippedType: flippedTypeS, // 'flipped_resistance' if price broke below it
           wickSize: wickDown,
           score, strength, tested, testCount,
           idx: i, tf,
@@ -867,16 +890,49 @@ function dms(c, a, dCandles, tf, htfBias){
 
     // BLIND ENTRY: untested, strong, price is touching it right now
     // Only on 1W/1D — 4H/1H still just show AT_LEVEL context
-    const blindCandidate = isHTF ? nearby.find(l=>
-      !l.tested &&
-      l.strength === 'strong' &&
-      Math.abs(l.price - cur.c) < a * 0.8 // price very close — actually at the level
-    ) : null;
+    //
+    // DIRECTIONAL APPROACH CHECK (key fix):
+    // For a SHORT blind entry at resistance → price must be approaching FROM BELOW
+    //   (cur.c < level) — price has come up to the level but not yet wicked through
+    // For a LONG blind entry at support → price must be approaching FROM ABOVE
+    //   (cur.c > level) — price has come down to the level
+    // If price is already on the wrong side, it's not a valid blind entry setup
+    const blindCandidate = isHTF ? nearby.find(l=>{
+      if(!l.tested || l.tested===false){} else return false; // untested only
+      if(l.strength !== 'strong') return false;
+      if(Math.abs(l.price - cur.c) > a * 0.8) return false; // must be close
+
+      // Determine effective direction for approach check
+      const eft = l.flippedType;
+      const effType = eft === 'flipped_support' ? 'support'
+                    : eft === 'flipped_resistance' ? 'resistance'
+                    : l.type;
+
+      // Directional approach: price must be on the correct side for the EFFECTIVE type
+      // For SHORT (resistance): price must be BELOW the level, approaching from below
+      // For LONG (support): price must be ABOVE the level, approaching from above
+      if(effType === 'resistance' && cur.c >= l.price) return false;
+      if(effType === 'support'    && cur.c <= l.price) return false;
+
+      // Also check: price is actually moving TOWARD the level
+      const prev = c[c.length-2];
+      if(effType === 'resistance' && prev.bh > cur.bh) return false; // was closer before = moving away
+      if(effType === 'support'    && prev.bl < cur.bl) return false; // was closer before = moving away
+
+      return true;
+    }) : null;
 
     if(blindCandidate){
-      const isRes = blindCandidate.type === 'resistance';
+      // Determine effective signal direction — flipped levels trade the NEW direction
+      // flipped_support = was resistance, broke above = now support → LONG when retesting
+      // flipped_resistance = was support, broke below = now resistance → SHORT when retesting
+      const ft = blindCandidate.flippedType;
+      const effectiveType = ft === 'flipped_support' ? 'support'
+                          : ft === 'flipped_resistance' ? 'resistance'
+                          : blindCandidate.type;
+      const isRes = effectiveType === 'resistance';
       const blindSig = isRes ? 'SHORT' : 'LONG';
-      // Only fire blind entry if it aligns with HTF story (or unclear)
+      const isFlipped = ft === 'flipped_support' || ft === 'flipped_resistance';
       const htfBlocks = (isRes && htfBias==='UP') || (!isRes && htfBias==='DOWN');
       if(!htfBlocks){
         const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
@@ -888,12 +944,13 @@ function dms(c, a, dCandles, tf, htfBias){
         } else {
           const dist = ((blindCandidate.price - cur.c)/cur.c*100).toFixed(2);
           const htfNote = htfBias!=='UNCLEAR' ? ` · ✓ HTF ${htfBias} aligns` : '';
+          const typeLabel = isFlipped ? `PASS-THROUGH (flipped to ${effectiveType})` : `UNTESTED ${tf} level`;
           return {
             sig: blindSig, type: 'BLIND_ENTRY',
             level: blindCandidate.price, target: tgt.price, rr, stopPrice: stop,
             strength: blindCandidate.strength, score: blindCandidate.score,
-            reason: `BLIND: ${blindCandidate.source} $${fmt(blindCandidate.price)} · ${dist>0?'+':''}${dist}% · UNTESTED ${tf} level${htfNote} · R:R ${rr} → $${fmt(tgt.price)}`,
-            detail: `Untested ${tf} body level — can enter now, no 15m trap needed | SL: $${fmt(stop)}`,
+            reason: `BLIND: ${blindCandidate.source} $${fmt(blindCandidate.price)} · ${dist>0?'+':''}${dist}% · ${typeLabel}${htfNote} · R:R ${rr} → $${fmt(tgt.price)}`,
+            detail: `${isFlipped?'Pass-through level — support-turned-resistance or vice versa':'Untested body level'} — blind entry valid | SL: $${fmt(stop)}`,
             untested: true
           };
         }
@@ -1230,7 +1287,7 @@ function renderCards(){
     const rrBadge=r.rr?`<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:2px 6px;border-radius:4px;background:rgba(255,193,7,.1);color:#ffc107;border:1px solid rgba(255,193,7,.2);margin-left:auto">R:R ${r.rr}</span>`:'';
     const lvlScore=r.score?`<span style="font-family:'IBM Plex Mono',monospace;font-size:8px;color:#3d5068;margin-left:6px">score ${r.score}</span>`:'';
     return`<div class="tfc ${cls}"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type ${r.type}">${tl}</span>${rrBadge}</div><div class="tfc-head" style="margin-top:5px;margin-bottom:0">${r.sig!=='NEUTRAL'?`<span class="tfc-sig ${r.sig}">${r.sig}</span>`:''}<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:${r.strength==='strong'?'#00e676':r.strength==='med'?'#ffc107':'#3d5068'};margin-left:4px">${r.strength||''}</span>${lvlScore}</div><div class="tfc-reason" style="margin-top:6px">${r.reason}</div>${r.detail?`<div class="tfc-reason" style="color:#3d5068;margin-top:3px;font-size:8px">${r.detail}</div>`:''
-    }${r.level?`<div class="tfc-prices"><span class="tcp"><span class="tcp-l">LVL</span>$${fmt(r.level)}</span>${r.target?`<span class="tcp"><span class="tcp-l">TGT</span><span style="color:${r.sig==='LONG'?'#00e676':'#ff3d5a'}">$${fmt(r.target)}</span></span>`:''}</div>`:''}</div>`;
+    }${r.level?`<div class="tfc-prices"><span class="tcp"><span class="tcp-l">LVL</span>$${fmt(r.level)}</span>${r.target?`<span class="tcp"><span class="tcp-l">TP</span><span style="color:${r.sig==='LONG'?'#00e676':'#ff3d5a'}">$${fmt(r.target)}</span></span>`:''  }${r.stopPrice?`<span class="tcp"><span class="tcp-l">SL</span><span style="color:#ff6b6b">$${fmt(r.stopPrice)}</span></span>`:''}</div>`:''}</div>`;
   }).join('');
 }
 
@@ -1239,7 +1296,9 @@ function renderLevels(){
   document.getElementById('lvl-list').innerHTML=allLevels.map(l=>{
     const isR=l.price>price,dist=((l.price-price)/price*100).toFixed(2),cls=isR?'R':'S';
     const strengthCol=l.strength==='strong'?'#00e676':l.strength==='med'?'#ffc107':'#5d7a99';
-    return`<div class="lvl-item${!l.tested?' untested':''}"><span class="lvl-badge ${cls}">${isR?'RES':'SUP'}</span><div class="lvl-info"><div class="lvl-tf">${l.tf||'—'} · ${l.source||''}${!l.tested?'<span class="lvl-untag">● UNTESTED</span>':''}</div></div><div class="lvl-right"><div class="lvl-price ${cls}">$${fmt(l.price)}</div><div class="lvl-dist">${dist>0?'+':''}${dist}% · <span style='color:${strengthCol}'>${l.strength||''}</span></div></div></div>`;
+    const flippedTag = l.flippedType === 'flipped_support' ? '<span style="font-size:8px;color:#64b5f6;margin-left:4px">↕ FLIPPED SUP</span>'
+      : l.flippedType === 'flipped_resistance' ? '<span style="font-size:8px;color:#64b5f6;margin-left:4px">↕ FLIPPED RES</span>' : '';
+    return`<div class="lvl-item${!l.tested?' untested':''}"><span class="lvl-badge ${cls}">${isR?'RES':'SUP'}</span><div class="lvl-info"><div class="lvl-tf">${l.tf||'—'} · ${l.source||''}${!l.tested?'<span class="lvl-untag">● UNTESTED</span>':''}${flippedTag}</div></div><div class="lvl-right"><div class="lvl-price ${cls}">$${fmt(l.price)}</div><div class="lvl-dist">${dist>0?'+':''}${dist}% · <span style='color:${strengthCol}'>${l.strength||''}</span></div></div></div>`;
   }).join('');
 }
 
