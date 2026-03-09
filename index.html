@@ -80,6 +80,8 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 .tfc-type{font-family:‘IBM Plex Mono’,monospace;font-size:9px;font-weight:700;letter-spacing:.07em;padding:3px 8px;border-radius:4px;white-space:nowrap}
 .tfc-type.FAIL_GAIN{background:rgba(255,61,90,.12);color:#ff3d5a;border:1px solid rgba(255,61,90,.25)}
 .tfc-type.FAIL_LOSE{background:rgba(0,230,118,.1);color:#00e676;border:1px solid rgba(0,230,118,.22)}
+.tfc-type.BLIND_ENTRY{background:rgba(255,193,7,.15);color:#ffc107;border:1px solid rgba(255,193,7,.35)}
+.tfc-type.BREAKOUT{background:rgba(100,181,246,.12);color:#64b5f6;border:1px solid rgba(100,181,246,.3)}
 .tfc-type.AT_LEVEL{background:rgba(255,193,7,.1);color:#ffc107;border:1px solid rgba(255,193,7,.22)}
 .tfc-type.NONE{background:#10151c;color:#3d5068;border:1px solid #1a2230}
 .tfc-sig{margin-left:auto;font-family:‘IBM Plex Mono’,monospace;font-size:13px;font-weight:700}
@@ -130,6 +132,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 .log-status.open{background:rgba(255,193,7,.1);color:#ffc107;border:1px solid rgba(255,193,7,.2)}
 .log-status.hit{background:rgba(0,230,118,.1);color:#00e676;border:1px solid rgba(0,230,118,.2)}
 .log-status.stopped{background:rgba(255,61,90,.1);color:#ff3d5a;border:1px solid rgba(255,61,90,.2)}
+.log-status.review_exit{background:rgba(255,152,0,.12);color:#ff9800;border:1px solid rgba(255,152,0,.3)}
 .log-reason{font-family:‘IBM Plex Mono’,monospace;font-size:9px;color:#3d5068;margin-top:4px;line-height:1.5}
 
 /* SETTINGS */
@@ -416,8 +419,8 @@ function maybeAlert(sig, tf, type, level, target, rr){
   const wantLevel = localStorage.getItem('alert_atlevel')==='true';
   const wantToast = localStorage.getItem('alert_toast')!=='false';
 
-  if(type==='FAIL_GAIN' && !wantShort) return;
-  if(type==='FAIL_LOSE' && !wantLong)  return;
+  if((type==='FAIL_GAIN'||type==='BREAKOUT'&&sig==='SHORT') && !wantShort) return;
+  if((type==='FAIL_LOSE'||type==='BREAKOUT'&&sig==='LONG'||type==='BLIND_ENTRY') && !wantLong) return;
   if(type==='AT_LEVEL'  && !wantLevel) return;
 
   const icon  = sig==='LONG'?'🟢':sig==='SHORT'?'🔴':'🟡';
@@ -607,16 +610,20 @@ function findVPeaks(c, tf){
 
     // V-HIGH: body high is local swing high AND upper wick shows rejection
     if(isSwingHigh(c, i, lookback)){
-      const score = scoreLevel(c, i, 'resistance');
-      const tested = isLevelTested(c, i+1, x.bh, x.bl, 'resistance');
+      let score = scoreLevel(c, i, 'resistance');
+      const testCount = countLevelTests(c, i+1, x.bh, x.bl, 'resistance');
+      const tested = testCount > 0;
+      // Decay: each test reduces reliability (Chris Hunter rule)
+      if(testCount >= 2) score = Math.round(score * 0.5);
+      else if(testCount === 1) score = Math.round(score * 0.75);
       const strength = classifyStrength(score, range, wickUp);
       if(strength !== 'weak'){
         L.push({
           price: x.bh,
-          bh: x.bh, bl: x.bh * 0.999, // tight zone at body top
+          bh: x.bh, bl: x.bh * 0.999,
           type: 'resistance',
           wickSize: wickUp,
-          score, strength, tested,
+          score, strength, tested, testCount,
           idx: i, tf,
           source: `V-High${wickUp > range*wickRatio ? ' (wick reject)' : ''}`
         });
@@ -625,8 +632,11 @@ function findVPeaks(c, tf){
 
     // V-LOW: body low is local swing low AND lower wick shows rejection
     if(isSwingLow(c, i, lookback)){
-      const score = scoreLevel(c, i, 'support');
-      const tested = isLevelTested(c, i+1, x.bh, x.bl, 'support');
+      let score = scoreLevel(c, i, 'support');
+      const testCount = countLevelTests(c, i+1, x.bh, x.bl, 'support');
+      const tested = testCount > 0;
+      if(testCount >= 2) score = Math.round(score * 0.5);
+      else if(testCount === 1) score = Math.round(score * 0.75);
       const strength = classifyStrength(score, range, wickDown);
       if(strength !== 'weak'){
         L.push({
@@ -634,7 +644,7 @@ function findVPeaks(c, tf){
           bh: x.bl * 1.001, bl: x.bl,
           type: 'support',
           wickSize: wickDown,
-          score, strength, tested,
+          score, strength, tested, testCount,
           idx: i, tf,
           source: `V-Low${wickDown > range*wickRatio ? ' (wick reject)' : ''}`
         });
@@ -693,13 +703,18 @@ function classifyStrength(score, range, wick){
 }
 
 // Has this level been revisited by a body after it was formed?
-function isLevelTested(c, startIdx, bh, bl, type){
-  const zone = (bh - bl) * 0.5 + (bh * 0.002); // small tolerance
-  return c.slice(startIdx).some(k =>
+// Returns count of times tested (0 = fresh/untested)
+// Chris Hunter: "once tested, unlikely to hold unless a new level formed there"
+function countLevelTests(c, startIdx, bh, bl, type){
+  const zone = (bh - bl) * 0.5 + (bh * 0.002);
+  return c.slice(startIdx).filter(k =>
     type==='resistance'
       ? k.bh >= bl - zone && k.bl <= bh + zone
       : k.bl <= bh + zone && k.bh >= bl - zone
-  );
+  ).length;
+}
+function isLevelTested(c, startIdx, bh, bl, type){
+  return countLevelTests(c, startIdx, bh, bl, type) > 0;
 }
 
 // ── PDH / PDL ─────────────────────────────────────────────
@@ -775,12 +790,31 @@ function findNextLevel(levels, currentPrice, direction){
 }
 
 // ── RR RATIO ──────────────────────────────────────────────
-function calcRR(entry, target, level){
-  // Stop = level + small buffer (where the trade is invalidated)
-  const risk   = Math.abs(entry - level) * 1.05;
-  const reward = Math.abs(entry - target);
+// Chris Hunter: "Put your stop behind the NEXT level behind the entry"
+// stopLevel = the level beyond which the trade thesis is broken
+function calcRR(entry, target, trapLevel, stopLevel){
+  // If stopLevel provided (next level behind), use it; else fallback to trap + buffer
+  const stopRef = stopLevel || trapLevel;
+  const risk    = Math.abs(entry - stopRef) * 1.05;
+  const reward  = Math.abs(entry - target);
   if(risk < 1) return null;
   return (reward / risk).toFixed(1);
+}
+
+// Find the next level BEHIND the entry (for stop placement)
+// For SHORT: next level ABOVE the trap resistance (where shorts are wrong)
+// For LONG:  next level BELOW the trap support (where longs are wrong)
+function findStopLevel(levels, trapPrice, direction){
+  const sorted = [...levels].sort((a,b)=>a.price-b.price);
+  if(direction==='short'){
+    // Stop = next resistance ABOVE the trap (if shorts, don't want price above here)
+    const candidates = sorted.filter(l=>l.price > trapPrice * 1.003);
+    return candidates.length ? candidates[0].price : trapPrice * 1.015;
+  } else {
+    // Stop = next support BELOW the trap
+    const candidates = sorted.filter(l=>l.price < trapPrice * 0.997);
+    return candidates.length ? candidates[candidates.length-1].price : trapPrice * 0.985;
+  }
 }
 
 // ── MAIN DMS SIGNAL ───────────────────────────────────────
@@ -808,11 +842,46 @@ function dms(c, a, dCandles, tf, htfBias){
     .filter(l=>Math.abs(l.price-cur.c) < a*14)
     .sort((a,b)=>Math.abs(a.price-cur.c)-Math.abs(b.price-cur.c));
 
-  // ── 1W / 1D / 4H / 1H: CONTEXT ONLY ─────────────────
-  // These timeframes show AT_LEVEL or NO SETUP only.
-  // They tell you WHERE the key levels are and if price is approaching.
-  // The actual trap confirmation always comes from the 15m card.
+  // ── 1W / 1D / 4H / 1H: CONTEXT + BLIND ENTRY ────────
+  // These timeframes show AT_LEVEL, BLIND_ENTRY or NO SETUP only.
+  // BLIND ENTRY: untested strong HTF level — Chris Hunter says these
+  // "pretty much always get some sort of reaction" and you can enter without
+  // waiting for a 15m trap. Best on 1D/1W only (too noisy on 4H/1H).
+  // AT LEVEL: tested or lower-score level — wait for 15m confirmation.
+  // The actual trap (FAIL_GAIN / FAIL_LOSE) always comes from the 15m card.
   if(tf !== '15m'){
+    const isHTF = (tf === '1W' || tf === '1D');
+
+    // BLIND ENTRY: untested, strong, price is touching it right now
+    // Only on 1W/1D — 4H/1H still just show AT_LEVEL context
+    const blindCandidate = isHTF ? nearby.find(l=>
+      !l.tested &&
+      l.strength === 'strong' &&
+      Math.abs(l.price - cur.c) < a * 0.8 // price very close — actually at the level
+    ) : null;
+
+    if(blindCandidate){
+      const isRes = blindCandidate.type === 'resistance';
+      const blindSig = isRes ? 'SHORT' : 'LONG';
+      // Only fire blind entry if it aligns with HTF story (or unclear)
+      const htfBlocks = (isRes && htfBias==='UP') || (!isRes && htfBias==='DOWN');
+      if(!htfBlocks){
+        const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
+        const stop = findStopLevel(levels, blindCandidate.price, isRes?'short':'long');
+        const rr   = calcRR(cur.c, tgt.price, blindCandidate.price, stop);
+        const dist = ((blindCandidate.price - cur.c)/cur.c*100).toFixed(2);
+        const htfNote = htfBias!=='UNCLEAR' ? ` · ✓ HTF ${htfBias} aligns` : '';
+        return {
+          sig: blindSig, type: 'BLIND_ENTRY',
+          level: blindCandidate.price, target: tgt.price, rr,
+          strength: blindCandidate.strength, score: blindCandidate.score,
+          reason: `BLIND: ${blindCandidate.source} $${fmt(blindCandidate.price)} · ${dist>0?'+':''}${dist}% · UNTESTED ${tf} level${htfNote}${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)}`,
+          detail: `Untested ${tf} body level — can enter now, no 15m trap needed`,
+          untested: true
+        };
+      }
+    }
+
     const atLevel = nearby.find(l=>
       Math.abs(l.price-cur.c) < a * 1.8 && l.score >= 20
     );
@@ -821,7 +890,9 @@ function dms(c, a, dCandles, tf, htfBias){
         ? 'RESISTANCE — watch 15m for wick + body close back below'
         : 'SUPPORT — watch 15m for wick + body close back above';
       const dist = ((atLevel.price - cur.c)/cur.c*100).toFixed(2);
-      // Note if this level aligns with or contradicts the HTF story
+      const testedNote = atLevel.testCount >= 2 ? ` · ⚠ tested ×${atLevel.testCount} — weaker`
+        : atLevel.testCount === 1 ? ' · tested ×1'
+        : ' · UNTESTED';
       const htfNote = (atLevel.type==='resistance' && htfBias==='UP')
         ? ' · ⚠ HTF UP — short here is counter-trend'
         : (atLevel.type==='support' && htfBias==='DOWN')
@@ -835,8 +906,8 @@ function dms(c, a, dCandles, tf, htfBias){
         sig:'NEUTRAL', type:'AT_LEVEL',
         level:atLevel.price, target:null,
         strength:atLevel.strength, score:atLevel.score,
-        reason:`${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · ${dir}${htfNote}`,
-        detail:`Score: ${atLevel.score} · ${atLevel.strength} · ${atLevel.tested?'tested':'UNTESTED'}`,
+        reason:`${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · ${dir}${testedNote}${htfNote}`,
+        detail:`Score: ${atLevel.score} · ${atLevel.strength}${atLevel.testCount?` · tested ×${atLevel.testCount}`:''}`,
         untested:!atLevel.tested
       };
     }
@@ -886,8 +957,9 @@ function dms(c, a, dCandles, tf, htfBias){
       if(priceRallied || levelReclaimed || currentAbove) continue;
       if(htfBlockShort) continue;
 
-      const tgt = findNextLevel(levels, confirm.c, 'short');
-      const rr  = calcRR(confirm.c, tgt.price, lv.price);
+      const tgt  = findNextLevel(levels, confirm.c, 'short');
+      const stop = findStopLevel(levels, lv.price, 'short');
+      const rr   = calcRR(confirm.c, tgt.price, lv.price, stop);
       const dist = ((lv.price - confirm.c)/confirm.c*100).toFixed(2);
       return {
         sig:'SHORT', type:'FAIL_GAIN',
@@ -918,8 +990,9 @@ function dms(c, a, dCandles, tf, htfBias){
       if(priceDropped || levelReclaimed || currentBelow) continue;
       if(htfBlockLong) continue;
 
-      const tgt = findNextLevel(levels, confirm.c, 'long');
-      const rr  = calcRR(confirm.c, tgt.price, lv.price);
+      const tgt  = findNextLevel(levels, confirm.c, 'long');
+      const stop = findStopLevel(levels, lv.price, 'long');
+      const rr   = calcRR(confirm.c, tgt.price, lv.price, stop);
       const dist = ((confirm.c - lv.price)/confirm.c*100).toFixed(2);
       return {
         sig:'LONG', type:'FAIL_LOSE',
@@ -927,6 +1000,51 @@ function dms(c, a, dCandles, tf, htfBias){
         strength:lv.strength, score:lv.score,
         reason:`${lv.source} $${fmt(lv.price)} · ${dist}% below · ${lb===1?'just now':lb+' bars ago'}${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)}`,
         detail:`Wick: $${fmt(trap.l)} | Body: $${fmt(trap.bl)} | Support: $${fmt(lv.price)}`,
+        untested:!lv.tested
+      };
+    }
+  }
+
+  // ── 15m: BREAKOUT (SUCCESS = CONTINUATION) ───────────
+  // Chris Hunter: "If you gain a level, you continue to the next one"
+  // A clean 15m body close THROUGH a level = enter in breakout direction
+  // Conditions: current candle body has cleanly closed beyond the level
+  //             AND prior candle body was still on the other side (fresh break)
+  //             AND no immediate pullback yet (body still beyond)
+  for(const lv of nearby.filter(l=>l.type==='resistance')){
+    const prev = c[n-2];
+    // Clean breakout LONG: prior body below level, current body above
+    const cleanBreak = prev.bh < lv.price && cur.bl > lv.price * 0.998;
+    if(cleanBreak && !htfBlockLong){
+      const tgt  = findNextLevel(levels, cur.c, 'long');
+      const stop = findStopLevel(levels, lv.price, 'long');
+      const rr   = calcRR(cur.c, tgt.price, lv.price, stop);
+      const htfNote = htfBias==='UP' ? ' · ✓ HTF aligns' : htfBias==='DOWN' ? ' · ⚠ counter-trend' : '';
+      return {
+        sig:'LONG', type:'BREAKOUT',
+        level:lv.price, target:tgt.price, rr,
+        strength:lv.strength, score:lv.score,
+        reason:`GAINED ${lv.source} $${fmt(lv.price)} · body closed above · continuation LONG${htfNote}${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)}`,
+        detail:`Breakout: body $${fmt(cur.bl)}–$${fmt(cur.bh)} closed above level $${fmt(lv.price)}`,
+        untested:!lv.tested
+      };
+    }
+  }
+  for(const lv of nearby.filter(l=>l.type==='support')){
+    const prev = c[n-2];
+    // Clean breakdown SHORT: prior body above level, current body below
+    const cleanBreak = prev.bl > lv.price && cur.bh < lv.price * 1.002;
+    if(cleanBreak && !htfBlockShort){
+      const tgt  = findNextLevel(levels, cur.c, 'short');
+      const stop = findStopLevel(levels, lv.price, 'short');
+      const rr   = calcRR(cur.c, tgt.price, lv.price, stop);
+      const htfNote = htfBias==='DOWN' ? ' · ✓ HTF aligns' : htfBias==='UP' ? ' · ⚠ counter-trend' : '';
+      return {
+        sig:'SHORT', type:'BREAKOUT',
+        level:lv.price, target:tgt.price, rr,
+        strength:lv.strength, score:lv.score,
+        reason:`LOST ${lv.source} $${fmt(lv.price)} · body closed below · continuation SHORT${htfNote}${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)}`,
+        detail:`Breakdown: body $${fmt(cur.bl)}–$${fmt(cur.bh)} closed below level $${fmt(lv.price)}`,
         untested:!lv.tested
       };
     }
@@ -941,6 +1059,8 @@ function dms(c, a, dCandles, tf, htfBias){
       ? 'RESISTANCE — watch for wick + body close back below'
       : 'SUPPORT — watch for wick + body close back above';
     const dist = ((atLevel.price - cur.c)/cur.c*100).toFixed(2);
+    const testedNote = atLevel.testCount >= 2 ? ` · ⚠ tested ×${atLevel.testCount}`
+      : atLevel.testCount === 1 ? ' · tested ×1' : ' · UNTESTED';
     const htfNote = (atLevel.type==='resistance' && htfBias==='DOWN') ? ' · ✓ HTF aligns SHORT'
       : (atLevel.type==='support' && htfBias==='UP') ? ' · ✓ HTF aligns LONG'
       : (atLevel.type==='resistance' && htfBias==='UP') ? ' · ⚠ HTF says UP'
@@ -950,8 +1070,8 @@ function dms(c, a, dCandles, tf, htfBias){
       sig:'NEUTRAL', type:'AT_LEVEL',
       level:atLevel.price, target:null,
       strength:atLevel.strength, score:atLevel.score,
-      reason:`${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · ${dir}${htfNote}`,
-      detail:`Score: ${atLevel.score} · ${atLevel.strength} · ${atLevel.tested?'tested':'UNTESTED'}`,
+      reason:`${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · ${dir}${testedNote}${htfNote}`,
+      detail:`Score: ${atLevel.score} · ${atLevel.strength}${atLevel.testCount?` · tested ×${atLevel.testCount}`:''}`,
       untested:!atLevel.tested
     };
   }
@@ -1086,7 +1206,7 @@ function renderCards(){
     const r=results[tf.l];
     if(!r)return`<div class="tfc none"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type NONE">···</span><span class="tfc-sig WAIT" style="margin-left:auto">—</span></div><div class="tfc-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div></div>`;
     const cls=r.sig==='LONG'?'long':r.sig==='SHORT'?'short':'neutral';
-    const tl=r.type==='FAIL_GAIN'?'FAIL TO GAIN':r.type==='FAIL_LOSE'?'FAIL TO LOSE':r.type==='AT_LEVEL'?'AT LEVEL':'NO SETUP';
+    const tl=r.type==='FAIL_GAIN'?'FAIL TO GAIN':r.type==='FAIL_LOSE'?'FAIL TO LOSE':r.type==='BLIND_ENTRY'?'BLIND ENTRY':r.type==='BREAKOUT'?'BREAKOUT':r.type==='AT_LEVEL'?'AT LEVEL':'NO SETUP';
     const rrBadge=r.rr?`<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:2px 6px;border-radius:4px;background:rgba(255,193,7,.1);color:#ffc107;border:1px solid rgba(255,193,7,.2);margin-left:auto">R:R ${r.rr}</span>`:'';
     const lvlScore=r.score?`<span style="font-family:'IBM Plex Mono',monospace;font-size:8px;color:#3d5068;margin-left:6px">score ${r.score}</span>`:'';
     return`<div class="tfc ${cls}"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type ${r.type}">${tl}</span>${rrBadge}</div><div class="tfc-head" style="margin-top:5px;margin-bottom:0">${r.sig!=='NEUTRAL'?`<span class="tfc-sig ${r.sig}">${r.sig}</span>`:''}<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:${r.strength==='strong'?'#00e676':r.strength==='med'?'#ffc107':'#3d5068'};margin-left:4px">${r.strength||''}</span>${lvlScore}</div><div class="tfc-reason" style="margin-top:6px">${r.reason}</div>${r.detail?`<div class="tfc-reason" style="color:#3d5068;margin-top:3px;font-size:8px">${r.detail}</div>`:''
@@ -1134,6 +1254,19 @@ function addLog(sig, tf, reason, type, level, target, rr){
     entryPrice: price,
     status: 'open' // open | hit | stopped
   };
+  // ── EXIT RULE: opposite signal = flag open trades ────
+  // Chris Hunter: "If it fails to make a new low, exit your short"
+  // When a LONG fires, any open SHORT = mark REVIEW EXIT (and vice versa)
+  if(sig === 'LONG' || sig === 'SHORT'){
+    const opposite = sig === 'LONG' ? 'SHORT' : 'LONG';
+    entries.forEach(e => {
+      if(e.sig === opposite && e.status === 'open'){
+        e.status = 'review_exit';
+        e.exitNote = `⚠ ${sig} signal fired on ${tf} — consider exiting this ${opposite}`;
+      }
+    });
+  }
+
   entries.unshift(entry);
   if(entries.length > MAX_LOG) entries.pop();
   saveLog(entries);
@@ -1159,7 +1292,8 @@ function renderLog(){
 
   el.innerHTML = entries.map(e=>{
     const cls = e.sig==='LONG'?'long':e.sig==='SHORT'?'short':'neutral';
-    const statusBadge = `<span class="log-status ${e.status}">${e.status.toUpperCase()}</span>`;
+    const statusLabel = e.status === 'review_exit' ? '⚠ REVIEW EXIT' : e.status.toUpperCase();
+    const statusBadge = `<span class="log-status ${e.status}">${statusLabel}</span>`;
     const rrBadge = e.rr ? `<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#ffc107">R:R ${e.rr}</span>` : '';
     const prices = [
       e.entryPrice ? `<span class="log-p"><span class="log-pl">ENTRY</span>$${fmt(e.entryPrice)}</span>` : '',
@@ -1168,6 +1302,7 @@ function renderLog(){
     ].filter(Boolean).join('');
 
     // Status update buttons (only for open trades)
+    const exitNoteEl = e.exitNote ? `<div style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#ff9800;margin-top:5px;padding:4px 8px;background:rgba(255,152,0,.05);border-radius:4px;border:1px solid rgba(255,152,0,.15)">${e.exitNote}</div>` : '';
     const btns = e.status==='open' ? `
       <div style="display:flex;gap:6px;margin-top:8px">
         <button onclick="updateLogStatus(${e.id},'hit')" style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:4px 10px;border-radius:5px;border:1px solid rgba(0,230,118,.3);background:rgba(0,230,118,.08);color:#00e676;cursor:pointer">✓ TP HIT</button>
@@ -1184,6 +1319,7 @@ function renderLog(){
       </div>
       <div class="log-prices">${prices}</div>
       <div class="log-reason">${e.reason}</div>
+      ${exitNoteEl}
       ${btns}
     </div>`;
   }).join('');
