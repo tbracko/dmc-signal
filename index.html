@@ -421,10 +421,15 @@ function maybeAlert(sig, tf, type, level, target, rr){
 
   if((type==='FAIL_GAIN'||type==='BREAKOUT'&&sig==='SHORT') && !wantShort) return;
   if((type==='FAIL_LOSE'||type==='BREAKOUT'&&sig==='LONG'||type==='BLIND_ENTRY') && !wantLong) return;
-  if(type==='AT_LEVEL'  && !wantLevel) return;
+  // AT_LEVEL is a watch zone only — never send as directional signal
+  if(type==='AT_LEVEL') {
+    if(!wantLevel) return;
+    // Don't send if sig leaked as SHORT/LONG (shouldn't happen but guard it)
+    if(sig !== 'NEUTRAL') return;
+  }
 
   const icon  = sig==='LONG'?'🟢':sig==='SHORT'?'🔴':'🟡';
-  const dir   = type==='FAIL_GAIN'?'FAIL TO GAIN':type==='FAIL_LOSE'?'FAIL TO LOSE':'AT LEVEL';
+  const dir   = type==='FAIL_GAIN'?'FAIL TO GAIN':type==='FAIL_LOSE'?'FAIL TO LOSE':type==='BLIND_ENTRY'?'BLIND ENTRY':type==='BREAKOUT'?'BREAKOUT':'AT LEVEL';
   const rrTxt = rr ? ` · R:R ${rr}` : '';
 
   // ── In-app toast (2 lines: signal + entry/TP) ──
@@ -448,11 +453,17 @@ function maybeAlert(sig, tf, type, level, target, rr){
 R:R <b>${rr}</b>` : '';
     const tpLine  = target? `
 Take Profit: <b>$${fmt(target)}</b>` : '';
+    const slLevel = findStopLevel(
+      allLevels.length ? allLevels : [{price:level,type:sig==='SHORT'?'resistance':'support'}],
+      level, sig==='SHORT'?'short':'long'
+    );
+    const slLine  = slLevel ? `
+Stop Loss: <b>$${fmt(slLevel)}</b>` : '';
     const msg = `${icon} <b>DMS ${sig}</b> [${tf}]
 ${dir}
 
 Entry now: <b>$${fmt(price)}</b>
-Level: <b>$${fmt(level)}</b>${tpLine}${rrLine}
+Level: <b>$${fmt(level)}</b>${tpLine}${slLine}${rrLine}
 
 <a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
     sendTelegram(msg);
@@ -873,10 +884,10 @@ function dms(c, a, dCandles, tf, htfBias){
         const htfNote = htfBias!=='UNCLEAR' ? ` · ✓ HTF ${htfBias} aligns` : '';
         return {
           sig: blindSig, type: 'BLIND_ENTRY',
-          level: blindCandidate.price, target: tgt.price, rr,
+          level: blindCandidate.price, target: tgt.price, rr, stopPrice: stop,
           strength: blindCandidate.strength, score: blindCandidate.score,
           reason: `BLIND: ${blindCandidate.source} $${fmt(blindCandidate.price)} · ${dist>0?'+':''}${dist}% · UNTESTED ${tf} level${htfNote}${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)}`,
-          detail: `Untested ${tf} body level — can enter now, no 15m trap needed`,
+          detail: `Untested ${tf} body level — can enter now, no 15m trap needed | SL: $${fmt(stop)}`,
           untested: true
         };
       }
@@ -1232,7 +1243,7 @@ function loadLog(){
 }
 function saveLog(entries){ localStorage.setItem(LOG_KEY, JSON.stringify(entries)); }
 
-function addLog(sig, tf, reason, type, level, target, rr){
+function addLog(sig, tf, reason, type, level, target, rr, stopPrice){
   if(type==='NONE') return;
   const entries = loadLog();
   const now = new Date();
@@ -1250,6 +1261,7 @@ function addLog(sig, tf, reason, type, level, target, rr){
     date: dateStr,
     time: timeStr,
     sig, tf, type, level, target, rr,
+    stopPrice: stopPrice || null,
     reason: reason.slice(0,120),
     entryPrice: price,
     status: 'open' // open | hit | stopped
@@ -1299,6 +1311,7 @@ function renderLog(){
       e.entryPrice ? `<span class="log-p"><span class="log-pl">ENTRY</span>$${fmt(e.entryPrice)}</span>` : '',
       e.level      ? `<span class="log-p"><span class="log-pl">LVL</span>$${fmt(e.level)}</span>` : '',
       e.target     ? `<span class="log-p"><span class="log-pl">TP</span><span style="color:${e.sig==='LONG'?'#00e676':'#ff3d5a'}">$${fmt(e.target)}</span></span>` : '',
+      e.stopPrice  ? `<span class="log-p"><span class="log-pl">SL</span><span style="color:#ff6b6b">$${fmt(e.stopPrice)}</span></span>` : '',
     ].filter(Boolean).join('');
 
     // Status update buttons (only for open trades)
@@ -1342,7 +1355,7 @@ function processTF(i, candles, dCandles){
   results[tf.l] = d;
   if(d.type!=='NONE'){
     maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr);
-    if(d.type!=='AT_LEVEL') addLog(d.sig, tf.l, d.reason, d.type, d.level, d.target, d.rr);
+    if(d.type!=='AT_LEVEL') addLog(d.sig, tf.l, d.reason, d.type, d.level, d.target, d.rr, d.stopPrice);
   }
   renderHero();
   renderCards();
