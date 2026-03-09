@@ -790,30 +790,79 @@ function calcRR(entry, target, level){
 // 3. Level reclaim check: if any candle between trap and now reclaimed the level → dead
 // 4. PDH/PDL excluded from 1W (only relevant on daily and below)
 
+// ── DMS ENGINE ────────────────────────────────────────────
+// Chris Hunter Phase 3 rule: ENTRY TRIGGER is ALWAYS on 15m.
+// 1W/1D/4H/1H provide CONTEXT (level identification + story).
+// Only 15m fires actual LONG/SHORT signals.
 function dms(c, a, dCandles, tf, htfBias){
   const n = c.length;
   const minCandles = (tf==='1W'||tf==='1D') ? 10 : 20;
   if(n < minCandles) return {sig:'NEUTRAL',type:'NONE',reason:'Insufficient data ('+n+' candles)'};
 
-  // PDH/PDL only relevant on 1D and lower timeframes
   const usePDHL = (tf !== '1W');
   const levels = findDMCLevels(c, usePDHL ? dCandles : null, tf);
   const cur    = c[n-1];
   const tol    = a * 0.10;
 
-  // Fresh trap only — max lookback per timeframe:
-  // 1D: 2 days, 4H: 3 bars (12h), 1H: 3 bars (3h), 15m: 3 bars (45min)
-  const maxLB = (tf==='1D'||tf==='1W') ? 2 : 3;
-
   const nearby = levels
     .filter(l=>Math.abs(l.price-cur.c) < a*14)
     .sort((a,b)=>Math.abs(a.price-cur.c)-Math.abs(b.price-cur.c));
 
-  // ── HTF STORY FILTER ─────────────────────────────────
-  // Only trade WITH the HTF direction. Chris Hunter: "define the story on 1H/4H first."
-  // If HTF is UP  → only LONG signals (no shorts)
-  // If HTF is DOWN → only SHORT signals (no longs)
-  // If UNCLEAR    → allow both but mark as lower confidence
+  // ── 1W / 1D / 4H / 1H: CONTEXT ONLY ─────────────────
+  // These timeframes show AT_LEVEL or NO SETUP only.
+  // They tell you WHERE the key levels are and if price is approaching.
+  // The actual trap confirmation always comes from the 15m card.
+  if(tf !== '15m'){
+    const atLevel = nearby.find(l=>
+      Math.abs(l.price-cur.c) < a * 1.8 && l.score >= 20
+    );
+    if(atLevel){
+      const dir = atLevel.type==='resistance'
+        ? 'RESISTANCE — watch 15m for wick + body close back below'
+        : 'SUPPORT — watch 15m for wick + body close back above';
+      const dist = ((atLevel.price - cur.c)/cur.c*100).toFixed(2);
+      // Note if this level aligns with or contradicts the HTF story
+      const htfNote = (atLevel.type==='resistance' && htfBias==='UP')
+        ? ' · ⚠ HTF UP — short here is counter-trend'
+        : (atLevel.type==='support' && htfBias==='DOWN')
+          ? ' · ⚠ HTF DOWN — long here is counter-trend'
+          : (atLevel.type==='resistance' && htfBias==='DOWN')
+            ? ' · ✓ HTF DOWN aligns'
+            : (atLevel.type==='support' && htfBias==='UP')
+              ? ' · ✓ HTF UP aligns'
+              : '';
+      return {
+        sig:'NEUTRAL', type:'AT_LEVEL',
+        level:atLevel.price, target:null,
+        strength:atLevel.strength, score:atLevel.score,
+        reason:`${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · ${dir}${htfNote}`,
+        detail:`Score: ${atLevel.score} · ${atLevel.strength} · ${atLevel.tested?'tested':'UNTESTED'}`,
+        untested:!atLevel.tested
+      };
+    }
+    // NO SETUP — show nearest levels above/below as context
+    const above = nearby.filter(l=>l.price > cur.c).sort((a,b)=>a.price-b.price)[0];
+    const below = nearby.filter(l=>l.price < cur.c).sort((a,b)=>b.price-a.price)[0];
+    const ctx = [
+      above ? `R $${fmt(above.price)}` : null,
+      below ? `S $${fmt(below.price)}` : null
+    ].filter(Boolean).join(' / ') || '—';
+    return {
+      sig:'NEUTRAL', type:'NONE',
+      level:null, target:null,
+      reason:`Between levels — ${ctx}`,
+      detail:'Wait for price to reach a key level'
+    };
+  }
+
+  // ── 15m ONLY: TRAP DETECTION ──────────────────────────
+  // This is Phase 3 execution. We look for:
+  // FAIL TO GAIN → SHORT: wick above resistance, 15m body closes back below
+  // FAIL TO LOSE → LONG:  wick below support, 15m body closes back above
+  // Max lookback: 3 bars (45 min) — traps older than that are stale
+  const maxLB = 3;
+
+  // HTF story filter — only trade with the 4H/1H direction
   const htfBlockShort = (htfBias === 'UP');
   const htfBlockLong  = (htfBias === 'DOWN');
 
@@ -824,21 +873,18 @@ function dms(c, a, dCandles, tf, htfBias){
       const trap    = c[n-1-lb];
       const confirm = c[n-1];
 
-      // The trap candle: wick exceeded resistance, body closed back below
+      // Trap: 15m wick pierced resistance, body closed back below
       const wickedThrough = trap.h  > lv.price + (tol*0.2);
       const bodyBelow     = trap.bh < lv.price + tol;
       if(!wickedThrough || !bodyBelow) continue;
 
-      // Signal invalidation — any of these = trade is over, skip it:
-      // A) Price rallied more than 0.7 ATR above the trap body close
+      // Invalidation checks
       const priceRallied   = confirm.bh > trap.bh + a * 0.7;
-      // B) Any candle after the trap reclaimed the level (body closed above it)
       const levelReclaimed = c.slice(n-lb, n).some(k => k.bh > lv.price);
-      // C) Current candle body is above the level
       const currentAbove   = confirm.bh > lv.price;
 
       if(priceRallied || levelReclaimed || currentAbove) continue;
-      if(htfBlockShort) continue; // HTF says UP — don't short against the trend
+      if(htfBlockShort) continue;
 
       const tgt = findNextLevel(levels, confirm.c, 'short');
       const rr  = calcRR(confirm.c, tgt.price, lv.price);
@@ -865,13 +911,12 @@ function dms(c, a, dCandles, tf, htfBias){
       const bodyAbove     = trap.bl > lv.price - tol;
       if(!wickedThrough || !bodyAbove) continue;
 
-      // Invalidation
       const priceDropped   = confirm.bl < trap.bl - a * 0.7;
       const levelReclaimed = c.slice(n-lb, n).some(k => k.bl < lv.price);
       const currentBelow   = confirm.bl < lv.price;
 
       if(priceDropped || levelReclaimed || currentBelow) continue;
-      if(htfBlockLong) continue; // HTF says DOWN — don't long against the trend
+      if(htfBlockLong) continue;
 
       const tgt = findNextLevel(levels, confirm.c, 'long');
       const rr  = calcRR(confirm.c, tgt.price, lv.price);
@@ -887,32 +932,31 @@ function dms(c, a, dCandles, tf, htfBias){
     }
   }
 
-  // ── AT LEVEL ─────────────────────────────────────────
+  // ── 15m: AT LEVEL (approaching key zone) ─────────────
   const atLevel = nearby.find(l=>
     Math.abs(l.price-cur.c) < a * 1.5 && l.score >= 20
   );
   if(atLevel){
     const dir = atLevel.type==='resistance'
-      ? 'RESISTANCE — watch for 15m wick + body close back below'
-      : 'SUPPORT — watch for 15m wick + body close back above';
+      ? 'RESISTANCE — watch for wick + body close back below'
+      : 'SUPPORT — watch for wick + body close back above';
     const dist = ((atLevel.price - cur.c)/cur.c*100).toFixed(2);
-    const blockedNote = (atLevel.type==='resistance' && htfBias==='UP')
-      ? ' · HTF UP — short would be counter-trend'
-      : (atLevel.type==='support' && htfBias==='DOWN')
-        ? ' · HTF DOWN — long would be counter-trend'
-        : '';
+    const htfNote = (atLevel.type==='resistance' && htfBias==='DOWN') ? ' · ✓ HTF aligns SHORT'
+      : (atLevel.type==='support' && htfBias==='UP') ? ' · ✓ HTF aligns LONG'
+      : (atLevel.type==='resistance' && htfBias==='UP') ? ' · ⚠ HTF says UP'
+      : (atLevel.type==='support' && htfBias==='DOWN') ? ' · ⚠ HTF says DOWN'
+      : '';
     return {
       sig:'NEUTRAL', type:'AT_LEVEL',
       level:atLevel.price, target:null,
       strength:atLevel.strength, score:atLevel.score,
-      reason:`${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · ${dir}${blockedNote}`,
+      reason:`${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · ${dir}${htfNote}`,
       detail:`Score: ${atLevel.score} · ${atLevel.strength} · ${atLevel.tested?'tested':'UNTESTED'}`,
       untested:!atLevel.tested
     };
   }
 
-  // ── NO SETUP ─────────────────────────────────────────
-  // Show nearest level above and nearest level below current price
+  // ── 15m: NO SETUP ────────────────────────────────────
   const above = nearby.filter(l=>l.price > cur.c).sort((a,b)=>a.price-b.price)[0];
   const below = nearby.filter(l=>l.price < cur.c).sort((a,b)=>b.price-a.price)[0];
   const ctx = [
@@ -929,36 +973,51 @@ function dms(c, a, dCandles, tf, htfBias){
 
 // ── HTF STORY (1H + 4H analysis) ─────────────────────────
 // Determines if market is "gaining" or "failing" at key levels
-function nextMove(wC, dC){
-  const wn=wC.length, dn=dC.length;
-  if(wn<10||dn<10) return {dir:'UNCLEAR',reason:'Insufficient HTF data'};
+// ── HTF STORY: reads 4H + 1H candle bodies ──────────────────────────────
+// Chris Hunter: "Phase 2 is the story — use 1H/4H to define if price is
+// gaining or failing levels. Only execute in that direction."
+function nextMove(h4C, h1C){
+  const n4=h4C.length, n1=h1C.length;
+  if(n4<8||n1<8) return {dir:'UNCLEAR',reason:'Insufficient 4H/1H data'};
 
-  // Weekly structure: consecutive body highs = bullish HTF
-  const wLast3 = wC.slice(-4);
-  const wGaining = wLast3.every((k,i)=>i===0||k.bh>wLast3[i-1].bh);
-  const wFailing = wLast3.every((k,i)=>i===0||k.bl<wLast3[i-1].bl);
-
-  // Daily: recent bodies gaining or losing?
-  const dLast = dC.slice(-6);
-  let dBullCount=0, dBearCount=0;
-  for(let i=1;i<dLast.length;i++){
-    if(dLast[i].bh > dLast[i-1].bh) dBullCount++;
-    else dBearCount++;
+  // ── 4H analysis: is price making higher body highs / lower body lows? ──
+  const h4 = h4C.slice(-6);
+  let bull4=0, bear4=0;
+  for(let i=1;i<h4.length;i++){
+    if(h4[i].bh > h4[i-1].bh && h4[i].bl > h4[i-1].bl) bull4++;
+    else if(h4[i].bh < h4[i-1].bh && h4[i].bl < h4[i-1].bl) bear4++;
   }
+  // 4H failed to gain resistance = bearish story
+  const h4n=h4C[n4-1], h4p=h4C[n4-2], h4pp=h4C[n4-3];
+  const h4FailedHigh = h4n.bh < h4p.bh && h4p.bh > h4pp.bh; // prior bar was swing high, now rejected
+  const h4FailedLow  = h4n.bl > h4p.bl && h4p.bl < h4pp.bl;
 
-  // Daily failed to close above prior high = bearish story
-  const dn1=dC[dn-1], dn2=dC[dn-2], dn3=dC[dn-3];
-  const dailyFailedHigh = dn1.bh < dn2.bh && dn2.bh > dn3.bh; // dn2 was local high, dn1 failed
-  const dailyFailedLow  = dn1.bl > dn2.bl && dn2.bl < dn3.bl;
+  // ── 1H analysis: recent 8 bars momentum ──────────────────────────────
+  const h1 = h1C.slice(-8);
+  let bull1=0, bear1=0;
+  for(let i=1;i<h1.length;i++){
+    if(h1[i].bh > h1[i-1].bh) bull1++;
+    else bear1++;
+  }
+  // 1H fail to gain or lose: last bar vs 2 bars ago
+  const h1n=h1C[n1-1], h1p=h1C[n1-2];
+  const h1Bearish = h1n.bh < h1p.bh && h1n.bl < h1p.bl;
+  const h1Bullish = h1n.bh > h1p.bh && h1n.bl > h1p.bl;
 
-  // Score
-  if(wGaining && dBullCount>=4) return {dir:'UP',reason:`Weekly + daily bodies gaining — ${dBullCount}/5 days bullish`};
-  if(wFailing  && dBearCount>=4) return {dir:'DOWN',reason:`Weekly + daily bodies losing — ${dBearCount}/5 days bearish`};
-  if(dailyFailedHigh && dBearCount>=3) return {dir:'DOWN',reason:`Daily failed to close above last high · ${dBearCount}/5 days losing`};
-  if(dailyFailedLow  && dBullCount>=3) return {dir:'UP',reason:`Daily failed to close below last low · ${dBullCount}/5 days gaining`};
-  if(wGaining) return {dir:'UP',reason:`Weekly bullish structure · Daily mixed (${dBullCount}b/${dBearCount}bear)`};
-  if(wFailing)  return {dir:'DOWN',reason:`Weekly bearish structure · Daily mixed (${dBearCount}b/${dBullCount}bull)`};
-  return {dir:'UNCLEAR',reason:'No clear HTF direction — both sides contested'};
+  // ── Score: 4H is the story, 1H is the confirmation ───────────────────
+  const bearScore = bear4 + (h4FailedHigh?2:0) + (bear1>=5?1:0) + (h1Bearish?1:0);
+  const bullScore = bull4 + (h4FailedLow?2:0)  + (bull1>=5?1:0) + (h1Bullish?1:0);
+
+  const threshold = 3;
+  if(bullScore >= threshold && bullScore > bearScore)
+    return {dir:'UP',   reason:`4H gaining (${bull4}/5 bars up) · 1H confirming (${bull1}/7 bullish)`};
+  if(bearScore >= threshold && bearScore > bullScore)
+    return {dir:'DOWN', reason:`4H failing (${bear4}/5 bars down) · 1H confirming (${bear1}/7 bearish)`};
+  if(h4FailedHigh && h1Bearish)
+    return {dir:'DOWN', reason:`4H failed to gain last high · 1H trending down`};
+  if(h4FailedLow && h1Bullish)
+    return {dir:'UP',   reason:`4H failed to lose last low · 1H trending up`};
+  return {dir:'UNCLEAR',reason:'No clear 4H/1H direction — both sides contested'};
 }
 
 // ── COLLECT ALL LEVELS FOR LEVELS PAGE ───────────────────
@@ -1179,14 +1238,22 @@ async function run(){
 
     // Render Next Major Move as soon as both weekly + daily are ready
     const results2 = await Promise.all(fetches);
+    // HTF Story: read 4H + 1H candles (Chris Hunter Phase 2)
+    const h4Entry = results2.find(r=>r.i===2); // index 2 = 4H
+    const h1Entry = results2.find(r=>r.i===3); // index 3 = 1H
+    if(h4Entry?.c && h1Entry?.c){
+      const nm = nextMove(h4Entry.c, h1Entry.c); htfDir=nm.dir; renderNM(nm);
+    } else if(h4Entry?.c){
+      const nm = nextMove(h4Entry.c, h4Entry.c); htfDir=nm.dir; renderNM(nm);
+    } else if(dCandles){
+      const nm = nextMove(dCandles, dCandles); htfDir=nm.dir; renderNM(nm);
+    }
+    // Levels page uses W + D for full level map
     const wEntry = results2.find(r=>r.i===0);
     if(wEntry?.c && dCandles){
-      const nm=nextMove(wEntry.c, dCandles); htfDir=nm.dir; renderNM(nm);
       allLevels = collectLevels(wEntry.c, dCandles, td.price);
       renderLevels();
     } else if(dCandles){
-      // Fallback: use daily-only for NM and levels
-      const nmFb=nextMove(dCandles, dCandles); htfDir=nmFb.dir; renderNM(nmFb);
       allLevels = collectLevels(dCandles, dCandles, td.price);
       renderLevels();
     }
