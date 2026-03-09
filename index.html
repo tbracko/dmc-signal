@@ -740,11 +740,16 @@ function classifyStrength(score, range, wick){
 // Returns count of times tested (0 = fresh/untested)
 // Chris Hunter: "once tested, unlikely to hold unless a new level formed there"
 function countLevelTests(c, startIdx, bh, bl, type){
-  const zone = (bh - bl) * 0.5 + (bh * 0.002);
+  // Chris Hunter: a level is only TESTED when a candle BODY approaches it closely
+  // A wick through does NOT count as testing the level
+  // For resistance (bh): body high must get within 0.3% of the level price
+  // For support (bl): body low must get within 0.3% of the level price
+  const levelPrice = type==='resistance' ? bh : bl;
+  const zone = levelPrice * 0.003; // 0.3% approach zone
   return c.slice(startIdx).filter(k =>
     type==='resistance'
-      ? k.bh >= bl - zone && k.bl <= bh + zone
-      : k.bl <= bh + zone && k.bh >= bl - zone
+      ? k.bh >= levelPrice - zone  // body got close to resistance from below
+      : k.bl <= levelPrice + zone  // body got close to support from above
   ).length;
 }
 function isLevelTested(c, startIdx, bh, bl, type){
@@ -760,15 +765,16 @@ function findPDHL(dCandles){
   const levels = [];
 
   // PDH — previous day HIGH (body high, not wick)
+  // bh and bl define the zone used for testing/approach checks — use bodies only
   levels.push({
-    price: prev.bh, bh: prev.h, bl: prev.bh,
+    price: prev.bh, bh: prev.bh, bl: prev.bh * 0.999,
     type: 'resistance', strength: 'strong',
     tested: false, source: 'PDH', score: 70, tf: 'PDH/PDL'
   });
 
   // PDL — previous day LOW (body low)
   levels.push({
-    price: prev.bl, bh: prev.bl, bl: prev.l,
+    price: prev.bl, bh: prev.bl * 1.001, bl: prev.bl,
     type: 'support', strength: 'strong',
     tested: false, source: 'PDL', score: 70, tf: 'PDH/PDL'
   });
@@ -957,8 +963,12 @@ function dms(c, a, dCandles, tf, htfBias){
       }
     }
 
+    // AT LEVEL: price must be genuinely close — tighter window for HTF
+    // 1W/1D: within 0.4 ATR (roughly 1-2% on daily, prevents 13% false positives)
+    // 4H/1H: within 1.0 ATR (reasonable for intraday)
+    const atLevelWindow = isHTF ? a * 0.4 : a * 1.0;
     const atLevel = nearby.find(l=>
-      Math.abs(l.price-cur.c) < a * 1.8 && l.score >= 20
+      Math.abs(l.price-cur.c) < atLevelWindow && l.score >= 20
     );
     if(atLevel){
       const dir = atLevel.type==='resistance'
@@ -1205,7 +1215,9 @@ function nextMove(h4C, h1C){
   const bearScore = bear4 + (h4FailedHigh?2:0) + (bear1>=5?1:0) + (h1Bearish?1:0);
   const bullScore = bull4 + (h4FailedLow?2:0)  + (bull1>=5?1:0) + (h1Bullish?1:0);
 
-  const threshold = 3;
+  // Lower threshold to 2 — easier to get a directional read
+  // Chris Hunter reads the story from 1H/4H quite quickly; UNCLEAR should be rare
+  const threshold = 2;
   if(bullScore >= threshold && bullScore > bearScore)
     return {dir:'UP',   reason:`4H gaining (${bull4}/5 bars up) · 1H confirming (${bull1}/7 bullish)`};
   if(bearScore >= threshold && bearScore > bullScore)
@@ -1214,6 +1226,11 @@ function nextMove(h4C, h1C){
     return {dir:'DOWN', reason:`4H failed to gain last high · 1H trending down`};
   if(h4FailedLow && h1Bullish)
     return {dir:'UP',   reason:`4H failed to lose last low · 1H trending up`};
+  // Tiebreaker: use the most recent 4H candle direction
+  if(h4n.bh > h4p.bh && h4n.bl > h4p.bl)
+    return {dir:'UP',   reason:`Slight 4H bias UP (last candle higher body) — use caution`};
+  if(h4n.bh < h4p.bh && h4n.bl < h4p.bl)
+    return {dir:'DOWN', reason:`Slight 4H bias DOWN (last candle lower body) — use caution`};
   return {dir:'UNCLEAR',reason:'No clear 4H/1H direction — both sides contested'};
 }
 
