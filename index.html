@@ -742,10 +742,11 @@ function classifyStrength(score, range, wick){
 function countLevelTests(c, startIdx, bh, bl, type){
   // Chris Hunter: a level is only TESTED when a candle BODY approaches it closely
   // A wick through does NOT count as testing the level
-  // For resistance (bh): body high must get within 0.3% of the level price
-  // For support (bl): body low must get within 0.3% of the level price
+  // For resistance (bh): body high must get within 1.0% of the level price
+  // For support (bl): body low must get within 1.0% of the level price
+  // Using 1% not 0.3% — BTC ATR is $500-1500/day, 0.3% is too tight
   const levelPrice = type==='resistance' ? bh : bl;
-  const zone = levelPrice * 0.003; // 0.3% approach zone
+  const zone = levelPrice * 0.010; // 1.0% approach zone
   return c.slice(startIdx).filter(k =>
     type==='resistance'
       ? k.bh >= levelPrice - zone  // body got close to resistance from below
@@ -920,11 +921,9 @@ function dms(c, a, dCandles, tf, htfBias){
       if(effType === 'resistance' && cur.c >= l.price) return false;
       if(effType === 'support'    && cur.c <= l.price) return false;
 
-      // Also check: price is actually moving TOWARD the level
-      const prev = c[c.length-2];
-      if(effType === 'resistance' && prev.bh > cur.bh) return false; // was closer before = moving away
-      if(effType === 'support'    && prev.bl < cur.bl) return false; // was closer before = moving away
-
+      // Note: we do NOT require price to be moving toward the level on this candle —
+      // on 1D/1W a single pullback candle doesn't negate the overall approach
+      // The directional side check above is sufficient
       return true;
     }) : null;
 
@@ -939,7 +938,11 @@ function dms(c, a, dCandles, tf, htfBias){
       const isRes = effectiveType === 'resistance';
       const blindSig = isRes ? 'SHORT' : 'LONG';
       const isFlipped = ft === 'flipped_support' || ft === 'flipped_resistance';
-      const htfBlocks = (isRes && htfBias==='UP') || (!isRes && htfBias==='DOWN');
+      // Blind entries at strong HTF levels fire even counter-trend
+      // Chris Hunter: untested weekly/daily body levels always get a reaction
+      // Only block if level is weak/med AND counter-trend
+      const isStrongLevel = blindCandidate.score >= 55;
+      const htfBlocks = !isStrongLevel && ((isRes && htfBias==='UP') || (!isRes && htfBias==='DOWN'));
       if(!htfBlocks){
         const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
         const stop = findStopLevel(levels, blindCandidate.price, isRes?'short':'long');
@@ -1018,9 +1021,13 @@ function dms(c, a, dCandles, tf, htfBias){
   // Max lookback: 3 bars (45 min) — traps older than that are stale
   const maxLB = 3;
 
-  // HTF story filter — only trade with the 4H/1H direction
-  const htfBlockShort = (htfBias === 'UP');
-  const htfBlockLong  = (htfBias === 'DOWN');
+  // HTF story filter — hard block only when HTF is very clear
+  // Chris Hunter: strong levels CAN be traded counter-trend on 15m
+  // Soft block (warning only) when HTF has slight bias; hard block only when very clear
+  // We treat 'UP'/'DOWN' as soft warnings at 15m — don't fully suppress signals
+  // Only truly block if HTF bias exists AND signal has poor R:R (already handled by R:R filter)
+  const htfBlockShort = false; // removed hard block — R:R filter + ⚠ label is sufficient
+  const htfBlockLong  = false; // removed hard block — R:R filter + ⚠ label is sufficient
 
   // ── FAIL TO GAIN → SHORT ──────────────────────────────
   for(const lv of nearby.filter(l=>l.type==='resistance')){
