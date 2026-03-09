@@ -788,15 +788,17 @@ function findDMCLevels(c, dCandles, tf){
 function findNextLevel(levels, currentPrice, direction){
   const sorted = [...levels].sort((a,b)=>a.price-b.price);
   if(direction==='long'){
-    // Next level above current price (any type — nearest resistance above)
-    const candidates = sorted.filter(l=>l.price > currentPrice * 1.002);
+    // Nearest level ABOVE current price — first meaningful resistance
+    const candidates = sorted.filter(l=>l.price > currentPrice * 1.003);
     if(candidates.length) return {price:candidates[0].price, source:candidates[0].source};
   } else {
-    // Next level below current price (any type — nearest support below)
-    const candidates = sorted.filter(l=>l.price < currentPrice * 0.998);
-    if(candidates.length){ const c2=candidates[candidates.length-1]; return {price:c2.price, source:c2.source}; }
+    // Nearest level BELOW current price — closest support
+    // Must be at least 0.5% below to avoid returning the trap level itself
+    const candidates = sorted.filter(l=>l.price < currentPrice * 0.995);
+    // Take the NEAREST one below (highest price that is still below)
+    if(candidates.length) return {price:candidates[candidates.length-1].price, source:candidates[candidates.length-1].source};
   }
-  // Fallback: use ATR extension
+  // Fallback: use ATR extension (2.5%)
   return {price: direction==='long' ? currentPrice*1.025 : currentPrice*0.975, source:'ATR est.'};
 }
 
@@ -880,16 +882,21 @@ function dms(c, a, dCandles, tf, htfBias){
         const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
         const stop = findStopLevel(levels, blindCandidate.price, isRes?'short':'long');
         const rr   = calcRR(cur.c, tgt.price, blindCandidate.price, stop);
-        const dist = ((blindCandidate.price - cur.c)/cur.c*100).toFixed(2);
-        const htfNote = htfBias!=='UNCLEAR' ? ` · ✓ HTF ${htfBias} aligns` : '';
-        return {
-          sig: blindSig, type: 'BLIND_ENTRY',
-          level: blindCandidate.price, target: tgt.price, rr, stopPrice: stop,
-          strength: blindCandidate.strength, score: blindCandidate.score,
-          reason: `BLIND: ${blindCandidate.source} $${fmt(blindCandidate.price)} · ${dist>0?'+':''}${dist}% · UNTESTED ${tf} level${htfNote}${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)}`,
-          detail: `Untested ${tf} body level — can enter now, no 15m trap needed | SL: $${fmt(stop)}`,
-          untested: true
-        };
+        // Require minimum R:R of 1.0 — otherwise not worth the trade
+        if(!rr || parseFloat(rr) < 1.0) {
+          // Fall through to AT_LEVEL instead of firing a bad-RR blind entry
+        } else {
+          const dist = ((blindCandidate.price - cur.c)/cur.c*100).toFixed(2);
+          const htfNote = htfBias!=='UNCLEAR' ? ` · ✓ HTF ${htfBias} aligns` : '';
+          return {
+            sig: blindSig, type: 'BLIND_ENTRY',
+            level: blindCandidate.price, target: tgt.price, rr, stopPrice: stop,
+            strength: blindCandidate.strength, score: blindCandidate.score,
+            reason: `BLIND: ${blindCandidate.source} $${fmt(blindCandidate.price)} · ${dist>0?'+':''}${dist}% · UNTESTED ${tf} level${htfNote} · R:R ${rr} → $${fmt(tgt.price)}`,
+            detail: `Untested ${tf} body level — can enter now, no 15m trap needed | SL: $${fmt(stop)}`,
+            untested: true
+          };
+        }
       }
     }
 
@@ -971,6 +978,7 @@ function dms(c, a, dCandles, tf, htfBias){
       const tgt  = findNextLevel(levels, confirm.c, 'short');
       const stop = findStopLevel(levels, lv.price, 'short');
       const rr   = calcRR(confirm.c, tgt.price, lv.price, stop);
+      if(rr && parseFloat(rr) < 0.8) continue; // Skip low R:R setups
       const dist = ((lv.price - confirm.c)/confirm.c*100).toFixed(2);
       return {
         sig:'SHORT', type:'FAIL_GAIN',
@@ -1004,6 +1012,7 @@ function dms(c, a, dCandles, tf, htfBias){
       const tgt  = findNextLevel(levels, confirm.c, 'long');
       const stop = findStopLevel(levels, lv.price, 'long');
       const rr   = calcRR(confirm.c, tgt.price, lv.price, stop);
+      if(rr && parseFloat(rr) < 0.8) continue; // Skip low R:R setups
       const dist = ((confirm.c - lv.price)/confirm.c*100).toFixed(2);
       return {
         sig:'LONG', type:'FAIL_LOSE',
