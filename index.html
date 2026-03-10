@@ -675,7 +675,7 @@ function findVPeaks(c, tf){
   for(let i=lookback; i<n-lookback; i++){
     const x = c[i];
     const range = x.h - x.l;
-    if(range < 1) continue; // skip tiny candles
+    if(range < x.c * 0.0001) continue; // skip near-flat candles (relative threshold)
 
     const wickUp   = x.h  - x.bh;
     const wickDown = x.bl - x.l;
@@ -924,7 +924,7 @@ function dms(c, a, dCandles, tf, htfBias){
   const tol    = a * 0.10;
 
   const nearby = levels
-    .filter(l=>Math.abs(l.price-cur.c) < a*14)
+    .filter(l=>Math.abs(l.price-cur.c) < a*30)  // wide window: ATR×30
     .sort((a,b)=>Math.abs(a.price-cur.c)-Math.abs(b.price-cur.c));
 
   // ── 1W / 1D / 4H / 1H: CONTEXT + BLIND ENTRY ────────
@@ -1042,8 +1042,10 @@ function dms(c, a, dCandles, tf, htfBias){
       };
     }
     // NO SETUP — show nearest levels above/below as context
-    const above = nearby.filter(l=>l.price > cur.c).sort((a,b)=>a.price-b.price)[0];
-    const below = nearby.filter(l=>l.price < cur.c).sort((a,b)=>b.price-a.price)[0];
+    // Use all levels if nearby is empty (wide fallback for context display)
+    const pool = nearby.length > 0 ? nearby : levels;
+    const above = pool.filter(l=>l.price > cur.c).sort((a,b)=>a.price-b.price)[0];
+    const below = pool.filter(l=>l.price < cur.c).sort((a,b)=>b.price-a.price)[0];
     const ctx = [
       above ? `R $${fmt(above.price)}` : null,
       below ? `S $${fmt(below.price)}` : null
@@ -1051,8 +1053,8 @@ function dms(c, a, dCandles, tf, htfBias){
     return {
       sig:'NEUTRAL', type:'NONE',
       level:null, target:null,
-      reason:`Between levels — ${ctx}`,
-      detail:'Wait for price to reach a key level'
+      reason:`Between levels — ${ctx}${levels.length===0?' (no levels detected)':''}`,
+      detail:`${levels.length} levels detected · Wait for price to reach a key level`
     };
   }
 
