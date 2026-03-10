@@ -601,11 +601,11 @@ async function getCandles(tf, coinId){
   const sym=COINS[coinId].bnSym;
   // Each call returns real OHLC candles for the exact interval — no aggregation needed
   switch(tf.l){
-    case'1W': return bnKlines(sym,'1w',52);   // 52 weekly candles (~1 year)
-    case'1D': return bnKlines(sym,'1d',90);   // 90 daily candles
-    case'4H': return bnKlines(sym,'4h',120);  // 120 four-hour candles (~20 days)
-    case'1H': return bnKlines(sym,'1h',72);   // 72 hourly candles (~3 days)
-    case'15m':return bnKlines(sym,'15m',96);  // 96 fifteen-minute candles (~24h)
+    case'1W': return bnKlines(sym,'1w',104);  // 104 weekly candles (~2 years)
+    case'1D': return bnKlines(sym,'1d',180);  // 180 daily candles (~6 months)
+    case'4H': return bnKlines(sym,'4h',200);  // 200 four-hour candles (~33 days)
+    case'1H': return bnKlines(sym,'1h',120);  // 120 hourly candles (~5 days)
+    case'15m':return bnKlines(sym,'15m',192); // 192 fifteen-minute candles (~48h)
   }
 }
 
@@ -676,8 +676,8 @@ function detectFlippedLevel(c, formationIdx, originalType, levelPrice){
 
 function findVPeaks(c, tf){
   const n = c.length, L = [];
-  const lookback = tf==='1W'||tf==='1D' ? 3 : 4;
-  const wickRatio = 0.35; // wick must be at least 35% of candle range for rejection
+  const lookback = 2; // 2 bars each side — catches more obvious DMC levels
+  const wickRatio = 0.25; // wick must be at least 35% of candle range for rejection
 
   for(let i=lookback; i<n-lookback; i++){
     const x = c[i];
@@ -747,11 +747,17 @@ function scoreLevel(c, i, type){
   // 1. Velocity of departure (how fast price left = strong rejection)
   const nextCandles = c.slice(i+1, i+4);
   if(type==='resistance'){
-    const drop = nextCandles.reduce((s,k)=>s+(x.bh-k.bl),0)/Math.max(nextCandles.length,1);
-    score += Math.min(drop/range, 2) * 30;
+    // Did price close lower on the next candles? Score up to 30pts
+    const closedLower = nextCandles.filter(k => k.c < x.bh).length;
+    score += closedLower * 10; // 10pts per candle that closed below level
+    // Bonus: did price move away fast (> 0.5% from level)?
+    const fastDrop = nextCandles.some(k => k.c < x.bh * 0.995);
+    if(fastDrop) score += 10;
   } else {
-    const rise = nextCandles.reduce((s,k)=>s+(k.bh-x.bl),0)/Math.max(nextCandles.length,1);
-    score += Math.min(rise/range, 2) * 30;
+    const closedHigher = nextCandles.filter(k => k.c > x.bl).length;
+    score += closedHigher * 10;
+    const fastRise = nextCandles.some(k => k.c > x.bl * 1.005);
+    if(fastRise) score += 10;
   }
 
   // 2. Wick rejection at the level
@@ -780,8 +786,8 @@ function scoreLevel(c, i, type){
 }
 
 function classifyStrength(score, range, wick){
-  if(score >= 45) return 'strong';
-  if(score >= 20) return 'med';
+  if(score >= 40) return 'strong';
+  if(score >= 12) return 'med';   // much lower threshold — catch more DMC levels
   return 'weak';
 }
 
