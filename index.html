@@ -184,6 +184,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   <select id="coin-sel" onchange="switchCoin(this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:4px 8px;cursor:pointer;letter-spacing:.04em">
     <option value="bitcoin" data-sym="BTCUSDT" data-label="BTC/USD" selected>BTC/USD</option>
     <option value="ethereum" data-sym="ETHUSDT" data-label="ETH/USD">ETH/USD</option>
+    <option value="solana" data-sym="SOLUSDT" data-label="SOL/USD">SOL/USD</option>
   </select>
   <div class="topbar-r">
     <span id="tb-price">—</span>
@@ -367,6 +368,7 @@ const TFS=[{l:'1W',iv:'W',w:5},{l:'1D',iv:'D',w:4},{l:'4H',iv:'240',w:3},{l:'1H'
 const COINS = {
   bitcoin:  { id:'bitcoin',  label:'BTC/USD', sym:'BINANCE:BTCUSDT', shortLabel:'BTC', bnSym:'BTCUSDT' },
   ethereum: { id:'ethereum', label:'ETH/USD', sym:'BINANCE:ETHUSDT', shortLabel:'ETH', bnSym:'ETHUSDT' },
+  solana:   { id:'solana',   label:'SOL/USD', sym:'BINANCE:SOLUSDT', shortLabel:'SOL', bnSym:'SOLUSDT' },
 };
 let activeCoin = 'bitcoin'; // currently viewed coin
 
@@ -374,6 +376,7 @@ let activeCoin = 'bitcoin'; // currently viewed coin
 const coinState = {
   bitcoin:  { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{} },
   ethereum: { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{} },
+  solana:   { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{} },
 };
 
 // Convenience accessors for active coin (used by render functions)
@@ -1548,42 +1551,41 @@ async function runCoin(coinId){
     s.price = td.price; s.change = td.change;
     if(isActive){ syncActiveState(); renderTop(td); }
 
-    // Step 1: fetch 1D first (fast on Binance) — needed as dCandles context for all TFs
-    let dCandles=null, wCandles=null;
-    try{
-      dCandles = await getCandles({l:'1D'}, coinId);
-      processTF(1, dCandles, dCandles, coinId);
-      // fetch 1W in parallel right after 1D returns
-      getCandles({l:'1W'}, coinId).then(c=>{
-        wCandles=c;
-        processTF(0, c, dCandles, coinId);
-      }).catch(e=>console.warn('1W:',e.message));
-    }catch(e){ console.warn(COINS[coinId].shortLabel+' 1D failed:', e.message); }
-
-    // Step 2: fetch intraday TFs in parallel — all fast on Binance
-    const remaining = [2,3,4]; // 4H, 1H, 15m
-    const fetches = remaining.map(i =>
+    // Fetch ALL 5 timeframes in parallel — Binance has no meaningful rate limit
+    // 1D candles used as context for all TF processing (passed as dCandles)
+    const allFetches = [0,1,2,3,4].map(i =>
       getCandles(TFS[i], coinId)
-        .then(c => { processTF(i, c, dCandles, coinId); return {i, c}; })
-        .catch(e => { console.warn(TFS[i].l, e.message); return {i, c:null}; })
+        .then(c => ({ i, c }))
+        .catch(e => { console.warn(COINS[coinId].shortLabel, TFS[i].l, e.message); return { i, c:null }; })
     );
+    const allResults = await Promise.all(allFetches);
 
-    const results2 = await Promise.all(fetches);
+    const wEntry = allResults.find(r=>r.i===0);
+    const dEntry = allResults.find(r=>r.i===1);
+    const h4Entry = allResults.find(r=>r.i===2);
+    const h1Entry = allResults.find(r=>r.i===3);
+    const m15Entry = allResults.find(r=>r.i===4);
+
+    const dCandles = dEntry?.c || null;
+    const wCandles = wEntry?.c || null;
+
+    // Process each TF — pass dCandles as context (may be null if 1D failed, graceful)
+    if(dCandles) processTF(1, dCandles, dCandles, coinId);
+    if(wCandles && dCandles) processTF(0, wCandles, dCandles, coinId);
+    if(h4Entry?.c && dCandles) processTF(2, h4Entry.c, dCandles, coinId);
+    if(h1Entry?.c && dCandles) processTF(3, h1Entry.c, dCandles, coinId);
+    if(m15Entry?.c && dCandles) processTF(4, m15Entry.c, dCandles, coinId);
 
     // HTF Story
-    const h4Entry = results2.find(r=>r.i===2);
-    const h1Entry = results2.find(r=>r.i===3);
     let nm;
     if(h4Entry?.c && h1Entry?.c)      nm = nextMove(h4Entry.c, h1Entry.c);
     else if(h4Entry?.c)               nm = nextMove(h4Entry.c, h4Entry.c);
     else if(dCandles)                  nm = nextMove(dCandles, dCandles);
     if(nm){ s.htfDir = nm.dir; if(isActive){ syncActiveState(); renderNM(nm); } }
 
-    // Levels
-    // wCandles may still be loading (async) — use if available, else fallback to dCandles
-    const wc = wCandles || dCandles;
-    if(wc && dCandles) s.allLevels = collectLevels(wc, dCandles, s.price);
-    else if(dCandles)  s.allLevels = collectLevels(dCandles, dCandles, s.price);
+    // Levels — use 1W + 1D for key level detection
+    if(wCandles && dCandles) s.allLevels = collectLevels(wCandles, dCandles, s.price);
+    else if(dCandles)        s.allLevels = collectLevels(dCandles, dCandles, s.price);
     if(isActive){ syncActiveState(); renderLevels(); }
 
     if(isActive){
@@ -1628,12 +1630,11 @@ window.addEventListener('DOMContentLoaded',()=>{
   loadSettings();
   renderLog();
   document.getElementById('tf-cards').innerHTML=TFS.map(tf=>`<div class="tfc none"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type NONE">···</span><span class="tfc-sig WAIT" style="margin-left:auto">—</span></div><div class="tfc-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div></div>`).join('');
-  // Start BTC immediately (renders UI), stagger ETH by 8s to avoid rate limits
-  runCoin('bitcoin').then(() => {
-    scheduleAll();
-    // ETH starts after BTC finishes its first fetch
-    setTimeout(() => runCoin('ethereum'), 8000);
-  });
+  // Launch all coins with small stagger — Binance handles parallel requests fine
+  // BTC first (active coin, renders UI), then ETH + SOL with 2s gaps
+  runCoin('bitcoin').then(() => scheduleAll());
+  setTimeout(() => runCoin('ethereum'), 2000);
+  setTimeout(() => runCoin('solana'),   4000);
 });
 </script>
 
