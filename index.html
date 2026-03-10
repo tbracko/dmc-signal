@@ -359,14 +359,14 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 
 <script>
 'use strict';
-const CG='https://api.coingecko.com/api/v3', REFRESH=120000;
+const BINANCE='https://api.binance.com/api/v3', REFRESH=120000;
 const TFS=[{l:'1W',iv:'W',w:5},{l:'1D',iv:'D',w:4},{l:'4H',iv:'240',w:3},{l:'1H',iv:'60',w:2},{l:'15m',iv:'15',w:1}];
 
 // ── MULTI-COIN STATE ──────────────────────────────────────
 // Each coin runs its own independent engine loop
 const COINS = {
-  bitcoin:  { id:'bitcoin',  label:'BTC/USD', sym:'BINANCE:BTCUSDT', shortLabel:'BTC' },
-  ethereum: { id:'ethereum', label:'ETH/USD', sym:'BINANCE:ETHUSDT', shortLabel:'ETH' },
+  bitcoin:  { id:'bitcoin',  label:'BTC/USD', sym:'BINANCE:BTCUSDT', shortLabel:'BTC', bnSym:'BTCUSDT' },
+  ethereum: { id:'ethereum', label:'ETH/USD', sym:'BINANCE:ETHUSDT', shortLabel:'ETH', bnSym:'ETHUSDT' },
 };
 let activeCoin = 'bitcoin'; // currently viewed coin
 
@@ -561,46 +561,48 @@ document.getElementById('tf-bar').addEventListener('click',e=>{
 });
 
 // ── API ───────────────────────────────────────────────────
-async function getPrice(coinId){coinId=coinId||activeCoin;
-  const r=await fetch(`${CG}/simple/price?ids=${coinId}&vs_currencies=usd&include_24hr_change=true`);
-  if(!r.ok)throw new Error('Price: '+r.status);
-  const d=await r.json();
-  return{price:d[coinId].usd,change:d[coinId].usd_24h_change};
-}
 async function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
 
-// ── FAST OHLC FETCH (4H, 1H, 15m) ────────────────────────
-// CoinGecko OHLC endpoint returns pre-built candles — much faster than
-// fetching tick data and aggregating. Returns real O/H/L/C per interval.
-async function getOHLC(days, coinId){
-  coinId=coinId||activeCoin;
-  let r, att=0;
-  while(att<3){
-    r=await fetch(`${CG}/coins/${coinId}/ohlc?vs_currency=usd&days=${days}`);
-    if(r.status===429){await sleep(2000*(att+1)); att++; continue;}
-    break;
-  }
-  if(!r||!r.ok) throw new Error(`OHLC ${days}d: ${r?.status||'fail'}`);
+// ── BINANCE API — no key, no rate limits, real OHLC candles ──────────────
+// Endpoint: GET /api/v3/klines?symbol=BTCUSDT&interval=1w&limit=52
+// Returns: [[openTime, open, high, low, close, vol, closeTime, ...], ...]
+// Intervals: 1w, 1d, 4h, 1h, 15m
+async function bnKlines(sym, interval, limit){
+  const url=`${BINANCE}/klines?symbol=${sym}&interval=${interval}&limit=${limit}`;
+  const r=await fetch(url);
+  if(!r.ok) throw new Error(`Binance ${interval}: ${r.status}`);
   const raw=await r.json();
-  if(!Array.isArray(raw)||raw.length<4) throw new Error(`OHLC ${days}d: empty`);
-  return raw.map(k=>({t:k[0],o:k[1],h:k[2],l:k[3],c:k[4],bh:Math.max(k[1],k[4]),bl:Math.min(k[1],k[4])}));
+  if(!Array.isArray(raw)||raw.length<4) throw new Error(`Binance ${interval}: empty`);
+  return raw.map(k=>({
+    t:k[0], o:+k[1], h:+k[2], l:+k[3], c:+k[4],
+    bh:Math.max(+k[1],+k[4]), bl:Math.min(+k[1],+k[4])
+  }));
 }
 
-// ── MARKET CHART (1W, 1D) — tick data aggregated into candles ────────────
-async function fetchChart(days, coinId){
+async function getPrice(coinId){
   coinId=coinId||activeCoin;
-  let r, att=0;
-  while(att<3){
-    r=await fetch(`${CG}/coins/${coinId}/market_chart?vs_currency=usd&days=${days}`);
-    if(r.status===429){await sleep(2000*(att+1)); att++; continue;}
-    break;
-  }
-  if(!r||!r.ok) throw new Error(`Chart ${days}d: ${r?.status||'fail'}`);
+  const sym=COINS[coinId].bnSym;
+  // Binance ticker — returns price + 24h change instantly
+  const r=await fetch(`${BINANCE}/ticker/24hr?symbol=${sym}`);
+  if(!r.ok) throw new Error('Price: '+r.status);
   const d=await r.json();
-  if(!d.prices?.length) throw new Error(`Chart ${days}d: empty`);
-  return d.prices;
+  return{price:+d.lastPrice, change:+d.priceChangePercent};
 }
 
+async function getCandles(tf, coinId){
+  coinId=coinId||activeCoin;
+  const sym=COINS[coinId].bnSym;
+  // Each call returns real OHLC candles for the exact interval — no aggregation needed
+  switch(tf.l){
+    case'1W': return bnKlines(sym,'1w',52);   // 52 weekly candles (~1 year)
+    case'1D': return bnKlines(sym,'1d',90);   // 90 daily candles
+    case'4H': return bnKlines(sym,'4h',120);  // 120 four-hour candles (~20 days)
+    case'1H': return bnKlines(sym,'1h',72);   // 72 hourly candles (~3 days)
+    case'15m':return bnKlines(sym,'15m',96);  // 96 fifteen-minute candles (~24h)
+  }
+}
+
+// aggregateCandles kept for any legacy callers (unused but harmless)
 function aggregateCandles(prices, msPerCandle){
   const B={};
   for(const[ts,p]of prices){
@@ -609,36 +611,6 @@ function aggregateCandles(prices, msPerCandle){
     else{B[b].h=Math.max(B[b].h,p);B[b].l=Math.min(B[b].l,p);B[b].c=p;}
   }
   return Object.values(B).sort((a,b)=>a.t-b.t).map(k=>({...k,bh:Math.max(k.o,k.c),bl:Math.min(k.o,k.c)}));
-}
-
-async function getCandles(tf, coinId){
-  coinId=coinId||activeCoin;
-  const MS_D=86400000, MS_W=604800000;
-  switch(tf.l){
-    case'1W':{
-      // 90 days → ~13 weekly candles (enough for HTF level detection, much faster than 365d)
-      const prices=await fetchChart(90, coinId);
-      return aggregateCandles(prices, MS_W);
-    }
-    case'1D':{
-      // 90 days of daily candles — enough for PDH/PDL and level detection
-      const prices=await fetchChart(90, coinId);
-      return aggregateCandles(prices, MS_D);
-    }
-    // CoinGecko free tier granularity rules:
-    //   OHLC days=7-30  → 4H candles (use for 4H ✓)
-    //   market_chart days≤1   → 5min ticks  → aggregate to 15m ✓
-    //   market_chart days≤90  → hourly ticks → aggregate to 1H ✓
-    case'4H': return getOHLC(7, coinId);   // 4H candles, ~42 bars
-    case'1H':{                             // hourly ticks → 1H candles
-      const prices = await fetchChart(3, coinId); // 3 days = hourly ticks on free tier
-      return aggregateCandles(prices, 3600000);   // aggregate to 1H
-    }
-    case'15m':{                            // 5min ticks → 15m candles
-      const prices = await fetchChart(1, coinId); // 1 day = 5min ticks on free tier
-      return aggregateCandles(prices, 900000);    // aggregate to 15m
-    }
-  }
 }
 
 // ── DMS ENGINE v3 ─────────────────────────────────────────
@@ -1552,29 +1524,20 @@ async function runCoin(coinId){
     s.price = td.price;
     if(isActive){ syncActiveState(); renderTop(td); }
 
-    // Step 1: ONE shared 90-day request → build both 1D and 1W candles
-    // This cuts API calls in half vs fetching them separately
+    // Step 1: fetch 1D first (fast on Binance) — needed as dCandles context for all TFs
     let dCandles=null, wCandles=null;
     try{
-      const MS_D=86400000, MS_W=604800000;
-      let r90, att=0;
-      while(att<3){
-        r90=await fetch(`${CG}/coins/${coinId}/market_chart?vs_currency=usd&days=90`);
-        if(r90.status===429){await sleep(2000*(att+1));att++;continue;}
-        break;
-      }
-      if(!r90||!r90.ok) throw new Error('90d: '+r90?.status);
-      const d90=await r90.json();
-      if(d90.prices?.length){
-        dCandles=aggregateCandles(d90.prices,MS_D);
-        wCandles=aggregateCandles(d90.prices,MS_W);
-        processTF(1, dCandles, dCandles, coinId); // render 1D
-        processTF(0, wCandles, dCandles, coinId); // render 1W
-      }
-    }catch(e){ console.warn(COINS[coinId].shortLabel+' 1D/1W failed:', e.message); }
+      dCandles = await getCandles({l:'1D'}, coinId);
+      processTF(1, dCandles, dCandles, coinId);
+      // fetch 1W in parallel right after 1D returns
+      getCandles({l:'1W'}, coinId).then(c=>{
+        wCandles=c;
+        processTF(0, c, dCandles, coinId);
+      }).catch(e=>console.warn('1W:',e.message));
+    }catch(e){ console.warn(COINS[coinId].shortLabel+' 1D failed:', e.message); }
 
-    // Step 2: fetch intraday TFs in parallel using fast OHLC endpoint
-    const remaining = [2,3,4]; // 4H, 1H, 15m (1W+1D done above)
+    // Step 2: fetch intraday TFs in parallel — all fast on Binance
+    const remaining = [2,3,4]; // 4H, 1H, 15m
     const fetches = remaining.map(i =>
       getCandles(TFS[i], coinId)
         .then(c => { processTF(i, c, dCandles, coinId); return {i, c}; })
@@ -1593,9 +1556,10 @@ async function runCoin(coinId){
     if(nm){ s.htfDir = nm.dir; if(isActive){ syncActiveState(); renderNM(nm); } }
 
     // Levels
-    // Use wCandles captured from the shared 90d fetch above
-    if(wCandles && dCandles)        s.allLevels = collectLevels(wCandles, dCandles, s.price);
-    else if(dCandles)               s.allLevels = collectLevels(dCandles, dCandles, s.price);
+    // wCandles may still be loading (async) — use if available, else fallback to dCandles
+    const wc = wCandles || dCandles;
+    if(wc && dCandles) s.allLevels = collectLevels(wc, dCandles, s.price);
+    else if(dCandles)  s.allLevels = collectLevels(dCandles, dCandles, s.price);
     if(isActive){ syncActiveState(); renderLevels(); }
 
     if(isActive){
