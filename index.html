@@ -625,12 +625,19 @@ async function getCandles(tf, coinId){
       const prices=await fetchChart(90, coinId);
       return aggregateCandles(prices, MS_D);
     }
-    // OHLC endpoint for intraday — returns real candles directly, no aggregation needed
-    // CoinGecko OHLC: days=1→30min candles, days=7→4H candles, days=14→4H candles
-    // For 4H we use days=14 to get ~84 candles; for 1H days=2; for 15m days=1
-    case'4H': return getOHLC(14, coinId);  // ~84 4H candles
-    case'1H': return getOHLC(2, coinId);   // ~48 1H candles
-    case'15m':return getOHLC(1, coinId);   // ~48 30min candles (closest to 15m on free tier)
+    // CoinGecko free tier granularity rules:
+    //   OHLC days=7-30  → 4H candles (use for 4H ✓)
+    //   market_chart days≤1   → 5min ticks  → aggregate to 15m ✓
+    //   market_chart days≤90  → hourly ticks → aggregate to 1H ✓
+    case'4H': return getOHLC(7, coinId);   // 4H candles, ~42 bars
+    case'1H':{                             // hourly ticks → 1H candles
+      const prices = await fetchChart(3, coinId); // 3 days = hourly ticks on free tier
+      return aggregateCandles(prices, 3600000);   // aggregate to 1H
+    }
+    case'15m':{                            // 5min ticks → 15m candles
+      const prices = await fetchChart(1, coinId); // 1 day = 5min ticks on free tier
+      return aggregateCandles(prices, 900000);    // aggregate to 15m
+    }
   }
 }
 
