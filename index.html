@@ -574,9 +574,11 @@ async function getOHLC(days){
   if(!Array.isArray(raw)||!raw.length)throw new Error(`OHLC ${days}: empty`);
   return raw.map(k=>({t:k[0],o:k[1],h:k[2],l:k[3],c:k[4],bh:Math.max(k[1],k[4]),bl:Math.min(k[1],k[4])}));
 }
+async function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
 async function getChart(days,mins,coinId){coinId=coinId||activeCoin;
-  const r=await fetch(`${CG}/coins/${coinId}/market_chart?vs_currency=usd&days=${days}`);
-  if(!r.ok)throw new Error(`Chart ${days}: ${r.status}`);
+  let r, _att=0;
+  while(_att<3){r=await fetch(`${CG}/coins/${coinId}/market_chart?vs_currency=usd&days=${days}`);if(r.status===429){await sleep(2500*(_att+1));_att++;continue;}break;}
+  if(!r||!r.ok)throw new Error(`Chart ${days}: ${r?.status||'fail'}`);
   const d=await r.json();
   const prices=d.prices;if(!prices||prices.length<4)throw new Error(`Chart ${days}: empty`);
   const bms=mins*60000,B={};
@@ -596,7 +598,7 @@ function aggregateCandles(prices, msPerCandle){
     .map(k=>({...k,bh:Math.max(k.o,k.c),bl:Math.min(k.o,k.c)}));
 }
 
-async function getCandles(tf){
+async function getCandles(tf, coinId){coinId=coinId||activeCoin;
   const MS_MIN=60000, MS_H=3600000, MS_D=86400000, MS_W=604800000;
   switch(tf.l){
     case'1W':{
@@ -604,8 +606,9 @@ async function getCandles(tf){
       const ctrl=new AbortController();
       const tid=setTimeout(()=>ctrl.abort(),12000); // 12s timeout
       try{
-        const r=await fetch(`${CG}/coins/${coinId}/market_chart?vs_currency=usd&days=365`,{signal:ctrl.signal});
+        let r=await fetch(`${CG}/coins/${coinId}/market_chart?vs_currency=usd&days=365`,{signal:ctrl.signal});
         clearTimeout(tid);
+        if(r.status===429){await sleep(3000);r=await fetch(`${CG}/coins/${coinId}/market_chart?vs_currency=usd&days=365`);}
         if(!r.ok)throw new Error('1W fetch: '+r.status);
         const d=await r.json();
         if(!d.prices?.length)throw new Error('1W: empty');
@@ -614,15 +617,16 @@ async function getCandles(tf){
     }
     case'1D':{
       // Use 180 days of price ticks → aggregate into daily candles
-      const r=await fetch(`${CG}/coins/${coinId}/market_chart?vs_currency=usd&days=180`);
+      let r=await fetch(`${CG}/coins/${coinId}/market_chart?vs_currency=usd&days=180`);
+      if(r.status===429){await sleep(2500);r=await fetch(`${CG}/coins/${coinId}/market_chart?vs_currency=usd&days=180`);}
       if(!r.ok)throw new Error('1D fetch: '+r.status);
       const d=await r.json();
       if(!d.prices?.length)throw new Error('1D: empty');
       return aggregateCandles(d.prices, MS_D);
     }
-    case'4H':return getChart('16',240);
-    case'1H':return getChart('7',60);
-    case'15m':return getChart('2',15);
+    case'4H':return getChart('16',240,coinId);
+    case'1H':return getChart('7',60,coinId);
+    case'15m':return getChart('2',15,coinId);
   }
 }
 
@@ -1584,10 +1588,15 @@ async function runCoin(coinId){
 
 // ── SCHEDULER: runs all coins independently ──────────────
 function scheduleAll(){
-  Object.keys(COINS).forEach(coinId => {
+  const coinIds = Object.keys(COINS);
+  coinIds.forEach((coinId, idx) => {
     const s = coinState[coinId];
     if(s.timer) clearTimeout(s.timer);
-    s.timer = setTimeout(()=>{ runCoin(coinId).then(()=>scheduleAll()); }, REFRESH);
+    // Stagger coins by half REFRESH interval to spread API load
+    const delay = REFRESH + idx * (REFRESH/2);
+    s.timer = setTimeout(()=>{ runCoin(coinId).then(()=>{
+      s.timer = setTimeout(()=>runCoin(coinId).then(()=>scheduleAll()),REFRESH);
+    }); }, delay);
   });
 }
 
@@ -1606,9 +1615,12 @@ window.addEventListener('DOMContentLoaded',()=>{
   loadSettings();
   renderLog();
   document.getElementById('tf-cards').innerHTML=TFS.map(tf=>`<div class="tfc none"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type NONE">···</span><span class="tfc-sig WAIT" style="margin-left:auto">—</span></div><div class="tfc-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div></div>`).join('');
-  // Start all coins simultaneously — BTC renders UI, ETH runs silently in background
-  Promise.all(Object.keys(COINS).map(coinId => runCoin(coinId)))
-    .then(scheduleAll);
+  // Start BTC immediately (renders UI), stagger ETH by 8s to avoid rate limits
+  runCoin('bitcoin').then(() => {
+    scheduleAll();
+    // ETH starts after BTC finishes its first fetch
+    setTimeout(() => runCoin('ethereum'), 8000);
+  });
 });
 </script>
 
