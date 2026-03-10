@@ -372,8 +372,8 @@ let activeCoin = 'bitcoin'; // currently viewed coin
 
 // Per-coin state — keyed by coin id
 const coinState = {
-  bitcoin:  { results:{}, allLevels:[], price:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{} },
-  ethereum: { results:{}, allLevels:[], price:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{} },
+  bitcoin:  { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{} },
+  ethereum: { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{} },
 };
 
 // Convenience accessors for active coin (used by render functions)
@@ -408,8 +408,15 @@ function switchCoin(coinId){
 function renderTopFromState(){
   const s = cs();
   if(s.price > 0){
-    document.getElementById('price').textContent = '$'+fmt(s.price);
-    document.getElementById('price-dot').style.background = '#00e676';
+    document.getElementById('tb-price').textContent = '$'+fmt(s.price);
+    document.getElementById('dot').style.background = '#00e676';
+    const chg = document.getElementById('tb-chg');
+    if(chg && s.change !== undefined){
+      chg.style.display = '';
+      chg.textContent = (s.change>=0?'+':'')+s.change.toFixed(2)+'%';
+      chg.style.background = s.change>=0?'rgba(0,230,118,.15)':'rgba(255,61,90,.15)';
+      chg.style.color = s.change>=0?'#00e676':'#ff3d5a';
+    }
   }
 }
 
@@ -1523,7 +1530,7 @@ async function runCoin(coinId){
 
   try{
     const td = await getPrice(coinId);
-    s.price = td.price;
+    s.price = td.price; s.change = td.change;
     if(isActive){ syncActiveState(); renderTop(td); }
 
     // Step 1: fetch 1D first (fast on Binance) — needed as dCandles context for all TFs
