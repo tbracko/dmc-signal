@@ -567,25 +567,40 @@ async function getPrice(coinId){coinId=coinId||activeCoin;
   const d=await r.json();
   return{price:d[coinId].usd,change:d[coinId].usd_24h_change};
 }
-async function getOHLC(days){
-  const r=await fetch(`${CG}/coins/${coinId}/ohlc?vs_currency=usd&days=${days}`);
-  if(!r.ok)throw new Error(`OHLC ${days}: ${r.status}`);
+async function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+
+// ── FAST OHLC FETCH (4H, 1H, 15m) ────────────────────────
+// CoinGecko OHLC endpoint returns pre-built candles — much faster than
+// fetching tick data and aggregating. Returns real O/H/L/C per interval.
+async function getOHLC(days, coinId){
+  coinId=coinId||activeCoin;
+  let r, att=0;
+  while(att<3){
+    r=await fetch(`${CG}/coins/${coinId}/ohlc?vs_currency=usd&days=${days}`);
+    if(r.status===429){await sleep(2000*(att+1)); att++; continue;}
+    break;
+  }
+  if(!r||!r.ok) throw new Error(`OHLC ${days}d: ${r?.status||'fail'}`);
   const raw=await r.json();
-  if(!Array.isArray(raw)||!raw.length)throw new Error(`OHLC ${days}: empty`);
+  if(!Array.isArray(raw)||raw.length<4) throw new Error(`OHLC ${days}d: empty`);
   return raw.map(k=>({t:k[0],o:k[1],h:k[2],l:k[3],c:k[4],bh:Math.max(k[1],k[4]),bl:Math.min(k[1],k[4])}));
 }
-async function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
-async function getChart(days,mins,coinId){coinId=coinId||activeCoin;
-  let r, _att=0;
-  while(_att<3){r=await fetch(`${CG}/coins/${coinId}/market_chart?vs_currency=usd&days=${days}`);if(r.status===429){await sleep(2500*(_att+1));_att++;continue;}break;}
-  if(!r||!r.ok)throw new Error(`Chart ${days}: ${r?.status||'fail'}`);
+
+// ── MARKET CHART (1W, 1D) — tick data aggregated into candles ────────────
+async function fetchChart(days, coinId){
+  coinId=coinId||activeCoin;
+  let r, att=0;
+  while(att<3){
+    r=await fetch(`${CG}/coins/${coinId}/market_chart?vs_currency=usd&days=${days}`);
+    if(r.status===429){await sleep(2000*(att+1)); att++; continue;}
+    break;
+  }
+  if(!r||!r.ok) throw new Error(`Chart ${days}d: ${r?.status||'fail'}`);
   const d=await r.json();
-  const prices=d.prices;if(!prices||prices.length<4)throw new Error(`Chart ${days}: empty`);
-  const bms=mins*60000,B={};
-  for(const[ts,p]of prices){const b=Math.floor(ts/bms)*bms;if(!B[b])B[b]={t:b,o:p,h:p,l:p,c:p};else{B[b].h=Math.max(B[b].h,p);B[b].l=Math.min(B[b].l,p);B[b].c=p;}}
-  return Object.values(B).sort((a,b)=>a.t-b.t).map(k=>({...k,bh:Math.max(k.o,k.c),bl:Math.min(k.o,k.c)}));
+  if(!d.prices?.length) throw new Error(`Chart ${days}d: empty`);
+  return d.prices;
 }
-// Aggregate price ticks into candles of minWidth ms
+
 function aggregateCandles(prices, msPerCandle){
   const B={};
   for(const[ts,p]of prices){
@@ -593,40 +608,29 @@ function aggregateCandles(prices, msPerCandle){
     if(!B[b])B[b]={t:b,o:p,h:p,l:p,c:p};
     else{B[b].h=Math.max(B[b].h,p);B[b].l=Math.min(B[b].l,p);B[b].c=p;}
   }
-  return Object.values(B)
-    .sort((a,b)=>a.t-b.t)
-    .map(k=>({...k,bh:Math.max(k.o,k.c),bl:Math.min(k.o,k.c)}));
+  return Object.values(B).sort((a,b)=>a.t-b.t).map(k=>({...k,bh:Math.max(k.o,k.c),bl:Math.min(k.o,k.c)}));
 }
 
-async function getCandles(tf, coinId){coinId=coinId||activeCoin;
-  const MS_MIN=60000, MS_H=3600000, MS_D=86400000, MS_W=604800000;
+async function getCandles(tf, coinId){
+  coinId=coinId||activeCoin;
+  const MS_D=86400000, MS_W=604800000;
   switch(tf.l){
     case'1W':{
-      // 365 days → ~52 weekly candles, faster than 730d
-      const ctrl=new AbortController();
-      const tid=setTimeout(()=>ctrl.abort(),12000); // 12s timeout
-      try{
-        let r=await fetch(`${CG}/coins/${coinId}/market_chart?vs_currency=usd&days=365`,{signal:ctrl.signal});
-        clearTimeout(tid);
-        if(r.status===429){await sleep(3000);r=await fetch(`${CG}/coins/${coinId}/market_chart?vs_currency=usd&days=365`);}
-        if(!r.ok)throw new Error('1W fetch: '+r.status);
-        const d=await r.json();
-        if(!d.prices?.length)throw new Error('1W: empty');
-        return aggregateCandles(d.prices, MS_W);
-      }catch(e){clearTimeout(tid);throw e;}
+      // 90 days → ~13 weekly candles (enough for HTF level detection, much faster than 365d)
+      const prices=await fetchChart(90, coinId);
+      return aggregateCandles(prices, MS_W);
     }
     case'1D':{
-      // Use 180 days of price ticks → aggregate into daily candles
-      let r=await fetch(`${CG}/coins/${coinId}/market_chart?vs_currency=usd&days=180`);
-      if(r.status===429){await sleep(2500);r=await fetch(`${CG}/coins/${coinId}/market_chart?vs_currency=usd&days=180`);}
-      if(!r.ok)throw new Error('1D fetch: '+r.status);
-      const d=await r.json();
-      if(!d.prices?.length)throw new Error('1D: empty');
-      return aggregateCandles(d.prices, MS_D);
+      // 90 days of daily candles — enough for PDH/PDL and level detection
+      const prices=await fetchChart(90, coinId);
+      return aggregateCandles(prices, MS_D);
     }
-    case'4H':return getChart('16',240,coinId);
-    case'1H':return getChart('7',60,coinId);
-    case'15m':return getChart('2',15,coinId);
+    // OHLC endpoint for intraday — returns real candles directly, no aggregation needed
+    // CoinGecko OHLC: days=1→30min candles, days=7→4H candles, days=14→4H candles
+    // For 4H we use days=14 to get ~84 candles; for 1H days=2; for 15m days=1
+    case'4H': return getOHLC(14, coinId);  // ~84 4H candles
+    case'1H': return getOHLC(2, coinId);   // ~48 1H candles
+    case'15m':return getOHLC(1, coinId);   // ~48 30min candles (closest to 15m on free tier)
   }
 }
 
@@ -1541,15 +1545,29 @@ async function runCoin(coinId){
     s.price = td.price;
     if(isActive){ syncActiveState(); renderTop(td); }
 
-    // Step 1: fetch daily first
-    let dCandles = null;
+    // Step 1: ONE shared 90-day request → build both 1D and 1W candles
+    // This cuts API calls in half vs fetching them separately
+    let dCandles=null, wCandles=null;
     try{
-      dCandles = await getCandles({l:'1D'}, coinId);
-      processTF(1, dCandles, dCandles, coinId);
-    }catch(e){ console.warn(COINS[coinId].shortLabel+' 1D failed:', e.message); }
+      const MS_D=86400000, MS_W=604800000;
+      let r90, att=0;
+      while(att<3){
+        r90=await fetch(`${CG}/coins/${coinId}/market_chart?vs_currency=usd&days=90`);
+        if(r90.status===429){await sleep(2000*(att+1));att++;continue;}
+        break;
+      }
+      if(!r90||!r90.ok) throw new Error('90d: '+r90?.status);
+      const d90=await r90.json();
+      if(d90.prices?.length){
+        dCandles=aggregateCandles(d90.prices,MS_D);
+        wCandles=aggregateCandles(d90.prices,MS_W);
+        processTF(1, dCandles, dCandles, coinId); // render 1D
+        processTF(0, wCandles, dCandles, coinId); // render 1W
+      }
+    }catch(e){ console.warn(COINS[coinId].shortLabel+' 1D/1W failed:', e.message); }
 
-    // Step 2: fetch remaining TFs in parallel
-    const remaining = [0,2,3,4];
+    // Step 2: fetch intraday TFs in parallel using fast OHLC endpoint
+    const remaining = [2,3,4]; // 4H, 1H, 15m (1W+1D done above)
     const fetches = remaining.map(i =>
       getCandles(TFS[i], coinId)
         .then(c => { processTF(i, c, dCandles, coinId); return {i, c}; })
@@ -1568,8 +1586,8 @@ async function runCoin(coinId){
     if(nm){ s.htfDir = nm.dir; if(isActive){ syncActiveState(); renderNM(nm); } }
 
     // Levels
-    const wEntry = results2.find(r=>r.i===0);
-    if(wEntry?.c && dCandles)       s.allLevels = collectLevels(wEntry.c, dCandles, s.price);
+    // Use wCandles captured from the shared 90d fetch above
+    if(wCandles && dCandles)        s.allLevels = collectLevels(wCandles, dCandles, s.price);
     else if(dCandles)               s.allLevels = collectLevels(dCandles, dCandles, s.price);
     if(isActive){ syncActiveState(); renderLevels(); }
 
