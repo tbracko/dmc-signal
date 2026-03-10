@@ -181,7 +181,10 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 
 <div class="topbar">
   <span class="brand">DMS ⚡</span>
-  <span class="pair">BTC/USD</span>
+  <select id="coin-sel" onchange="switchCoin(this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:4px 8px;cursor:pointer;letter-spacing:.04em">
+    <option value="bitcoin" data-sym="BTCUSDT" data-label="BTC/USD" selected>BTC/USD</option>
+    <option value="ethereum" data-sym="ETHUSDT" data-label="ETH/USD">ETH/USD</option>
+  </select>
   <div class="topbar-r">
     <span id="tb-price">—</span>
     <span id="tb-chg"></span>
@@ -356,11 +359,59 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 
 <script>
 'use strict';
-const COIN='bitcoin', CG='https://api.coingecko.com/api/v3', REFRESH=120000;
+const CG='https://api.coingecko.com/api/v3', REFRESH=120000;
 const TFS=[{l:'1W',iv:'W',w:5},{l:'1D',iv:'D',w:4},{l:'4H',iv:'240',w:3},{l:'1H',iv:'60',w:2},{l:'15m',iv:'15',w:1}];
-let results={}, allLevels=[], sigLog=[], running=false, timer=null, price=0, tvLoaded=false, htfDir='UNCLEAR';
-// Track sent alerts to avoid repeats
-let sentAlerts={};
+
+// ── MULTI-COIN STATE ──────────────────────────────────────
+// Each coin runs its own independent engine loop
+const COINS = {
+  bitcoin:  { id:'bitcoin',  label:'BTC/USD', sym:'BINANCE:BTCUSDT', shortLabel:'BTC' },
+  ethereum: { id:'ethereum', label:'ETH/USD', sym:'BINANCE:ETHUSDT', shortLabel:'ETH' },
+};
+let activeCoin = 'bitcoin'; // currently viewed coin
+
+// Per-coin state — keyed by coin id
+const coinState = {
+  bitcoin:  { results:{}, allLevels:[], price:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{} },
+  ethereum: { results:{}, allLevels:[], price:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{} },
+};
+
+// Convenience accessors for active coin (used by render functions)
+function cs(){ return coinState[activeCoin]; }
+let tvLoaded=false;
+// Legacy aliases pointing to active coin state (updated by switchCoin)
+let results={}, allLevels=[], price=0, htfDir='UNCLEAR';
+function syncActiveState(){
+  const s=cs(); results=s.results; allLevels=s.allLevels; price=s.price; htfDir=s.htfDir;
+}
+
+// ── COIN SWITCHING ───────────────────────────────────────
+function switchCoin(coinId){
+  if(!COINS[coinId]) return;
+  activeCoin = coinId;
+  syncActiveState();
+  // Update header label
+  document.getElementById('coin-sel').value = coinId;
+  // Re-render with this coin's cached state
+  renderHero();
+  renderCards();
+  renderLevels();
+  renderNM({dir:cs().htfDir, reason:''});
+  renderTopFromState();
+  // Reload TradingView chart with new symbol
+  tvLoaded = false;
+  if(document.getElementById('page-chart').style.display!=='none'){
+    loadTV();
+  }
+}
+
+function renderTopFromState(){
+  const s = cs();
+  if(s.price > 0){
+    document.getElementById('price').textContent = '$'+fmt(s.price);
+    document.getElementById('price-dot').style.background = '#00e676';
+  }
+}
 
 // ── SETTINGS ──────────────────────────────────────────────
 function loadSettings(){
@@ -404,12 +455,14 @@ async function sendTelegram(msg){
   }catch{return false;}
 }
 
-function maybeAlert(sig, tf, type, level, target, rr){
-  const alertKey = `${tf}_${type}_${Math.round(level)}`;
-  if(sentAlerts[alertKey]) return;
-  sentAlerts[alertKey] = Date.now();
+function maybeAlert(sig, tf, type, level, target, rr, coinId, state){
+  coinId = coinId || activeCoin;
+  state = state || coinState[coinId];
+  const alertKey = `${coinId}_${tf}_${type}_${Math.round(level)}`;
+  if(state.sentAlerts[alertKey]) return;
+  state.sentAlerts[alertKey] = Date.now();
   const now=Date.now();
-  Object.keys(sentAlerts).forEach(k=>{if(now-sentAlerts[k]>14400000)delete sentAlerts[k];});
+  Object.keys(state.sentAlerts).forEach(k=>{if(now-state.sentAlerts[k]>14400000)delete state.sentAlerts[k];});
 
   const htfOnly = localStorage.getItem('alert_htfonly')!=='false';
   if(htfOnly && tf!=='1D' && tf!=='1H') return;
@@ -431,19 +484,21 @@ function maybeAlert(sig, tf, type, level, target, rr){
   const icon  = sig==='LONG'?'🟢':sig==='SHORT'?'🔴':'🟡';
   const dir   = type==='FAIL_GAIN'?'FAIL TO GAIN':type==='FAIL_LOSE'?'FAIL TO LOSE':type==='BLIND_ENTRY'?'BLIND ENTRY':type==='BREAKOUT'?'BREAKOUT':'AT LEVEL';
   const rrTxt = rr ? ` · R:R ${rr}` : '';
+  const coinLabel = COINS[coinId] ? COINS[coinId].shortLabel : coinId.toUpperCase();
+  const px = state.price || 0;
 
-  // ── In-app toast (2 lines: signal + entry/TP) ──
-  if(wantToast){
-    const line1 = `${icon} ${sig} [${tf}]${rrTxt}`;
+  // ── In-app toast (2 lines: signal + entry/TP) — only for active coin ──
+  if(wantToast && coinId === activeCoin){
+    const line1 = `${icon} ${coinLabel} ${sig} [${tf}]${rrTxt}`;
     const line2 = target
-      ? `Entry: $${fmt(price)} · TP: $${fmt(target)}`
+      ? `Entry: $${fmt(px)} · TP: $${fmt(target)}`
       : `Level: $${fmt(level)}`;
     showToast(line1, line2, sig==='SHORT');
   }
 
-  // ── Telegram message ──
+  // ── Telegram message (fires for ALL coins) ──
   if(type==='AT_LEVEL'){
-    const msg = `${icon} <b>DMS AT LEVEL</b> [${tf}]
+    const msg = `${icon} <b>DMS AT LEVEL</b> · ${coinLabel} [${tf}]
 👁 Approaching $${fmt(level)} — watch 15m candle
 
 <a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
@@ -454,15 +509,15 @@ R:R <b>${rr}</b>` : '';
     const tpLine  = target? `
 Take Profit: <b>$${fmt(target)}</b>` : '';
     const slLevel = findStopLevel(
-      allLevels.length ? allLevels : [{price:level,type:sig==='SHORT'?'resistance':'support'}],
+      state.allLevels.length ? state.allLevels : [{price:level,type:sig==='SHORT'?'resistance':'support'}],
       level, sig==='SHORT'?'short':'long'
     );
     const slLine  = slLevel ? `
 Stop Loss: <b>$${fmt(slLevel)}</b>` : '';
-    const msg = `${icon} <b>DMS ${sig}</b> [${tf}]
+    const msg = `${icon} <b>DMS ${sig}</b> · ${coinLabel} [${tf}]
 ${dir}
 
-Entry now: <b>$${fmt(price)}</b>
+Entry now: <b>$${fmt(px)}</b>
 Level: <b>$${fmt(level)}</b>${tpLine}${slLine}${rrLine}
 
 <a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
@@ -496,7 +551,7 @@ function loadTV(iv){
   const s=document.createElement('script');
   s.src='https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
   s.async=true;
-  s.textContent=JSON.stringify({autosize:true,symbol:'BINANCE:BTCUSDT',interval:iv,timezone:'Etc/UTC',theme:'dark',style:'1',locale:'en',backgroundColor:'#07090d',hide_top_toolbar:false,allow_symbol_change:false,save_image:false,hide_side_toolbar:true});
+  s.textContent=JSON.stringify({autosize:true,symbol:COINS[activeCoin].sym,interval:iv,timezone:'Etc/UTC',theme:'dark',style:'1',locale:'en',backgroundColor:'#07090d',hide_top_toolbar:false,allow_symbol_change:false,save_image:false,hide_side_toolbar:true});
   w.firstChild.appendChild(s);
 }
 document.getElementById('tf-bar').addEventListener('click',e=>{
@@ -506,21 +561,21 @@ document.getElementById('tf-bar').addEventListener('click',e=>{
 });
 
 // ── API ───────────────────────────────────────────────────
-async function getPrice(){
-  const r=await fetch(`${CG}/simple/price?ids=${COIN}&vs_currencies=usd&include_24hr_change=true`);
+async function getPrice(coinId){coinId=coinId||activeCoin;
+  const r=await fetch(`${CG}/simple/price?ids=${coinId}&vs_currencies=usd&include_24hr_change=true`);
   if(!r.ok)throw new Error('Price: '+r.status);
   const d=await r.json();
-  return{price:d[COIN].usd,change:d[COIN].usd_24h_change};
+  return{price:d[coinId].usd,change:d[coinId].usd_24h_change};
 }
 async function getOHLC(days){
-  const r=await fetch(`${CG}/coins/${COIN}/ohlc?vs_currency=usd&days=${days}`);
+  const r=await fetch(`${CG}/coins/${coinId}/ohlc?vs_currency=usd&days=${days}`);
   if(!r.ok)throw new Error(`OHLC ${days}: ${r.status}`);
   const raw=await r.json();
   if(!Array.isArray(raw)||!raw.length)throw new Error(`OHLC ${days}: empty`);
   return raw.map(k=>({t:k[0],o:k[1],h:k[2],l:k[3],c:k[4],bh:Math.max(k[1],k[4]),bl:Math.min(k[1],k[4])}));
 }
-async function getChart(days,mins){
-  const r=await fetch(`${CG}/coins/${COIN}/market_chart?vs_currency=usd&days=${days}`);
+async function getChart(days,mins,coinId){coinId=coinId||activeCoin;
+  const r=await fetch(`${CG}/coins/${coinId}/market_chart?vs_currency=usd&days=${days}`);
   if(!r.ok)throw new Error(`Chart ${days}: ${r.status}`);
   const d=await r.json();
   const prices=d.prices;if(!prices||prices.length<4)throw new Error(`Chart ${days}: empty`);
@@ -549,7 +604,7 @@ async function getCandles(tf){
       const ctrl=new AbortController();
       const tid=setTimeout(()=>ctrl.abort(),12000); // 12s timeout
       try{
-        const r=await fetch(`${CG}/coins/${COIN}/market_chart?vs_currency=usd&days=365`,{signal:ctrl.signal});
+        const r=await fetch(`${CG}/coins/${coinId}/market_chart?vs_currency=usd&days=365`,{signal:ctrl.signal});
         clearTimeout(tid);
         if(!r.ok)throw new Error('1W fetch: '+r.status);
         const d=await r.json();
@@ -559,7 +614,7 @@ async function getCandles(tf){
     }
     case'1D':{
       // Use 180 days of price ticks → aggregate into daily candles
-      const r=await fetch(`${CG}/coins/${COIN}/market_chart?vs_currency=usd&days=180`);
+      const r=await fetch(`${CG}/coins/${coinId}/market_chart?vs_currency=usd&days=180`);
       if(!r.ok)throw new Error('1D fetch: '+r.status);
       const d=await r.json();
       if(!d.prices?.length)throw new Error('1D: empty');
@@ -1335,7 +1390,8 @@ function loadLog(){
 }
 function saveLog(entries){ localStorage.setItem(LOG_KEY, JSON.stringify(entries)); }
 
-function addLog(sig, tf, reason, type, level, target, rr, stopPrice){
+function addLog(sig, tf, reason, type, level, target, rr, stopPrice, coinId){
+  coinId = coinId || activeCoin;
   if(type==='NONE') return;
   const entries = loadLog();
   const now = new Date();
@@ -1344,18 +1400,21 @@ function addLog(sig, tf, reason, type, level, target, rr, stopPrice){
 
   // Avoid duplicate: same sig+tf+level within last 2 hours
   const recent = entries[0];
-  if(recent && recent.sig===sig && recent.tf===tf && Math.abs((recent.level||0)-(level||0))<10
+  if(recent && recent.sig===sig && recent.tf===tf && recent.coin===coinId
+     && Math.abs((recent.level||0)-(level||0))<10
      && (now - new Date(recent.ts)) < 7200000) return;
 
+  const s = coinState[coinId];
   const entry = {
     id: now.getTime(),
     ts: now.toISOString(),
     date: dateStr,
     time: timeStr,
+    coin: coinId,
     sig, tf, type, level, target, rr,
     stopPrice: stopPrice || null,
     reason: reason.slice(0,120),
-    entryPrice: price,
+    entryPrice: s ? s.price : price,
     status: 'open' // open | hit | stopped
   };
   // ── EXIT RULE: opposite signal = flag open trades ────
@@ -1416,7 +1475,7 @@ function renderLog(){
 
     return `<div class="log-item ${cls}">
       <div class="log-head">
-        <span class="log-sig ${e.sig}">${e.sig}</span>
+        <span class="log-coin" style="font-size:9px;font-weight:700;letter-spacing:.06em;background:#1a2230;padding:2px 5px;border-radius:3px;color:#7b8fa8;margin-right:4px">${(e.coin&&COINS[e.coin])?COINS[e.coin].shortLabel:'BTC'}</span><span class="log-sig ${e.sig}">${e.sig}</span>
         <span class="log-tf">${e.tf}</span>
         ${rrBadge}
         ${statusBadge}
@@ -1440,83 +1499,116 @@ function setStatus(s,t){
 // Daily fetched first (fast) → used for PDH/PDL context on all TFs.
 // Weekly fetched in parallel but renders independently.
 
-function processTF(i, candles, dCandles){
+function processTF(i, candles, dCandles, coinId){
+  coinId = coinId || activeCoin;
+  const s = coinState[coinId];
   const tf = TFS[i];
   const a = atr(candles);
-  const d = dms(candles, a, dCandles, tf.l, htfDir);
-  results[tf.l] = d;
+  const d = dms(candles, a, dCandles, tf.l, s.htfDir);
+  s.results[tf.l] = d;
+  // Alerts fire for all coins regardless of active view
   if(d.type!=='NONE'){
-    maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr);
-    if(d.type!=='AT_LEVEL') addLog(d.sig, tf.l, d.reason, d.type, d.level, d.target, d.rr, d.stopPrice);
+    maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, coinId, s);
+    if(d.type!=='AT_LEVEL') addLog(d.sig, tf.l, d.reason, d.type, d.level, d.target, d.rr, d.stopPrice, coinId);
   }
-  renderHero();
-  renderCards();
+  // Only re-render UI if this coin is the one currently being viewed
+  if(coinId === activeCoin){
+    syncActiveState();
+    renderHero();
+    renderCards();
+  }
 }
 
-async function run(){
-  if(running)return; running=true;
-  const fab=document.getElementById('fab');
-  fab.classList.add('spin');
-  setStatus('loading','Fetching...');
-  try{
-    const td = await getPrice();
-    renderTop(td);
+// ── PER-COIN RUN LOOP ─────────────────────────────────────
+async function runCoin(coinId){
+  const s = coinState[coinId];
+  if(s.running) return;
+  s.running = true;
+  const isActive = coinId === activeCoin;
 
-    // Step 1: fetch daily first (fastest, needed as PDH/PDL context for all TFs)
+  // Show spinner only for active coin
+  if(isActive){
+    document.getElementById('fab').classList.add('spin');
+    setStatus('loading','Fetching '+COINS[coinId].shortLabel+'...');
+  }
+
+  try{
+    const td = await getPrice(coinId);
+    s.price = td.price;
+    if(isActive){ syncActiveState(); renderTop(td); }
+
+    // Step 1: fetch daily first
     let dCandles = null;
     try{
-      dCandles = await getCandles({l:'1D'});
-      processTF(1, dCandles, dCandles); // render 1D immediately
-    }catch(e){ console.warn('1D failed:', e.message); }
+      dCandles = await getCandles({l:'1D'}, coinId);
+      processTF(1, dCandles, dCandles, coinId);
+    }catch(e){ console.warn(COINS[coinId].shortLabel+' 1D failed:', e.message); }
 
-    // Step 2: fetch remaining TFs in parallel, render each as it arrives
-    const remaining = [0,2,3,4]; // 1W, 4H, 1H, 15m  (1D already done at index 1)
+    // Step 2: fetch remaining TFs in parallel
+    const remaining = [0,2,3,4];
     const fetches = remaining.map(i =>
-      getCandles(TFS[i])
-        .then(c => { processTF(i, c, dCandles); return {i, c}; })
+      getCandles(TFS[i], coinId)
+        .then(c => { processTF(i, c, dCandles, coinId); return {i, c}; })
         .catch(e => { console.warn(TFS[i].l, e.message); return {i, c:null}; })
     );
 
-    // Render Next Major Move as soon as both weekly + daily are ready
     const results2 = await Promise.all(fetches);
-    // HTF Story: read 4H + 1H candles (Chris Hunter Phase 2)
-    const h4Entry = results2.find(r=>r.i===2); // index 2 = 4H
-    const h1Entry = results2.find(r=>r.i===3); // index 3 = 1H
-    if(h4Entry?.c && h1Entry?.c){
-      const nm = nextMove(h4Entry.c, h1Entry.c); htfDir=nm.dir; renderNM(nm);
-    } else if(h4Entry?.c){
-      const nm = nextMove(h4Entry.c, h4Entry.c); htfDir=nm.dir; renderNM(nm);
-    } else if(dCandles){
-      const nm = nextMove(dCandles, dCandles); htfDir=nm.dir; renderNM(nm);
-    }
-    // Levels page uses W + D for full level map
-    const wEntry = results2.find(r=>r.i===0);
-    if(wEntry?.c && dCandles){
-      allLevels = collectLevels(wEntry.c, dCandles, td.price);
-      renderLevels();
-    } else if(dCandles){
-      allLevels = collectLevels(dCandles, dCandles, td.price);
-      renderLevels();
-    }
 
-    const now = new Date().toTimeString().slice(0,8);
-    setStatus('ok','Live · '+now);
-    document.getElementById('last-upd').textContent=now;
+    // HTF Story
+    const h4Entry = results2.find(r=>r.i===2);
+    const h1Entry = results2.find(r=>r.i===3);
+    let nm;
+    if(h4Entry?.c && h1Entry?.c)      nm = nextMove(h4Entry.c, h1Entry.c);
+    else if(h4Entry?.c)               nm = nextMove(h4Entry.c, h4Entry.c);
+    else if(dCandles)                  nm = nextMove(dCandles, dCandles);
+    if(nm){ s.htfDir = nm.dir; if(isActive){ syncActiveState(); renderNM(nm); } }
+
+    // Levels
+    const wEntry = results2.find(r=>r.i===0);
+    if(wEntry?.c && dCandles)       s.allLevels = collectLevels(wEntry.c, dCandles, s.price);
+    else if(dCandles)               s.allLevels = collectLevels(dCandles, dCandles, s.price);
+    if(isActive){ syncActiveState(); renderLevels(); }
+
+    if(isActive){
+      const now = new Date().toTimeString().slice(0,8);
+      setStatus('ok',COINS[coinId].shortLabel+' Live · '+now);
+      document.getElementById('last-upd').textContent=now;
+    }
   }catch(e){
-    console.error(e);
-    setStatus('err', e.message.slice(0,50));
+    console.error(coinId, e);
+    if(isActive) setStatus('err', e.message.slice(0,50));
   }
-  running=false;
-  fab.classList.remove('spin');
+  s.running = false;
+  if(isActive) document.getElementById('fab').classList.remove('spin');
 }
-function manualRefresh(){clearTimeout(timer);sentAlerts={};run().then(schedule);}
-function schedule(){timer=setTimeout(()=>run().then(schedule),REFRESH);}
+
+// ── SCHEDULER: runs all coins independently ──────────────
+function scheduleAll(){
+  Object.keys(COINS).forEach(coinId => {
+    const s = coinState[coinId];
+    if(s.timer) clearTimeout(s.timer);
+    s.timer = setTimeout(()=>{ runCoin(coinId).then(()=>scheduleAll()); }, REFRESH);
+  });
+}
+
+// Legacy run() — runs active coin only (used by FAB manual refresh)
+async function run(){ return runCoin(activeCoin); }
+function manualRefresh(){
+  // Reset alerts for active coin and refresh
+  const s = cs();
+  s.sentAlerts = {};
+  clearTimeout(s.timer);
+  runCoin(activeCoin).then(scheduleAll);
+}
+function schedule(){} // no-op, replaced by scheduleAll
 
 window.addEventListener('DOMContentLoaded',()=>{
   loadSettings();
   renderLog();
   document.getElementById('tf-cards').innerHTML=TFS.map(tf=>`<div class="tfc none"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type NONE">···</span><span class="tfc-sig WAIT" style="margin-left:auto">—</span></div><div class="tfc-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div></div>`).join('');
-  run().then(schedule);
+  // Start all coins simultaneously — BTC renders UI, ETH runs silently in background
+  Promise.all(Object.keys(COINS).map(coinId => runCoin(coinId)))
+    .then(scheduleAll);
 });
 </script>
 
