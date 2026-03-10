@@ -420,7 +420,7 @@ function loadSettings(){
   document.getElementById('alert-short').checked   = localStorage.getItem('alert_short')!=='false';
   document.getElementById('alert-long').checked    = localStorage.getItem('alert_long')!=='false';
   document.getElementById('alert-atlevel').checked = localStorage.getItem('alert_atlevel')==='true';
-  document.getElementById('alert-htfonly').checked = localStorage.getItem('alert_htfonly')!=='false';
+  document.getElementById('alert-htfonly').checked = localStorage.getItem('alert_htfonly')==='true';
   document.getElementById('alert-toast').checked   = localStorage.getItem('alert_toast')!=='false';
 }
 function saveTelegram(){
@@ -464,7 +464,7 @@ function maybeAlert(sig, tf, type, level, target, rr, coinId, state){
   const now=Date.now();
   Object.keys(state.sentAlerts).forEach(k=>{if(now-state.sentAlerts[k]>14400000)delete state.sentAlerts[k];});
 
-  const htfOnly = localStorage.getItem('alert_htfonly')!=='false';
+  const htfOnly = localStorage.getItem('alert_htfonly')==='true'; // default OFF — alert all TFs including 15m
   if(htfOnly && tf!=='1D' && tf!=='1H') return;
 
   const wantShort = localStorage.getItem('alert_short')!=='false';
@@ -1179,10 +1179,10 @@ function dms(c, a, dCandles, tf, htfBias){
       const htfNote = htfBias==='UP' ? ' · ✓ HTF aligns' : htfBias==='DOWN' ? ' · ⚠ counter-trend' : '';
       return {
         sig:'LONG', type:'BREAKOUT',
-        level:lv.price, target:tgt.price, rr,
+        level:lv.price, target:tgt.price, rr, stopPrice:stop,
         strength:lv.strength, score:lv.score,
         reason:`GAINED ${lv.source} $${fmt(lv.price)} · body closed above · continuation LONG${htfNote}${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)}`,
-        detail:`Breakout: body $${fmt(cur.bl)}–$${fmt(cur.bh)} closed above level $${fmt(lv.price)}`,
+        detail:`Breakout: body $${fmt(cur.bl)}–$${fmt(cur.bh)} closed above $${fmt(lv.price)} | SL: $${fmt(stop)}`,
         untested:!lv.tested
       };
     }
@@ -1198,10 +1198,10 @@ function dms(c, a, dCandles, tf, htfBias){
       const htfNote = htfBias==='DOWN' ? ' · ✓ HTF aligns' : htfBias==='UP' ? ' · ⚠ counter-trend' : '';
       return {
         sig:'SHORT', type:'BREAKOUT',
-        level:lv.price, target:tgt.price, rr,
+        level:lv.price, target:tgt.price, rr, stopPrice:stop,
         strength:lv.strength, score:lv.score,
         reason:`LOST ${lv.source} $${fmt(lv.price)} · body closed below · continuation SHORT${htfNote}${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)}`,
-        detail:`Breakdown: body $${fmt(cur.bl)}–$${fmt(cur.bh)} closed below level $${fmt(lv.price)}`,
+        detail:`Breakdown: body $${fmt(cur.bl)}–$${fmt(cur.bh)} closed below $${fmt(lv.price)} | SL: $${fmt(stop)}`,
         untested:!lv.tested
       };
     }
