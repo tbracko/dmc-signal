@@ -476,7 +476,8 @@ function maybeAlert(sig, tf, type, level, target, rr, coinId, state){
   if(state.sentAlerts[alertKey]) return;
   state.sentAlerts[alertKey] = Date.now();
   const now=Date.now();
-  Object.keys(state.sentAlerts).forEach(k=>{if(now-state.sentAlerts[k]>14400000)delete state.sentAlerts[k];});
+  // Dedup: same signal not re-alerted within 2h (was 4h — reduced to avoid missing re-entries)
+  Object.keys(state.sentAlerts).forEach(k=>{if(now-state.sentAlerts[k]>7200000)delete state.sentAlerts[k];});
 
   const htfOnly = localStorage.getItem('alert_htfonly')==='true'; // default OFF — alert all TFs including 15m
   if(htfOnly && tf!=='1D' && tf!=='1H') return;
@@ -1121,10 +1122,10 @@ function dms(c, a, dCandles, tf, htfBias){
       const dist = ((lv.price - confirm.c)/confirm.c*100).toFixed(2);
       return {
         sig:'SHORT', type:'FAIL_GAIN',
-        level:lv.price, target:tgt.price, rr,
+        level:lv.price, target:tgt.price, rr, stopPrice:stop,
         strength:lv.strength, score:lv.score,
         reason:`${lv.source} $${fmt(lv.price)} · ${dist}% above · ${lb===1?'just now':lb+' bars ago'}${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)}`,
-        detail:`Wick: $${fmt(trap.h)} | Body: $${fmt(trap.bh)} | Resistance: $${fmt(lv.price)}`,
+        detail:`Wick: $${fmt(trap.h)} | Body: $${fmt(trap.bh)} | Resistance: $${fmt(lv.price)} | SL: $${fmt(stop)}`,
         untested:!lv.tested
       };
     }
@@ -1427,13 +1428,13 @@ function addLog(sig, tf, reason, type, level, target, rr, stopPrice, coinId){
     entryPrice: s ? s.price : price,
     status: 'open' // open | hit | stopped
   };
-  // ── EXIT RULE: opposite signal = flag open trades ────
+  // ── EXIT RULE: opposite signal on SAME COIN = flag open trades ────
   // Chris Hunter: "If it fails to make a new low, exit your short"
-  // When a LONG fires, any open SHORT = mark REVIEW EXIT (and vice versa)
+  // When a LONG fires, any open SHORT on the SAME coin = mark REVIEW EXIT
   if(sig === 'LONG' || sig === 'SHORT'){
     const opposite = sig === 'LONG' ? 'SHORT' : 'LONG';
     entries.forEach(e => {
-      if(e.sig === opposite && e.status === 'open'){
+      if(e.sig === opposite && e.status === 'open' && e.coin === coinId){
         e.status = 'review_exit';
         e.exitNote = `⚠ ${sig} signal fired on ${tf} — consider exiting this ${opposite}`;
       }
