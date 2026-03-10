@@ -398,6 +398,13 @@ function switchCoin(coinId){
   renderLevels();
   renderNM({dir:cs().htfDir, reason:''});
   renderTopFromState();
+  // Update status bar to reflect current coin
+  const s = cs();
+  if(s.price > 0){
+    setStatus('ok', COINS[coinId].shortLabel+' Live · --:--:--');
+  } else {
+    setStatus('loading', 'Loading '+COINS[coinId].shortLabel+'...');
+  }
   // Reload TradingView chart with new symbol
   tvLoaded = false;
   if(document.getElementById('page-chart').style.display!=='none'){
@@ -802,11 +809,12 @@ function countLevelTests(c, startIdx, bh, bl, type){
   // Using 1% not 0.3% — BTC ATR is $500-1500/day, 0.3% is too tight
   const levelPrice = type==='resistance' ? bh : bl;
   const zone = levelPrice * 0.010; // 1.0% approach zone
-  return c.slice(startIdx).filter(k =>
+  const raw = c.slice(startIdx).filter(k =>
     type==='resistance'
       ? k.bh >= levelPrice - zone  // body got close to resistance from below
       : k.bl <= levelPrice + zone  // body got close to support from above
   ).length;
+  return Math.min(raw, 10); // cap at 10 — prevents "tested ×70" display noise
 }
 function isLevelTested(c, startIdx, bh, bl, type){
   return countLevelTests(c, startIdx, bh, bl, type) > 0;
