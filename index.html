@@ -58,6 +58,28 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 .hero-reason{font-family:‘IBM Plex Mono’,monospace;font-size:10px;color:#5d7a99;line-height:1.6;border-top:1px solid #1a2230;padding-top:10px}
 
 /* NEXT MOVE */
+.session-banner{margin:0 16px 10px;padding:10px 14px;border-radius:10px;font-family:‘IBM Plex Mono’,monospace;font-size:10px;letter-spacing:.05em;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);display:flex;flex-direction:column;gap:5px}
+.session-banner .sb-row{display:flex;align-items:center;gap:8px}
+.session-banner .sb-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.session-banner .sb-label{color:#7b8fa8;font-size:9px;letter-spacing:.08em;text-transform:uppercase}
+.session-banner .sb-val{color:#c9d6e3;font-size:10px}
+.session-banner .sb-range{color:#ffc107;font-size:10px;font-weight:600}
+.session-banner .sb-trap{font-size:9px;letter-spacing:.04em;padding:2px 7px;border-radius:4px;font-weight:700}
+.session-banner .sb-trap.long{background:rgba(0,230,118,.15);color:#00e676;border:1px solid rgba(0,230,118,.3)}
+.session-banner .sb-trap.short{background:rgba(255,61,90,.12);color:#ff3d5a;border:1px solid rgba(255,61,90,.25)}
+.session-banner .sb-trap.watch{background:rgba(255,193,7,.1);color:#ffc107;border:1px solid rgba(255,193,7,.22)}
+.nm-divider{height:1px;background:rgba(255,255,255,.06);margin:10px 0 8px}
+.nm-story-lbl{font-family:‘IBM Plex Mono’,monospace;font-size:8px;color:#3d5068;letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px}
+.nm-story{display:flex;flex-direction:column;gap:4px}
+.story-row{display:flex;align-items:flex-start;gap:6px;font-family:‘IBM Plex Mono’,monospace;font-size:9px;line-height:1.4}
+.story-icon{flex-shrink:0;width:14px;height:14px;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;margin-top:1px}
+.story-icon.gain{background:rgba(0,230,118,.2);color:#00e676}
+.story-icon.fail{background:rgba(255,61,90,.15);color:#ff3d5a}
+.story-icon.neutral{background:rgba(255,193,7,.1);color:#ffc107}
+.story-text{color:#7b8fa8;flex:1}
+.story-text strong{color:#c9d6e3}
+.story-conclusion{margin-top:4px;font-family:‘IBM Plex Mono’,monospace;font-size:9px;color:#5d7a99;border-top:1px solid rgba(255,255,255,.04);padding-top:6px}
+.story-conclusion span{color:#c9d6e3;font-weight:600}
 .nm-card{margin:0 16px 14px;border-radius:10px;background:#0c0f14;border:1px solid #1a2230;padding:14px 16px}
 .nm-lbl{font-family:‘IBM Plex Mono’,monospace;font-size:8px;letter-spacing:.2em;text-transform:uppercase;color:#3d5068;margin-bottom:4px}
 .nm-val{font-family:‘Bebas Neue’,sans-serif;font-size:36px;letter-spacing:.06em;line-height:1;color:#5d7a99}
@@ -220,7 +242,11 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
     <div class="nm-lbl">Next Major Move · HTF</div>
     <div class="nm-val UNCLEAR" id="nm-val">—</div>
     <div class="nm-sub" id="nm-sub">Analysing weekly + daily bodies...</div>
+    <div class="nm-divider" id="nm-divider" style="display:none"></div>
+    <div class="nm-story-lbl" id="nm-story-lbl" style="display:none">SESSION STORY</div>
+    <div class="nm-story" id="nm-story" style="display:none"></div>
   </div>
+  <div class="session-banner" id="session-banner" style="display:none"></div>
   <div class="sh">Timeframe Breakdown</div>
   <div class="tf-cards" id="tf-cards"></div>
 </div>
@@ -241,7 +267,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <!-- PAGE: LEVELS -->
 
 <div class="page" id="page-levels">
-  <div class="sh">Key Levels · Weekly + Daily (V-Peaks + PDH/PDL)</div>
+  <div class="sh">Key Levels · Weekly + Daily + Session (V-Peaks + PDH/PDL + Asia)</div>
   <div id="lvl-list"><div class="empty">Loading levels...</div></div>
 </div>
 
@@ -374,9 +400,9 @@ let activeCoin = 'bitcoin'; // currently viewed coin
 
 // Per-coin state — keyed by coin id
 const coinState = {
-  bitcoin:  { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{} },
-  ethereum: { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{} },
-  solana:   { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{} },
+  bitcoin:  { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
+  ethereum: { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
+  solana:   { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
 };
 
 // Convenience accessors for active coin (used by render functions)
@@ -401,13 +427,17 @@ function switchCoin(coinId){
   renderLevels();
   renderNM({dir:cs().htfDir, reason:''});
   renderTopFromState();
-  // Update status bar to reflect current coin
+  // Update status bar + session banner to reflect current coin
   const s = cs();
   if(s.price > 0){
     setStatus('ok', COINS[coinId].shortLabel+' Live · --:--:--');
   } else {
     setStatus('loading', 'Loading '+COINS[coinId].shortLabel+'...');
   }
+  if(s.candles15m) renderSessionBanner(s.candles15m, coinId);
+  else document.getElementById('session-banner').style.display='none';
+  if(s.lastStory) renderNM(s.lastStory);
+  else renderNM({dir:'UNCLEAR', reason:'Loading...', story:null});
   // Reload TradingView chart with new symbol
   tvLoaded = false;
   if(document.getElementById('page-chart').style.display!=='none'){
@@ -826,6 +856,168 @@ function isLevelTested(c, startIdx, bh, bl, type){
 
 // ── PDH / PDL ─────────────────────────────────────────────
 // Previous Day High/Low — primary retail cluster zone
+// ── SESSION CONTEXT ───────────────────────────────────────
+// Three sessions: Asia (00:00–08:00 UTC), London (07:00–16:00 UTC), NY (13:00–21:00 UTC)
+// Uses Intl API for DST-correct UTC offsets (London +1 in summer, NY -4 in summer)
+function getSessionBoundaries(){
+  const now = new Date();
+  // Get current UTC offset for London and New York using Intl
+  const londonOffset = (() => {
+    const s = now.toLocaleString('en-GB', {timeZone:'Europe/London', hour:'numeric', hour12:false, timeZoneName:'short'});
+    // Check if BST (UTC+1) or GMT (UTC+0)
+    return s.includes('BST') || new Date().toLocaleString('en',{timeZone:'Europe/London',timeZoneName:'short'}).includes('BST') ? 1 : 0;
+  })();
+  const nyOffset = (() => {
+    const s = new Date().toLocaleString('en',{timeZone:'America/New_York',timeZoneName:'short'});
+    return s.includes('EDT') ? -4 : -5; // EDT = summer, EST = winter
+  })();
+
+  // Session boundaries in UTC hours
+  const asiaOpen  = 0;   const asiaClose  = 8;
+  const londonOpen  = 8  - londonOffset; // UTC equivalent of 08:00 London
+  const londonClose = 16 - londonOffset;
+  const nyOpen    = 9  - nyOffset - 5;   // 9:30am NY = 14:30 UTC in winter, 13:30 in summer
+  const nyClose   = 16 - nyOffset - 5;   // 4pm NY close
+
+  return { asiaOpen, asiaClose, londonOpen, londonClose, nyOpen, nyClose, londonOffset, nyOffset };
+}
+
+function getCurrentSession(){
+  const now = new Date();
+  const h = now.getUTCHours() + now.getUTCMinutes()/60;
+  const b = getSessionBoundaries();
+
+  if(h >= b.asiaOpen && h < b.asiaClose)  return 'ASIA';
+  if(h >= b.londonOpen && h < b.londonClose) return 'LONDON';
+  if(h >= b.nyOpen && h < b.nyClose)      return 'NY';
+  return 'AFTER_HOURS';
+}
+
+// Compute Asia session high/low from 15m candles (00:00–08:00 UTC today)
+// Returns { high, low, complete } — complete=true once Asia session has closed
+function getAsiaRange(candles15m){
+  if(!candles15m || candles15m.length < 4) return null;
+  const now = new Date();
+  const todayMidnightUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const asiaCloseUTC = todayMidnightUTC + 8 * 3600000; // 08:00 UTC today
+
+  // Filter to candles in today's Asia session (00:00–08:00 UTC)
+  const asiaCandles = candles15m.filter(k => k.t >= todayMidnightUTC && k.t < asiaCloseUTC);
+
+  if(asiaCandles.length < 2){
+    // Try yesterday's Asia session if today's hasn't started yet or too few candles
+    const yestMidnightUTC = todayMidnightUTC - 86400000;
+    const yestAsiaClose = yestMidnightUTC + 8 * 3600000;
+    const yestAsia = candles15m.filter(k => k.t >= yestMidnightUTC && k.t < yestAsiaClose);
+    if(yestAsia.length < 2) return null;
+    return {
+      high: Math.max(...yestAsia.map(k=>k.bh)),
+      low:  Math.min(...yestAsia.map(k=>k.bl)),
+      highWick: Math.max(...yestAsia.map(k=>k.h)),
+      lowWick:  Math.min(...yestAsia.map(k=>k.l)),
+      complete: true, source:'yesterday'
+    };
+  }
+
+  const curSession = getCurrentSession();
+  return {
+    high: Math.max(...asiaCandles.map(k=>k.bh)),
+    low:  Math.min(...asiaCandles.map(k=>k.bl)),
+    highWick: Math.max(...asiaCandles.map(k=>k.h)),
+    lowWick:  Math.min(...asiaCandles.map(k=>k.l)),
+    complete: curSession !== 'ASIA',
+    source: 'today'
+  };
+}
+
+// Build Asia session levels — these become high-priority trap targets
+// Only add if Asia session is complete (range is set)
+function getAsiaLevels(candles15m){
+  const asia = getAsiaRange(candles15m);
+  if(!asia || !asia.complete) return [];
+  const levels = [];
+  levels.push({
+    price: asia.high,
+    bh: asia.high, bl: asia.high * 0.999,
+    type: 'resistance', strength: 'strong',
+    tested: false, score: 75, tf: 'SESSION',
+    source: 'Asia High', isAsiaLevel: true,
+    asiaRange: { high: asia.high, low: asia.low }
+  });
+  levels.push({
+    price: asia.low,
+    bh: asia.low * 1.001, bl: asia.low,
+    type: 'support', strength: 'strong',
+    tested: false, score: 75, tf: 'SESSION',
+    source: 'Asia Low', isAsiaLevel: true,
+    asiaRange: { high: asia.high, low: asia.low }
+  });
+  return levels;
+}
+
+// Render the session banner on the Signal tab
+function renderSessionBanner(candles15m, coinId){
+  const el = document.getElementById('session-banner');
+  if(!el) return;
+  const session = getCurrentSession();
+  const asia = getAsiaRange(candles15m);
+  const price = coinState[coinId]?.price || 0;
+
+  const sessionMeta = {
+    ASIA:        { emoji:'🌏', label:'Asia Session',   color:'#7b8fa8',  dot:'#4fc3f7' },
+    LONDON:      { emoji:'🇬🇧', label:'London Session', color:'#ffc107',  dot:'#ffc107' },
+    NY:          { emoji:'🗽', label:'NY Session',     color:'#00e676',  dot:'#00e676' },
+    AFTER_HOURS: { emoji:'🌙', label:'After Hours',    color:'#7b8fa8',  dot:'#3a4a5c' },
+  };
+  const meta = sessionMeta[session];
+
+  let html = `<div class="sb-row">
+    <span class="sb-dot" style="background:${meta.dot}"></span>
+    <span class="sb-label">${meta.emoji} ${meta.label}</span>
+  </div>`;
+
+  if(asia && price > 0){
+    const rangeSize = ((asia.high - asia.low)/asia.low*100).toFixed(2);
+    const aboveHigh = ((price - asia.high)/asia.high*100).toFixed(2);
+    const belowLow  = ((asia.low - price)/asia.low*100).toFixed(2);
+    const isAbove = price > asia.high;
+    const isBelow = price < asia.low;
+    const isInside = !isAbove && !isBelow;
+
+    let posLabel = isAbove
+      ? `<span style="color:#ff3d5a">+${aboveHigh}% above Asia High</span>`
+      : isBelow
+      ? `<span style="color:#00e676">-${belowLow}% below Asia Low</span>`
+      : `<span style="color:#7b8fa8">inside Asia range</span>`;
+
+    // Trap hint: if London/NY, show what to watch for
+    let trapHint = '';
+    if(session === 'LONDON' || session === 'NY'){
+      if(isAbove){
+        trapHint = `<span class="sb-trap short">WATCH: Fail to gain Asia High → SHORT</span>`;
+      } else if(isBelow){
+        trapHint = `<span class="sb-trap long">WATCH: Fail to lose Asia Low → LONG</span>`;
+      } else {
+        trapHint = `<span class="sb-trap watch">WATCH: Hunt above ${fmt(asia.high)} or below ${fmt(asia.low)}</span>`;
+      }
+    }
+
+    const srcNote = asia.source === 'yesterday' ? ' (prev day)' : '';
+    html += `<div class="sb-row" style="margin-top:3px">
+      <span class="sb-label">Asia Range${srcNote}</span>
+      <span class="sb-range">$${fmt(asia.low)} – $${fmt(asia.high)}</span>
+      <span style="color:#4a5a6a;font-size:9px">(${rangeSize}%)</span>
+    </div>
+    <div class="sb-row">${posLabel}</div>`;
+    if(trapHint) html += `<div class="sb-row" style="margin-top:2px">${trapHint}</div>`;
+  }
+
+  el.innerHTML = html;
+  el.style.display = 'flex';
+  el.style.flexDirection = 'column';
+  el.style.gap = '4px';
+}
+
 function findPDHL(dCandles){
   if(!dCandles || dCandles.length < 3) return [];
   const prev = dCandles[dCandles.length-2];
@@ -866,10 +1058,11 @@ function findPDHL(dCandles){
 }
 
 // ── COMBINE + DEDUPE + RANK ───────────────────────────────
-function findDMCLevels(c, dCandles, tf){
+function findDMCLevels(c, dCandles, tf, asiaLevels){
   const vp = findVPeaks(c, tf);
   const pdhl = dCandles ? findPDHL(dCandles) : [];
-  const all = [...vp, ...pdhl];
+  const asia = (tf === '15m' && asiaLevels) ? asiaLevels : [];
+  const all = [...vp, ...pdhl, ...asia];
 
   // Dedupe: merge levels within 0.3% of each other, keep highest score
   const merged = [];
@@ -883,19 +1076,21 @@ function findDMCLevels(c, dCandles, tf){
 
 // ── TARGET: next obvious level in opposite direction ──────
 function findNextLevel(levels, currentPrice, direction){
-  const sorted = [...levels].sort((a,b)=>a.price-b.price);
+  // Only use meaningful levels for target calculation — score >= 25 filters weak noise
+  // Falls back to all levels if no quality levels found (avoids no-target edge case)
+  const qualityLevels = levels.filter(l => l.score >= 25);
+  const pool = qualityLevels.length >= 2 ? qualityLevels : levels;
+  const sorted = [...pool].sort((a,b)=>a.price-b.price);
   if(direction==='long'){
-    // Nearest level ABOVE current price — first meaningful resistance
+    // Nearest quality level ABOVE current price
     const candidates = sorted.filter(l=>l.price > currentPrice * 1.003);
     if(candidates.length) return {price:candidates[0].price, source:candidates[0].source};
   } else {
-    // Nearest level BELOW current price — closest support
-    // Must be at least 0.5% below to avoid returning the trap level itself
+    // Nearest quality level BELOW current price
     const candidates = sorted.filter(l=>l.price < currentPrice * 0.995);
-    // Take the NEAREST one below (highest price that is still below)
     if(candidates.length) return {price:candidates[candidates.length-1].price, source:candidates[candidates.length-1].source};
   }
-  // Fallback: use ATR extension (2.5%)
+  // Fallback: ATR extension
   return {price: direction==='long' ? currentPrice*1.025 : currentPrice*0.975, source:'ATR est.'};
 }
 
@@ -915,13 +1110,16 @@ function calcRR(entry, target, trapLevel, stopLevel){
 // For SHORT: next level ABOVE the trap resistance (where shorts are wrong)
 // For LONG:  next level BELOW the trap support (where longs are wrong)
 function findStopLevel(levels, trapPrice, direction){
-  const sorted = [...levels].sort((a,b)=>a.price-b.price);
+  // Use quality levels for stop placement — weak nearby levels make stops too tight
+  const qualityLevels = levels.filter(l => l.score >= 25);
+  const pool = qualityLevels.length >= 2 ? qualityLevels : levels;
+  const sorted = [...pool].sort((a,b)=>a.price-b.price);
   if(direction==='short'){
-    // Stop = next resistance ABOVE the trap (if shorts, don't want price above here)
+    // Stop = next meaningful resistance ABOVE the trap
     const candidates = sorted.filter(l=>l.price > trapPrice * 1.003);
     return candidates.length ? candidates[0].price : trapPrice * 1.015;
   } else {
-    // Stop = next support BELOW the trap
+    // Stop = next meaningful support BELOW the trap
     const candidates = sorted.filter(l=>l.price < trapPrice * 0.997);
     return candidates.length ? candidates[candidates.length-1].price : trapPrice * 0.985;
   }
@@ -944,7 +1142,8 @@ function dms(c, a, dCandles, tf, htfBias){
   if(n < minCandles) return {sig:'NEUTRAL',type:'NONE',reason:'Insufficient data ('+n+' candles)'};
 
   const usePDHL = (tf !== '1W');
-  const levels = findDMCLevels(c, usePDHL ? dCandles : null, tf);
+  const asiaLvls = (tf === '15m') ? (htfBias.__asiaLevels || []) : [];
+  const levels = findDMCLevels(c, usePDHL ? dCandles : null, tf, asiaLvls);
   const cur    = c[n-1];
   const tol    = a * 0.10;
 
@@ -1103,17 +1302,23 @@ function dms(c, a, dCandles, tf, htfBias){
       const trap    = c[n-1-lb];
       const confirm = c[n-1];
 
-      // Trap: 15m wick pierced resistance, body closed back below
-      const wickedThrough = trap.h  > lv.price + (tol*0.2);
-      const bodyBelow     = trap.bh < lv.price + tol;
-      if(!wickedThrough || !bodyBelow) continue;
+      // Trap: 15m wick pierced resistance, body closed CONVINCINGLY back below
+      const wickedThrough  = trap.h  > lv.price + (tol * 0.5);  // wick must reach meaningfully above
+      const bodyBelow      = trap.bh < lv.price - (lv.price * 0.004); // body closes 0.4% below level (not just barely)
+      const wickSize       = trap.h - trap.bh; // wick above body
+      const bodyRange      = trap.bh - trap.bl;
+      const strongReject   = wickSize > bodyRange * 0.5; // wick at least 50% of body — clear rejection
+      if(!wickedThrough || !bodyBelow || !strongReject) continue;
 
       // Invalidation checks
       const priceRallied   = confirm.bh > trap.bh + a * 0.7;
       const levelReclaimed = c.slice(n-lb, n).some(k => k.bh > lv.price);
       const currentAbove   = confirm.bh > lv.price;
+      // Confirming candle must show follow-through — close in lower half of trap range
+      const trapMid        = (trap.bh + trap.bl) / 2;
+      const confirmFollows = confirm.c <= trapMid; // confirm closed at or below trap midpoint
 
-      if(priceRallied || levelReclaimed || currentAbove) continue;
+      if(priceRallied || levelReclaimed || currentAbove || !confirmFollows) continue;
       if(htfBlockShort) continue;
 
       const tgt  = findNextLevel(levels, confirm.c, 'short');
@@ -1139,15 +1344,21 @@ function dms(c, a, dCandles, tf, htfBias){
       const trap    = c[n-1-lb];
       const confirm = c[n-1];
 
-      const wickedThrough = trap.l  < lv.price - (tol*0.2);
-      const bodyAbove     = trap.bl > lv.price - tol;
-      if(!wickedThrough || !bodyAbove) continue;
+      const wickedThrough  = trap.l  < lv.price - (tol * 0.5);  // wick must reach meaningfully below
+      const bodyAbove      = trap.bl > lv.price + (lv.price * 0.004); // body closes 0.4% above level
+      const wickSize       = trap.bl - trap.l; // wick below body
+      const bodyRange      = trap.bh - trap.bl;
+      const strongReject   = wickSize > bodyRange * 0.5; // wick at least 50% of body — clear rejection
+      if(!wickedThrough || !bodyAbove || !strongReject) continue;
 
       const priceDropped   = confirm.bl < trap.bl - a * 0.7;
       const levelReclaimed = c.slice(n-lb, n).some(k => k.bl < lv.price);
       const currentBelow   = confirm.bl < lv.price;
+      // Confirming candle must show follow-through — close in upper half of trap range
+      const trapMid        = (trap.bh + trap.bl) / 2;
+      const confirmFollows = confirm.c >= trapMid; // confirm closed at or above trap midpoint
 
-      if(priceDropped || levelReclaimed || currentBelow) continue;
+      if(priceDropped || levelReclaimed || currentBelow || !confirmFollows) continue;
       if(htfBlockLong) continue;
 
       const tgt  = findNextLevel(levels, confirm.c, 'long');
@@ -1217,6 +1428,134 @@ function dms(c, a, dCandles, tf, htfBias){
 // ── HTF STORY: reads 4H + 1H candle bodies ──────────────────────────────
 // Chris Hunter: "Phase 2 is the story — use 1H/4H to define if price is
 // gaining or failing levels. Only execute in that direction."
+// ── SESSION STORY TRACKER ─────────────────────────────────
+// Scans recent 4H + 1H candles to assess how price is BEHAVING at key levels
+// Returns: { rows: [{icon, text}], conclusion, storyDir }
+// storyDir is advisory only — does NOT override the HTF hard block
+function buildStory(levels, h4C, h1C, currentPrice){
+  if(!levels || !levels.length || !h4C || !h1C) return null;
+  if(h4C.length < 4 || h1C.length < 4) return null;
+
+  // Focus on the 4-6 most significant levels within 6% of current price
+  const nearby = levels
+    .filter(l => Math.abs(l.price - currentPrice)/currentPrice < 0.06 && l.score >= 20)
+    .sort((a,b) => b.score - a.score)
+    .slice(0, 6);
+
+  if(nearby.length < 2) return null;
+
+  const rows = [];
+  let bullPoints = 0, bearPoints = 0;
+
+  // Use last 12 h1 candles + last 6 h4 candles for recency
+  const h1Recent = h1C.slice(-12);
+  const h4Recent = h4C.slice(-6);
+
+  for(const lv of nearby){
+    const tol = lv.price * 0.004; // 0.4% touch zone
+    const isRes = lv.type === 'resistance';
+
+    // ── Scan 4H candles for level interactions (weight=2) ──────────────
+    for(const k of h4Recent){
+      const touched = isRes
+        ? (k.h >= lv.price - tol)          // approached resistance from below
+        : (k.l <= lv.price + tol);          // approached support from above
+
+      if(!touched) continue;
+
+      const gained = isRes
+        ? (k.bh > lv.price + tol)          // body closed above resistance = gained
+        : (k.bl < lv.price - tol);          // body closed below support = lost (failed to hold)
+      const failed = isRes
+        ? (k.bh < lv.price - tol * 0.5)   // approached but body stayed below = failed to gain
+        : (k.bl > lv.price + tol * 0.5);   // approached but body stayed above = failed to lose
+
+      if(gained){
+        const label = isRes ? 'Gained' : 'Held';
+        rows.push({
+          icon:'gain',
+          text:`<strong>4H ${label} $${fmt(lv.price)}</strong> — body closed ${isRes?'above':'below'} · ${lv.source}`,
+          weight:2, dir: isRes ? 'bull' : 'bear'
+        });
+        isRes ? bullPoints += 2 : bearPoints += 2;
+      } else if(failed){
+        const label = isRes ? 'Failed to gain' : 'Failed to hold';
+        rows.push({
+          icon:'fail',
+          text:`<strong>4H ${label} $${fmt(lv.price)}</strong> — rejected · ${lv.source}`,
+          weight:2, dir: isRes ? 'bear' : 'bull'
+        });
+        isRes ? bearPoints += 2 : bullPoints += 2;
+      }
+    }
+
+    // ── Scan 1H candles for level interactions (weight=1) ──────────────
+    let h1GainCount = 0, h1FailCount = 0;
+    for(const k of h1Recent){
+      const touched = isRes ? (k.h >= lv.price - tol) : (k.l <= lv.price + tol);
+      if(!touched) continue;
+      const gained = isRes ? (k.bh > lv.price + tol) : (k.bl < lv.price - tol);
+      const failed = isRes ? (k.bh < lv.price - tol*0.5) : (k.bl > lv.price + tol*0.5);
+      if(gained) h1GainCount++;
+      else if(failed) h1FailCount++;
+    }
+
+    if(h1GainCount > 0){
+      const label = isRes ? 'gaining' : 'holding';
+      rows.push({
+        icon:'gain',
+        text:`<strong>1H ${label} $${fmt(lv.price)}</strong> · ${h1GainCount}× body close ${isRes?'above':'below'} · ${lv.source}`,
+        weight:1, dir: isRes ? 'bull' : 'bear'
+      });
+      isRes ? bullPoints += h1GainCount : bearPoints += h1GainCount;
+    }
+    if(h1FailCount > 0){
+      const label = isRes ? 'failing' : 'losing';
+      rows.push({
+        icon:'fail',
+        text:`<strong>1H ${label} $${fmt(lv.price)}</strong> · rejected ${h1FailCount}× · ${lv.source}`,
+        weight:1, dir: isRes ? 'bear' : 'bull'
+      });
+      isRes ? bearPoints += h1FailCount : bullPoints += h1FailCount;
+    }
+  }
+
+  // Limit to 5 most recent/significant rows to keep card readable
+  const topRows = rows.slice(-5);
+
+  if(topRows.length === 0){
+    // No level interactions detected — tell the user
+    return {
+      rows:[{ icon:'neutral', text:'No significant level interactions yet this session' }],
+      conclusion:'Watching for price to engage a key level',
+      storyDir:'UNCLEAR',
+      bullPoints, bearPoints
+    };
+  }
+
+  // ── Conclusion ──────────────────────────────────────────────────────
+  const net = bullPoints - bearPoints;
+  let storyDir, conclusion;
+  if(net >= 3){
+    storyDir = 'UP';
+    conclusion = `<span style="color:#00e676">Bullish structure</span> · price gaining key levels (${bullPoints} bull vs ${bearPoints} bear pts)`;
+  } else if(net <= -3){
+    storyDir = 'DOWN';
+    conclusion = `<span style="color:#ff3d5a">Bearish structure</span> · price failing key levels (${bearPoints} bear vs ${bullPoints} bull pts)`;
+  } else if(net > 0){
+    storyDir = 'UNCLEAR';
+    conclusion = `<span style="color:#ffc107">Slight bullish lean</span> · contested at key levels — wait for clarity`;
+  } else if(net < 0){
+    storyDir = 'UNCLEAR';
+    conclusion = `<span style="color:#ffc107">Slight bearish lean</span> · contested at key levels — wait for clarity`;
+  } else {
+    storyDir = 'UNCLEAR';
+    conclusion = `<span style="color:#ffc107">No clear story</span> · price ranging between levels`;
+  }
+
+  return { rows: topRows, conclusion, storyDir, bullPoints, bearPoints };
+}
+
 function nextMove(h4C, h1C){
   const n4=h4C.length, n1=h1C.length;
   if(n4<8||n1<8) return {dir:'UNCLEAR',reason:'Insufficient 4H/1H data'};
@@ -1269,12 +1608,13 @@ function nextMove(h4C, h1C){
 }
 
 // ── COLLECT ALL LEVELS FOR LEVELS PAGE ───────────────────
-function collectLevels(wC, dC, p){
+function collectLevels(wC, dC, p, c15m){
   const wLvls = findVPeaks(wC,'1W').map(l=>({...l,tf:'1W'}));
   const dLvls = findVPeaks(dC,'1D').map(l=>({...l,tf:'1D'}));
   const pdhl  = findPDHL(dC).map(l=>({...l,tf:'PDH/PDL'}));
+  const asia  = c15m ? getAsiaLevels(c15m).map(l=>({...l,tf:'SESSION'})) : [];
 
-  const all = [...wLvls,...dLvls,...pdhl].sort((a,b)=>b.price-a.price);
+  const all = [...wLvls,...dLvls,...pdhl,...asia].sort((a,b)=>b.price-a.price);
 
   // Dedupe within 0.4%
   const dd = [];
@@ -1327,6 +1667,27 @@ function renderNM(nm){
   el.className='nm-val '+nm.dir;
   el.textContent=nm.dir==='UP'?'UP ▲':nm.dir==='DOWN'?'DOWN ▼':'UNCLEAR';
   document.getElementById('nm-sub').textContent=nm.reason;
+
+  // Story section
+  const story = nm.story;
+  const divider = document.getElementById('nm-divider');
+  const lbl = document.getElementById('nm-story-lbl');
+  const storyEl = document.getElementById('nm-story');
+  if(!story || !storyEl){ if(divider) divider.style.display='none'; if(lbl) lbl.style.display='none'; return; }
+
+  divider.style.display='block';
+  lbl.style.display='block';
+  storyEl.style.display='flex';
+
+  const rowsHtml = story.rows.map(r =>
+    `<div class="story-row">
+      <div class="story-icon ${r.icon}">${r.icon==='gain'?'✓':r.icon==='fail'?'✗':'~'}</div>
+      <div class="story-text">${r.text}</div>
+    </div>`
+  ).join('');
+
+  storyEl.innerHTML = rowsHtml +
+    `<div class="story-conclusion">${story.conclusion}</div>`;
 }
 
 function renderCards(){
@@ -1476,7 +1837,9 @@ function processTF(i, candles, dCandles, coinId){
   const s = coinState[coinId];
   const tf = TFS[i];
   const a = atr(candles);
-  const d = dms(candles, a, dCandles, tf.l, s.htfDir);
+  // Attach asiaLevels to htfDir as a carrier object for 15m processing
+  const htfCarrier = Object.assign(String(s.htfDir), { __asiaLevels: s.asiaLevels || [] });
+  const d = dms(candles, a, dCandles, tf.l, htfCarrier);
   s.results[tf.l] = d;
   // Alerts fire for all coins regardless of active view
   if(d.type!=='NONE'){
@@ -1547,12 +1910,28 @@ async function runCoin(coinId){
     if(h4Entry?.c && h1Entry?.c)      nm = nextMove(h4Entry.c, h1Entry.c);
     else if(h4Entry?.c)               nm = nextMove(h4Entry.c, h4Entry.c);
     else if(dCandles)                  nm = nextMove(dCandles, dCandles);
-    if(nm){ s.htfDir = nm.dir; if(isActive){ syncActiveState(); renderNM(nm); } }
+    if(nm){
+      s.htfDir = nm.dir;
+      // Build session story from level interactions — runs alongside momentum calc
+      const story = buildStory(s.allLevels, h4Entry?.c || [], h1Entry?.c || [], s.price);
+      nm.story = story;
+      s.lastStory = { dir: nm.dir, reason: nm.reason, story }; // persist for coin switch
+      if(isActive){ syncActiveState(); renderNM(nm); }
+    }
 
     // Levels — use 1W + 1D for key level detection
-    if(wCandles && dCandles) s.allLevels = collectLevels(wCandles, dCandles, s.price);
-    else if(dCandles)        s.allLevels = collectLevels(dCandles, dCandles, s.price);
-    if(isActive){ syncActiveState(); renderLevels(); }
+    // Store 15m candles and compute Asia session levels
+    if(m15Entry?.c){
+      s.candles15m = m15Entry.c;
+      s.asiaLevels = getAsiaLevels(m15Entry.c);
+    }
+    if(wCandles && dCandles) s.allLevels = collectLevels(wCandles, dCandles, s.price, s.candles15m);
+    else if(dCandles)        s.allLevels = collectLevels(dCandles, dCandles, s.price, s.candles15m);
+    if(isActive){
+      syncActiveState();
+      renderLevels();
+      if(s.candles15m) renderSessionBanner(s.candles15m, coinId);
+    }
 
     if(isActive){
       const now = new Date().toTimeString().slice(0,8);
