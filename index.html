@@ -56,6 +56,8 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 .hero-conf.med{background:rgba(255,193,7,.1);border-color:rgba(255,193,7,.3);color:#ffc107}
 .hero-conflbl{font-family:‘IBM Plex Mono’,monospace;font-size:8px;letter-spacing:.15em;color:#3d5068;text-transform:uppercase}
 .hero-reason{font-family:‘IBM Plex Mono’,monospace;font-size:10px;color:#5d7a99;line-height:1.6;border-top:1px solid #1a2230;padding-top:10px}
+.hero-conflict{font-family:‘IBM Plex Mono’,monospace;font-size:9px;line-height:1.5;padding:6px 10px;border-radius:6px;margin-top:8px;border:1px solid rgba(255,152,0,.3);background:rgba(255,152,0,.06);color:#ff9800}
+.hero-conflict.strong{border-color:rgba(255,61,90,.35);background:rgba(255,61,90,.07);color:#ff6b6b}
 
 /* NEXT MOVE */
 .session-banner{margin:0 16px 10px;padding:10px 14px;border-radius:10px;font-family:‘IBM Plex Mono’,monospace;font-size:10px;letter-spacing:.05em;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);display:flex;flex-direction:column;gap:5px}
@@ -252,6 +254,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
       </div>
     </div>
     <div class="hero-reason" id="hero-reason">Fetching candle data...</div>
+    <div class="hero-conflict" id="hero-conflict" style="display:none"></div>
   </div>
   <div class="nm-card">
     <div class="nm-lbl">Next Major Move · HTF</div>
@@ -1929,6 +1932,56 @@ function renderHero(){
   const best=[...TFS].sort((a,b)=>b.w-a.w).find(tf=>results[tf.l]&&results[tf.l].type!=='NONE');
   const confPfx = activeW>0 ? `[${pct}% conf · ${label}] ` : '';
   document.getElementById('hero-reason').textContent=best?(confPfx+results[best.l].reason):'No active DMC setup';
+
+  // ── CONFLICT WARNING ──────────────────────────────────────────────────
+  // Show a warning on the hero card when the 15m signal contradicts
+  // the Session Story and/or HTF direction
+  const conflictEl = document.getElementById('hero-conflict');
+  if(conflictEl){
+    const s = coinState[activeCoin];
+    const storyDir = s?.lastStory?.storyDir || 'UNCLEAR';
+    const htfDir   = s?.htfDir || 'UNCLEAR';
+    const heroSig  = diff > 0 ? 'LONG' : diff < 0 ? 'SHORT' : null;
+
+    if(heroSig && loaded >= 2){
+      const storyConflicts = (heroSig==='LONG'  && storyDir==='DOWN') ||
+                             (heroSig==='SHORT' && storyDir==='UP');
+      const htfConflicts   = (heroSig==='LONG'  && htfDir==='DOWN') ||
+                             (heroSig==='SHORT' && htfDir==='UP');
+
+      if(storyConflicts && htfConflicts){
+        // Both conflict — strong warning
+        conflictEl.className = 'hero-conflict strong';
+        conflictEl.innerHTML = `⚠ STRONG CONFLICT: HTF ${htfDir} + Session Story ${storyDir} — this ${heroSig} is counter-trend on both · wait for story alignment or reduce size`;
+        conflictEl.style.display = 'block';
+      } else if(storyConflicts){
+        conflictEl.className = 'hero-conflict';
+        conflictEl.innerHTML = `⚠ Story conflict: Session Story is ${storyDir} · ${heroSig} signal is counter-story — wait for confirmation or skip`;
+        conflictEl.style.display = 'block';
+      } else if(htfConflicts){
+        conflictEl.className = 'hero-conflict';
+        conflictEl.innerHTML = `⚠ HTF conflict: HTF direction is ${htfDir} · ${heroSig} signal is counter-trend — lower probability, tighter size`;
+        conflictEl.style.display = 'block';
+      } else if(heroSig && storyDir !== 'UNCLEAR' && htfDir !== 'UNCLEAR'){
+        // Both agree — show confirmation
+        const matchDir = heroSig === 'LONG' ? 'UP' : 'DOWN';
+        if(storyDir === matchDir && htfDir === matchDir){
+          conflictEl.className = 'hero-conflict';
+          conflictEl.style.borderColor = 'rgba(0,230,118,.25)';
+          conflictEl.style.background  = 'rgba(0,230,118,.05)';
+          conflictEl.style.color = '#00e676';
+          conflictEl.innerHTML = `✓ Aligned: HTF ${htfDir} + Session Story ${storyDir} confirm this ${heroSig}`;
+          conflictEl.style.display = 'block';
+        } else {
+          conflictEl.style.display = 'none';
+        }
+      } else {
+        conflictEl.style.display = 'none';
+      }
+    } else {
+      conflictEl.style.display = 'none';
+    }
+  }
 }
 
 function renderNM(nm){
