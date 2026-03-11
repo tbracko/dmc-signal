@@ -1684,6 +1684,8 @@ function buildStory(levels, h4C, h1C, currentPrice){
     const isRes = lv.type === 'resistance';
 
     // ── Scan 4H candles for level interactions (weight=2) ──────────────
+    // Count gains and fails separately, then emit a single collapsed row
+    let h4GainCount = 0, h4FailCount = 0;
     for(const k of h4Recent){
       const touched = isRes
         ? (k.h >= lv.price - tol)          // approached resistance from below
@@ -1698,23 +1700,29 @@ function buildStory(levels, h4C, h1C, currentPrice){
         ? (k.bh < lv.price - tol * 0.5)   // approached but body stayed below = failed to gain
         : (k.bl > lv.price + tol * 0.5);   // approached but body stayed above = failed to lose
 
-      if(gained){
-        const label = isRes ? 'Gained' : 'Held';
-        rows.push({
-          icon:'gain',
-          text:`<strong>4H ${label} $${fmt(lv.price)}</strong> — body closed ${isRes?'above':'below'} · ${lv.source}`,
-          weight:2, dir: isRes ? 'bull' : 'bear'
-        });
-        isRes ? bullPoints += 2 : bearPoints += 2;
-      } else if(failed){
-        const label = isRes ? 'Failed to gain' : 'Failed to hold';
-        rows.push({
-          icon:'fail',
-          text:`<strong>4H ${label} $${fmt(lv.price)}</strong> — rejected · ${lv.source}`,
-          weight:2, dir: isRes ? 'bear' : 'bull'
-        });
-        isRes ? bearPoints += 2 : bullPoints += 2;
-      }
+      if(gained) h4GainCount++;
+      else if(failed) h4FailCount++;
+    }
+
+    if(h4GainCount > 0){
+      const label = isRes ? 'Gained' : 'Held';
+      const countStr = h4GainCount > 1 ? ` ×${h4GainCount}` : '';
+      rows.push({
+        icon:'gain',
+        text:`<strong>4H ${label} $${fmt(lv.price)}</strong>${countStr} — body closed ${isRes?'above':'below'} · ${lv.source}`,
+        weight:2, dir: isRes ? 'bull' : 'bear'
+      });
+      isRes ? bullPoints += 2 * h4GainCount : bearPoints += 2 * h4GainCount;
+    }
+    if(h4FailCount > 0){
+      const label = isRes ? 'Failed to gain' : 'Failed to hold';
+      const countStr = h4FailCount > 1 ? ` ×${h4FailCount}` : '';
+      rows.push({
+        icon:'fail',
+        text:`<strong>4H ${label} $${fmt(lv.price)}</strong>${countStr} — rejected · ${lv.source}`,
+        weight:2, dir: isRes ? 'bear' : 'bull'
+      });
+      isRes ? bearPoints += 2 * h4FailCount : bullPoints += 2 * h4FailCount;
     }
 
     // ── Scan 1H candles for level interactions (weight=1) ──────────────
@@ -1749,7 +1757,7 @@ function buildStory(levels, h4C, h1C, currentPrice){
   }
 
   // Limit to 5 most recent/significant rows to keep card readable
-  const topRows = rows.slice(-5);
+  const topRows = rows.slice(-8);
 
   if(topRows.length === 0){
     // No level interactions detected — tell the user
