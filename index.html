@@ -1129,6 +1129,52 @@ function renderSessionBanner(candles15m, coinId){
   const asia = getAsiaRange(candles15m);
   const price = coinState[coinId]?.price || 0;
 
+  // Pull story + HTF context to make trap hints smarter
+  const s = coinState[coinId];
+  const storyDir = s?.lastStory?.storyDir || 'UNCLEAR';
+  const htfDir   = s?.htfDir || 'UNCLEAR';
+  // Consensus: if BOTH story and HTF agree → strong signal; if one agrees → moderate
+  // conflictScore: +1 per bullish signal, -1 per bearish signal
+  function consensus(longIsGood){
+    // longIsGood=true means we're evaluating a LONG hint
+    let score = 0;
+    if(storyDir === 'UP')   score += (longIsGood ? 2 : -2);
+    if(storyDir === 'DOWN') score += (longIsGood ? -2 : 2);
+    if(htfDir   === 'UP')   score += (longIsGood ? 1 : -1);
+    if(htfDir   === 'DOWN') score += (longIsGood ? -1 : 1);
+    // score > 0 = agrees, score < 0 = conflicts, score = 0 = unclear
+    return score;
+  }
+  // Build a smart trap hint for a given position relative to a session range
+  // direction: 'above' (price above high → short trap), 'below' (price below low → long trap), 'inside'
+  // levelName: e.g. 'Asia High', 'London High'
+  function smartTrapHint(direction, highName, lowName){
+    if(direction === 'inside'){
+      return `<span class="sb-trap watch">Price inside range — watch breakout direction</span>`;
+    }
+    if(direction === 'above'){
+      // Classic setup: Fail to GAIN the high → SHORT
+      const c = consensus(false); // false = evaluating short
+      if(c >= 2) return `<span class="sb-trap short">⬇ WATCH: Fail to gain ${highName} → SHORT · story + HTF confirm</span>`;
+      if(c === 1) return `<span class="sb-trap short">WATCH: Fail to gain ${highName} → SHORT · story leans bearish</span>`;
+      if(c === 0) return `<span class="sb-trap watch">WATCH: Fail to gain ${highName} → possible SHORT · no story bias</span>`;
+      if(c === -1) return `<span class="sb-trap watch">⚠ Fail to gain ${highName} → SHORT conflicted · story leans bullish</span>`;
+      // c <= -2: strong conflict — flip suggestion
+      return `<span class="sb-trap long">⚠ ${highName} reject but story BULLISH — watch for reclaim → LONG instead</span>`;
+    }
+    if(direction === 'below'){
+      // Classic setup: Fail to LOSE the low → LONG
+      const c = consensus(true); // true = evaluating long
+      if(c >= 2) return `<span class="sb-trap long">⬆ WATCH: Fail to lose ${lowName} → LONG · story + HTF confirm</span>`;
+      if(c === 1) return `<span class="sb-trap long">WATCH: Fail to lose ${lowName} → LONG · story leans bullish</span>`;
+      if(c === 0) return `<span class="sb-trap watch">WATCH: Fail to lose ${lowName} → possible LONG · no story bias</span>`;
+      if(c === -1) return `<span class="sb-trap watch">⚠ Fail to lose ${lowName} → LONG conflicted · story leans bearish</span>`;
+      // c <= -2: strong conflict — flip suggestion
+      return `<span class="sb-trap short">⚠ ${lowName} breakdown — story BEARISH → watch for SHORT continuation</span>`;
+    }
+    return '';
+  }
+
   const sessionMeta = {
     ASIA:        { emoji:'🌏', label:'Asia Session',   color:'#7b8fa8',  dot:'#4fc3f7' },
     LONDON:      { emoji:'🇬🇧', label:'London Session', color:'#ffc107',  dot:'#ffc107' },
@@ -1156,16 +1202,11 @@ function renderSessionBanner(candles15m, coinId){
       ? `<span style="color:#00e676">-${belowLow}% below Asia Low</span>`
       : `<span style="color:#7b8fa8">inside Asia range</span>`;
 
-    // Trap hint: if London/NY, show what to watch for
+    // Smart trap hint using story + HTF consensus
     let trapHint = '';
     if(session === 'LONDON' || session === 'NY'){
-      if(isAbove){
-        trapHint = `<span class="sb-trap short">WATCH: Fail to gain Asia High → SHORT</span>`;
-      } else if(isBelow){
-        trapHint = `<span class="sb-trap long">WATCH: Fail to lose Asia Low → LONG</span>`;
-      } else {
-        trapHint = `<span class="sb-trap watch">WATCH: Hunt above ${fmt(asia.high)} or below ${fmt(asia.low)}</span>`;
-      }
+      const dir = isAbove ? 'above' : isBelow ? 'below' : 'inside';
+      trapHint = smartTrapHint(dir, 'Asia High', 'Asia Low');
     }
 
     const srcNote = asia.source === 'yesterday' ? ' (prev day)' : '';
@@ -1190,13 +1231,8 @@ function renderSessionBanner(candles15m, coinId){
       <span class="sb-range" style="color:#c9d6e3">$${fmt(london.low)} – $${fmt(london.high)}</span>
       <span style="color:#4a5a6a;font-size:9px">(${lRangeSize}%)</span>
     </div>`;
-    if(isAboveL){
-      html += `<div class="sb-row"><span class="sb-trap short">WATCH: Fail to gain London High → SHORT</span></div>`;
-    } else if(isBelowL){
-      html += `<div class="sb-row"><span class="sb-trap long">WATCH: Fail to lose London Low → LONG</span></div>`;
-    } else {
-      html += `<div class="sb-row"><span class="sb-trap watch">Price inside London range — watch breakout direction</span></div>`;
-    }
+    const londonDir = isAboveL ? 'above' : isBelowL ? 'below' : 'inside';
+    html += `<div class="sb-row">${smartTrapHint(londonDir, 'London High', 'London Low')}</div>`;
   }
 
   // Show NY range during Asia session (next morning hunting NY high/low)
@@ -1211,13 +1247,8 @@ function renderSessionBanner(candles15m, coinId){
       <span class="sb-range" style="color:#c9d6e3">$${fmt(ny.low)} – $${fmt(ny.high)}</span>
       <span style="color:#4a5a6a;font-size:9px">(${nyRangeSize}%)</span>
     </div>`;
-    if(isAboveNY){
-      html += `<div class="sb-row"><span class="sb-trap short">WATCH: Fail to gain NY High → SHORT</span></div>`;
-    } else if(isBelowNY){
-      html += `<div class="sb-row"><span class="sb-trap long">WATCH: Fail to lose NY Low → LONG</span></div>`;
-    } else {
-      html += `<div class="sb-row"><span class="sb-trap watch">Price inside NY range — watch breakout direction</span></div>`;
-    }
+    const nyDir = isAboveNY ? 'above' : isBelowNY ? 'below' : 'inside';
+    html += `<div class="sb-row">${smartTrapHint(nyDir, 'NY High', 'NY Low')}</div>`;
   }
 
   // Show NY range building during NY session
