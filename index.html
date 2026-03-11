@@ -374,9 +374,9 @@ let activeCoin = 'bitcoin'; // currently viewed coin
 
 // Per-coin state — keyed by coin id
 const coinState = {
-  bitcoin:  { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{} },
-  ethereum: { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{} },
-  solana:   { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{} },
+  bitcoin:  { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{} },
+  ethereum: { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{} },
+  solana:   { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{} },
 };
 
 // Convenience accessors for active coin (used by render functions)
@@ -1090,13 +1090,11 @@ function dms(c, a, dCandles, tf, htfBias){
   // Max lookback: 3 bars (45 min) — traps older than that are stale
   const maxLB = 3;
 
-  // HTF story filter — hard block only when HTF is very clear
-  // Chris Hunter: strong levels CAN be traded counter-trend on 15m
-  // Soft block (warning only) when HTF has slight bias; hard block only when very clear
-  // We treat 'UP'/'DOWN' as soft warnings at 15m — don't fully suppress signals
-  // Only truly block if HTF bias exists AND signal has poor R:R (already handled by R:R filter)
-  const htfBlockShort = false; // removed hard block — R:R filter + ⚠ label is sufficient
-  const htfBlockLong  = false; // removed hard block — R:R filter + ⚠ label is sufficient
+  // HTF hard block — Chris Hunter: counter-trend 15m setups are low probability
+  // If HTF story is clearly UP, suppress 15m SHORTs entirely (and vice versa)
+  // UNCLEAR = no block, let both directions fire
+  const htfBlockShort = htfBias === 'UP';   // HTF up = no 15m shorts
+  const htfBlockLong  = htfBias === 'DOWN'; // HTF down = no 15m longs
 
   // ── FAIL TO GAIN → SHORT ──────────────────────────────
   for(const lv of nearby.filter(l=>l.type==='resistance')){
@@ -1121,7 +1119,7 @@ function dms(c, a, dCandles, tf, htfBias){
       const tgt  = findNextLevel(levels, confirm.c, 'short');
       const stop = findStopLevel(levels, lv.price, 'short');
       const rr   = calcRR(confirm.c, tgt.price, lv.price, stop);
-      if(rr && parseFloat(rr) < 0.8) continue; // Skip low R:R setups
+      if(rr && parseFloat(rr) < 1.5) continue; // Skip low R:R setups — min 1.5 on 15m
       const dist = ((lv.price - confirm.c)/confirm.c*100).toFixed(2);
       return {
         sig:'SHORT', type:'FAIL_GAIN',
@@ -1155,7 +1153,7 @@ function dms(c, a, dCandles, tf, htfBias){
       const tgt  = findNextLevel(levels, confirm.c, 'long');
       const stop = findStopLevel(levels, lv.price, 'long');
       const rr   = calcRR(confirm.c, tgt.price, lv.price, stop);
-      if(rr && parseFloat(rr) < 0.8) continue; // Skip low R:R setups
+      if(rr && parseFloat(rr) < 1.5) continue; // Skip low R:R setups — min 1.5 on 15m
       const dist = ((confirm.c - lv.price)/confirm.c*100).toFixed(2);
       return {
         sig:'LONG', type:'FAIL_LOSE',
@@ -1168,50 +1166,10 @@ function dms(c, a, dCandles, tf, htfBias){
     }
   }
 
-  // ── 15m: BREAKOUT (SUCCESS = CONTINUATION) ───────────
-  // Chris Hunter: "If you gain a level, you continue to the next one"
-  // A clean 15m body close THROUGH a level = enter in breakout direction
-  // Conditions: current candle body has cleanly closed beyond the level
-  //             AND prior candle body was still on the other side (fresh break)
-  //             AND no immediate pullback yet (body still beyond)
-  for(const lv of nearby.filter(l=>l.type==='resistance')){
-    const prev = c[n-2];
-    // Clean breakout LONG: prior body below level, current body above
-    const cleanBreak = prev.bh < lv.price && cur.bl > lv.price * 0.998;
-    if(cleanBreak && !htfBlockLong){
-      const tgt  = findNextLevel(levels, cur.c, 'long');
-      const stop = findStopLevel(levels, lv.price, 'long');
-      const rr   = calcRR(cur.c, tgt.price, lv.price, stop);
-      const htfNote = htfBias==='UP' ? ' · ✓ HTF aligns' : htfBias==='DOWN' ? ' · ⚠ counter-trend' : '';
-      return {
-        sig:'LONG', type:'BREAKOUT',
-        level:lv.price, target:tgt.price, rr, stopPrice:stop,
-        strength:lv.strength, score:lv.score,
-        reason:`GAINED ${lv.source} $${fmt(lv.price)} · body closed above · continuation LONG${htfNote}${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)}`,
-        detail:`Breakout: body $${fmt(cur.bl)}–$${fmt(cur.bh)} closed above $${fmt(lv.price)} | SL: $${fmt(stop)}`,
-        untested:!lv.tested
-      };
-    }
-  }
-  for(const lv of nearby.filter(l=>l.type==='support')){
-    const prev = c[n-2];
-    // Clean breakdown SHORT: prior body above level, current body below
-    const cleanBreak = prev.bl > lv.price && cur.bh < lv.price * 1.002;
-    if(cleanBreak && !htfBlockShort){
-      const tgt  = findNextLevel(levels, cur.c, 'short');
-      const stop = findStopLevel(levels, lv.price, 'short');
-      const rr   = calcRR(cur.c, tgt.price, lv.price, stop);
-      const htfNote = htfBias==='DOWN' ? ' · ✓ HTF aligns' : htfBias==='UP' ? ' · ⚠ counter-trend' : '';
-      return {
-        sig:'SHORT', type:'BREAKOUT',
-        level:lv.price, target:tgt.price, rr, stopPrice:stop,
-        strength:lv.strength, score:lv.score,
-        reason:`LOST ${lv.source} $${fmt(lv.price)} · body closed below · continuation SHORT${htfNote}${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)}`,
-        detail:`Breakdown: body $${fmt(cur.bl)}–$${fmt(cur.bh)} closed below $${fmt(lv.price)} | SL: $${fmt(stop)}`,
-        untested:!lv.tested
-      };
-    }
-  }
+  // ── 15m: BREAKOUT removed from 15m signals ───────────
+  // Chris Hunter's primary 15m signals are trap-based (FAIL TO GAIN/LOSE only)
+  // BREAKOUT = chasing a move that already happened → lower probability, often faded
+  // Breakout context is still shown on 1D/4H/1H as AT_LEVEL with GAINED note
 
   // ── 15m: AT LEVEL (approaching key zone) ─────────────
   const atLevel = nearby.find(l=>
@@ -1522,8 +1480,16 @@ function processTF(i, candles, dCandles, coinId){
   s.results[tf.l] = d;
   // Alerts fire for all coins regardless of active view
   if(d.type!=='NONE'){
-    maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, coinId, s);
-    if(d.type!=='AT_LEVEL') addLog(d.sig, tf.l, d.reason, d.type, d.level, d.target, d.rr, d.stopPrice, coinId);
+    // 1 ATR dedup: same level (within 0.5%) can't re-fire until price moves 1 ATR away from it
+    const levelKey = tf.l + '_' + Math.round(d.level);
+    const lastPrice = s.lastSignalLevel[levelKey];
+    const atrVal = atr(candles);
+    const movedFarEnough = !lastPrice || Math.abs(s.price - lastPrice) >= atrVal;
+    if(movedFarEnough){
+      s.lastSignalLevel[levelKey] = s.price; // record current price at signal time
+      maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, coinId, s);
+      if(d.type!=='AT_LEVEL') addLog(d.sig, tf.l, d.reason, d.type, d.level, d.target, d.rr, d.stopPrice, coinId);
+    }
   }
   // Only re-render UI if this coin is the one currently being viewed
   if(coinId === activeCoin){
