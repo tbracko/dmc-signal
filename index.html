@@ -68,6 +68,21 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 .session-banner .sb-trap.long{background:rgba(0,230,118,.15);color:#00e676;border:1px solid rgba(0,230,118,.3)}
 .session-banner .sb-trap.short{background:rgba(255,61,90,.12);color:#ff3d5a;border:1px solid rgba(255,61,90,.25)}
 .session-banner .sb-trap.watch{background:rgba(255,193,7,.1);color:#ffc107;border:1px solid rgba(255,193,7,.22)}
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 16px 12px}
+.stat-card{background:#0c0f14;border:1px solid #1a2230;border-radius:10px;padding:12px 14px}
+.stat-card.full{grid-column:1/-1}
+.stat-val{font-family:‘Bebas Neue’,sans-serif;font-size:28px;letter-spacing:.04em;line-height:1}
+.stat-val.green{color:#00e676}.stat-val.red{color:#ff3d5a}.stat-val.yellow{color:#ffc107}.stat-val.white{color:#c9d6e3}
+.stat-lbl{font-family:‘IBM Plex Mono’,monospace;font-size:8px;color:#3d5068;letter-spacing:.08em;text-transform:uppercase;margin-top:3px}
+.stat-sub{font-family:‘IBM Plex Mono’,monospace;font-size:8px;color:#5d7a99;margin-top:5px;line-height:1.5}
+.stat-bar-wrap{height:4px;background:#1a2230;border-radius:2px;margin-top:8px;overflow:hidden}
+.stat-bar{height:100%;border-radius:2px;background:#00e676;transition:width .4s}
+.stat-table{width:100%;border-collapse:collapse;margin-top:6px}
+.stat-table td{font-family:‘IBM Plex Mono’,monospace;font-size:9px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04);color:#7b8fa8}
+.stat-table td:first-child{color:#c9d6e3;width:40%}
+.stat-table td.green{color:#00e676}.stat-table td.red{color:#ff3d5a}.stat-table td.yellow{color:#ffc107}
+.stat-streak{display:flex;gap:3px;margin-top:6px;flex-wrap:wrap}
+.streak-dot{width:10px;height:10px;border-radius:2px}
 .nm-divider{height:1px;background:rgba(255,255,255,.06);margin:10px 0 8px}
 .nm-story-lbl{font-family:‘IBM Plex Mono’,monospace;font-size:8px;color:#3d5068;letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px}
 .nm-story{display:flex;flex-direction:column;gap:4px}
@@ -271,6 +286,16 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   <div id="lvl-list"><div class="empty">Loading levels...</div></div>
 </div>
 
+<!-- PAGE: STATS -->
+
+<div class="page" id="page-stats">
+  <div class="sh" style="display:flex;justify-content:space-between;align-items:center">
+    <span>Performance Stats</span>
+    <span id="stats-auto-lbl" style="font-size:9px;color:#3d5068;letter-spacing:.06em">AUTO-CHECKING</span>
+  </div>
+  <div id="stats-content"><div class="empty">Loading stats...</div></div>
+</div>
+
 <!-- PAGE: SETTINGS -->
 
 <div class="page" id="page-settings">
@@ -378,6 +403,9 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   </button>
   <button class="nb" onclick="nav('log',this)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>Log
+  </button>
+  <button class="nb" onclick="nav('stats',this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>Stats
   </button>
   <button class="nb" onclick="nav('settings',this)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Alerts
@@ -590,6 +618,7 @@ function nav(id, btn){
   document.getElementById('page-'+id).classList.add('active');
   btn.classList.add('active');
   if(id==='chart'&&!tvLoaded){loadTV('240');tvLoaded=true;}
+  if(id==='stats') setTimeout(renderStats, 50);
 }
 
 // ── TRADINGVIEW ────────────────────────────────────────────
@@ -955,6 +984,75 @@ function getAsiaLevels(candles15m){
   return levels;
 }
 
+// Compute London session high/low from 15m candles
+// London: 08:00–16:00 London time (DST-correct)
+// During NY session, London range is complete and acts as key level
+// During London session, range is live (updates as session progresses)
+function getLondonRange(candles15m){
+  if(!candles15m || candles15m.length < 4) return null;
+  const b = getSessionBoundaries();
+  const now = new Date();
+  const todayMidnightUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+
+  // London boundaries in ms UTC
+  const londonOpenUTC  = todayMidnightUTC + b.londonOpen  * 3600000;
+  const londonCloseUTC = todayMidnightUTC + b.londonClose * 3600000;
+
+  const londonCandles = candles15m.filter(k => k.t >= londonOpenUTC && k.t < londonCloseUTC);
+
+  if(londonCandles.length < 2){
+    // Try yesterday's London session
+    const yestMidnightUTC = todayMidnightUTC - 86400000;
+    const yestLondonOpen  = yestMidnightUTC + b.londonOpen  * 3600000;
+    const yestLondonClose = yestMidnightUTC + b.londonClose * 3600000;
+    const yestLondon = candles15m.filter(k => k.t >= yestLondonOpen && k.t < yestLondonClose);
+    if(yestLondon.length < 2) return null;
+    return {
+      high: Math.max(...yestLondon.map(k=>k.bh)),
+      low:  Math.min(...yestLondon.map(k=>k.bl)),
+      highWick: Math.max(...yestLondon.map(k=>k.h)),
+      lowWick:  Math.min(...yestLondon.map(k=>k.l)),
+      complete: true, source: 'yesterday',
+      candleCount: yestLondon.length
+    };
+  }
+
+  const curSession = getCurrentSession();
+  const isComplete = curSession === 'NY' || curSession === 'AFTER_HOURS';
+  return {
+    high: Math.max(...londonCandles.map(k=>k.bh)),
+    low:  Math.min(...londonCandles.map(k=>k.bl)),
+    highWick: Math.max(...londonCandles.map(k=>k.h)),
+    lowWick:  Math.min(...londonCandles.map(k=>k.l)),
+    complete: isComplete,
+    source: 'today',
+    candleCount: londonCandles.length
+  };
+}
+
+// Build London levels — only meaningful when London session is complete (NY session active)
+// During London session these are live/building — show in banner but not as firm levels
+function getLondonLevels(candles15m){
+  const london = getLondonRange(candles15m);
+  if(!london || !london.complete) return [];
+  return [
+    {
+      price: london.high,
+      bh: london.high, bl: london.high * 0.999,
+      type: 'resistance', strength: 'strong',
+      tested: false, score: 72, tf: 'SESSION',
+      source: 'London High', isSessionLevel: true
+    },
+    {
+      price: london.low,
+      bh: london.low * 1.001, bl: london.low,
+      type: 'support', strength: 'strong',
+      tested: false, score: 72, tf: 'SESSION',
+      source: 'London Low', isSessionLevel: true
+    }
+  ];
+}
+
 // Render the session banner on the Signal tab
 function renderSessionBanner(candles15m, coinId){
   const el = document.getElementById('session-banner');
@@ -1010,6 +1108,37 @@ function renderSessionBanner(candles15m, coinId){
     </div>
     <div class="sb-row">${posLabel}</div>`;
     if(trapHint) html += `<div class="sb-row" style="margin-top:2px">${trapHint}</div>`;
+  }
+
+  // Show London range during NY session
+  const london = getLondonRange(candles15m);
+  if(london && (session === 'NY' || (session === 'AFTER_HOURS' && london.complete)) && price > 0){
+    const lRangeSize = ((london.high - london.low)/london.low*100).toFixed(2);
+    const isAboveL = price > london.high;
+    const isBelowL = price < london.low;
+    const srcNote = london.source === 'yesterday' ? ' (prev day)' : '';
+    html += `<div class="sb-row" style="margin-top:3px;border-top:1px solid rgba(255,255,255,.04);padding-top:5px">
+      <span class="sb-label">London Range${srcNote}</span>
+      <span class="sb-range" style="color:#c9d6e3">$${fmt(london.low)} – $${fmt(london.high)}</span>
+      <span style="color:#4a5a6a;font-size:9px">(${lRangeSize}%)</span>
+    </div>`;
+    if(isAboveL){
+      html += `<div class="sb-row"><span class="sb-trap short">WATCH: Fail to gain London High → SHORT</span></div>`;
+    } else if(isBelowL){
+      html += `<div class="sb-row"><span class="sb-trap long">WATCH: Fail to lose London Low → LONG</span></div>`;
+    } else {
+      html += `<div class="sb-row"><span class="sb-trap watch">Price inside London range — watch breakout direction</span></div>`;
+    }
+  }
+
+  // Show London range building during London session
+  if(london && session === 'LONDON' && !london.complete && london.candleCount >= 2 && price > 0){
+    const lRangeSize = ((london.high - london.low)/london.low*100).toFixed(2);
+    html += `<div class="sb-row" style="margin-top:3px;border-top:1px solid rgba(255,255,255,.04);padding-top:5px">
+      <span class="sb-label">London Range (building)</span>
+      <span class="sb-range" style="color:#7b8fa8">$${fmt(london.low)} – $${fmt(london.high)}</span>
+      <span style="color:#4a5a6a;font-size:9px">(${lRangeSize}%)</span>
+    </div>`;
   }
 
   el.innerHTML = html;
@@ -1612,9 +1741,10 @@ function collectLevels(wC, dC, p, c15m){
   const wLvls = findVPeaks(wC,'1W').map(l=>({...l,tf:'1W'}));
   const dLvls = findVPeaks(dC,'1D').map(l=>({...l,tf:'1D'}));
   const pdhl  = findPDHL(dC).map(l=>({...l,tf:'PDH/PDL'}));
-  const asia  = c15m ? getAsiaLevels(c15m).map(l=>({...l,tf:'SESSION'})) : [];
+  const asia   = c15m ? getAsiaLevels(c15m).map(l=>({...l,tf:'SESSION'})) : [];
+  const london = c15m ? getLondonLevels(c15m).map(l=>({...l,tf:'SESSION'})) : [];
 
-  const all = [...wLvls,...dLvls,...pdhl,...asia].sort((a,b)=>b.price-a.price);
+  const all = [...wLvls,...dLvls,...pdhl,...asia,...london].sort((a,b)=>b.price-a.price);
 
   // Dedupe within 0.4%
   const dd = [];
@@ -1822,6 +1952,227 @@ function renderLog(){
   }).join('');
 }
 
+// ── AUTO-OUTCOME DETECTION ───────────────────────────────
+// On each refresh, check open log entries against current price
+// If price has hit TP or SL level → auto-mark as hit/stopped
+function checkAutoOutcomes(coinId){
+  const s = coinState[coinId];
+  if(!s || s.price <= 0) return;
+  const entries = loadLog();
+  let changed = false;
+
+  entries.forEach(e => {
+    if(e.status !== 'open') return;
+    if(e.coin !== coinId) return;
+    if(!e.target && !e.stopPrice) return;
+
+    const p = s.price;
+    // For LONG: TP hit if price >= target, stopped if price <= SL
+    // For SHORT: TP hit if price <= target, stopped if price >= SL
+    if(e.sig === 'LONG'){
+      if(e.target && p >= e.target){
+        e.status = 'hit';
+        e.exitNote = `✓ Auto: TP hit at $${fmt(p)}`;
+        changed = true;
+      } else if(e.stopPrice && p <= e.stopPrice){
+        e.status = 'stopped';
+        e.exitNote = `✗ Auto: SL hit at $${fmt(p)}`;
+        changed = true;
+      }
+    } else if(e.sig === 'SHORT'){
+      if(e.target && p <= e.target){
+        e.status = 'hit';
+        e.exitNote = `✓ Auto: TP hit at $${fmt(p)}`;
+        changed = true;
+      } else if(e.stopPrice && p >= e.stopPrice){
+        e.status = 'stopped';
+        e.exitNote = `✗ Auto: SL hit at $${fmt(p)}`;
+        changed = true;
+      }
+    }
+  });
+
+  if(changed){
+    saveLog(entries);
+    renderLog();
+    renderStats();
+  }
+}
+
+// ── STATS ENGINE ──────────────────────────────────────────
+function calcStats(){
+  const entries = loadLog().filter(e => e.status === 'hit' || e.status === 'stopped');
+  if(!entries.length) return null;
+
+  const total  = entries.length;
+  const wins   = entries.filter(e=>e.status==='hit').length;
+  const losses = entries.filter(e=>e.status==='stopped').length;
+  const winRate = (wins/total*100).toFixed(0);
+
+  // By signal type
+  const byType = {};
+  entries.forEach(e => {
+    const k = e.type || 'UNKNOWN';
+    if(!byType[k]) byType[k] = {w:0,l:0};
+    e.status==='hit' ? byType[k].w++ : byType[k].l++;
+  });
+
+  // By timeframe
+  const byTF = {};
+  entries.forEach(e => {
+    const k = e.tf || '?';
+    if(!byTF[k]) byTF[k] = {w:0,l:0};
+    e.status==='hit' ? byTF[k].w++ : byTF[k].l++;
+  });
+
+  // By coin
+  const byCoin = {};
+  entries.forEach(e => {
+    const k = (e.coin && COINS[e.coin]) ? COINS[e.coin].shortLabel : 'BTC';
+    if(!byCoin[k]) byCoin[k] = {w:0,l:0};
+    e.status==='hit' ? byCoin[k].w++ : byCoin[k].l++;
+  });
+
+  // By session (hour of signal)
+  const bySession = {ASIA:{w:0,l:0},LONDON:{w:0,l:0},NY:{w:0,l:0},OTHER:{w:0,l:0}};
+  entries.forEach(e => {
+    const h = e.ts ? new Date(e.ts).getUTCHours() : -1;
+    const b = getSessionBoundaries();
+    let sess = 'OTHER';
+    if(h >= b.asiaOpen && h < b.asiaClose) sess = 'ASIA';
+    else if(h >= b.londonOpen && h < b.londonClose) sess = 'LONDON';
+    else if(h >= b.nyOpen && h < b.nyClose) sess = 'NY';
+    e.status==='hit' ? bySession[sess].w++ : bySession[sess].l++;
+  });
+
+  // Average R:R on wins vs losses
+  const winRR  = entries.filter(e=>e.status==='hit'&&e.rr).map(e=>+e.rr);
+  const lossRR = entries.filter(e=>e.status==='stopped'&&e.rr).map(e=>+e.rr);
+  const avgWinRR  = winRR.length  ? (winRR.reduce((a,b)=>a+b,0)/winRR.length).toFixed(1)  : null;
+  const avgLossRR = lossRR.length ? (lossRR.reduce((a,b)=>a+b,0)/lossRR.length).toFixed(1) : null;
+
+  // Streak (last 20)
+  const recent20 = entries.slice(0,20);
+  let curStreak=0, curStreakType='';
+  for(const e of recent20){
+    const w = e.status==='hit';
+    if(!curStreakType){ curStreakType=w?'W':'L'; curStreak=1; }
+    else if((curStreakType==='W')===w) curStreak++;
+    else break;
+  }
+
+  return { total, wins, losses, winRate, byType, byTF, byCoin, bySession,
+           avgWinRR, avgLossRR, streak: {count:curStreak, type:curStreakType},
+           recent20 };
+}
+
+function renderStats(){
+  const el = document.getElementById('stats-content');
+  if(!el) return;
+
+  // Count open/pending entries
+  const allEntries = loadLog();
+  const open = allEntries.filter(e=>e.status==='open').length;
+  const stats = calcStats();
+
+  if(!stats){
+    el.innerHTML = `<div class="empty" style="padding:40px 20px;text-align:center">
+      <div style="font-size:24px;margin-bottom:8px">📊</div>
+      <div style="color:#5d7a99;font-family:'IBM Plex Mono',monospace;font-size:10px">No completed trades yet</div>
+      <div style="color:#3d5068;font-family:'IBM Plex Mono',monospace;font-size:9px;margin-top:4px">${open} open · mark TP HIT or STOPPED in the Log tab</div>
+    </div>`;
+    return;
+  }
+
+  const wr = +stats.winRate;
+  const wrColor = wr>=60?'green':wr>=45?'yellow':'red';
+
+  // Type breakdown rows
+  const typeLabels = {FAIL_GAIN:'Fail to Gain',FAIL_LOSE:'Fail to Lose',BLIND_ENTRY:'Blind Entry',BREAKOUT:'Breakout'};
+  const typeRows = Object.entries(stats.byType)
+    .sort((a,b)=>(b[1].w+b[1].l)-(a[1].w+a[1].l))
+    .map(([k,v])=>{
+      const t=v.w+v.l, r=(v.w/t*100).toFixed(0);
+      const cls=+r>=60?'green':+r>=45?'yellow':'red';
+      return `<tr><td>${typeLabels[k]||k}</td><td>${v.w}W / ${v.l}L</td><td class="${cls}">${r}%</td></tr>`;
+    }).join('');
+
+  // TF breakdown rows
+  const tfRows = Object.entries(stats.byTF)
+    .sort((a,b)=>(b[1].w+b[1].l)-(a[1].w+a[1].l))
+    .map(([k,v])=>{
+      const t=v.w+v.l, r=(v.w/t*100).toFixed(0);
+      const cls=+r>=60?'green':+r>=45?'yellow':'red';
+      return `<tr><td>${k}</td><td>${v.w}W / ${v.l}L</td><td class="${cls}">${r}%</td></tr>`;
+    }).join('');
+
+  // Session breakdown rows
+  const sessRows = Object.entries(stats.bySession)
+    .filter(([,v])=>v.w+v.l>0)
+    .map(([k,v])=>{
+      const t=v.w+v.l, r=(v.w/t*100).toFixed(0);
+      const cls=+r>=60?'green':+r>=45?'yellow':'red';
+      const emoji = k==='ASIA'?'🌏':k==='LONDON'?'🇬🇧':k==='NY'?'🗽':'🌙';
+      return `<tr><td>${emoji} ${k}</td><td>${v.w}W / ${v.l}L</td><td class="${cls}">${r}%</td></tr>`;
+    }).join('');
+
+  // Streak dots
+  const streakDots = stats.recent20.map(e =>
+    `<div class="streak-dot" style="background:${e.status==='hit'?'#00e676':'#ff3d5a'}"></div>`
+  ).join('');
+
+  // Coin breakdown rows
+  const coinRows = Object.entries(stats.byCoin)
+    .sort((a,b)=>(b[1].w+b[1].l)-(a[1].w+a[1].l))
+    .map(([k,v])=>{
+      const t=v.w+v.l, r=(v.w/t*100).toFixed(0);
+      const cls=+r>=60?'green':+r>=45?'yellow':'red';
+      return `<tr><td>${k}</td><td>${v.w}W / ${v.l}L</td><td class="${cls}">${r}%</td></tr>`;
+    }).join('');
+
+  el.innerHTML = `
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-val ${wrColor}">${stats.winRate}%</div>
+        <div class="stat-lbl">Win Rate</div>
+        <div class="stat-bar-wrap"><div class="stat-bar" style="width:${stats.winRate}%;background:${wr>=60?'#00e676':wr>=45?'#ffc107':'#ff3d5a'}"></div></div>
+        <div class="stat-sub">${stats.wins}W · ${stats.losses}L · ${stats.total} total</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val white">${stats.streak.count}</div>
+        <div class="stat-lbl">${stats.streak.type==='W'?'Win':'Loss'} Streak</div>
+        <div class="stat-streak">${streakDots}</div>
+      </div>
+      ${stats.avgWinRR ? `
+      <div class="stat-card">
+        <div class="stat-val green">${stats.avgWinRR}</div>
+        <div class="stat-lbl">Avg R:R (wins)</div>
+        <div class="stat-sub">${stats.avgLossRR?`${stats.avgLossRR} avg R:R on losses`:''}</div>
+      </div>` : ''}
+      <div class="stat-card ${stats.avgWinRR ? '' : 'full'}">
+        <div class="stat-val white">${open}</div>
+        <div class="stat-lbl">Open Trades</div>
+        <div class="stat-sub">Auto-checking TP/SL on refresh</div>
+      </div>
+      <div class="stat-card full">
+        <div class="stat-lbl" style="margin-bottom:2px">By Signal Type</div>
+        <table class="stat-table"><tbody>${typeRows}</tbody></table>
+      </div>
+      <div class="stat-card full">
+        <div class="stat-lbl" style="margin-bottom:2px">By Timeframe</div>
+        <table class="stat-table"><tbody>${tfRows}</tbody></table>
+      </div>
+      ${sessRows ? `<div class="stat-card full">
+        <div class="stat-lbl" style="margin-bottom:2px">By Session</div>
+        <table class="stat-table"><tbody>${sessRows}</tbody></table>
+      </div>` : ''}
+      ${coinRows ? `<div class="stat-card full">
+        <div class="stat-lbl" style="margin-bottom:2px">By Coin</div>
+        <table class="stat-table"><tbody>${coinRows}</tbody></table>
+      </div>` : ''}
+    </div>`;
+}
+
 function setStatus(s,t){
   document.getElementById('dot').className='dot '+(s==='ok'?'ok':s==='err'?'err':'');
   document.getElementById('status-txt').textContent=t;
@@ -1860,6 +2211,8 @@ function processTF(i, candles, dCandles, coinId){
     renderHero();
     renderCards();
   }
+  // Auto-outcome check runs for all coins (not just active)
+  checkAutoOutcomes(coinId);
 }
 
 // ── PER-COIN RUN LOOP ─────────────────────────────────────
@@ -1923,7 +2276,8 @@ async function runCoin(coinId){
     // Store 15m candles and compute Asia session levels
     if(m15Entry?.c){
       s.candles15m = m15Entry.c;
-      s.asiaLevels = getAsiaLevels(m15Entry.c);
+      // Combine Asia + London session levels for the 15m engine
+      s.asiaLevels = [...getAsiaLevels(m15Entry.c), ...getLondonLevels(m15Entry.c)];
     }
     if(wCandles && dCandles) s.allLevels = collectLevels(wCandles, dCandles, s.price, s.candles15m);
     else if(dCandles)        s.allLevels = collectLevels(dCandles, dCandles, s.price, s.candles15m);
