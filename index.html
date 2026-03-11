@@ -282,7 +282,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <!-- PAGE: LEVELS -->
 
 <div class="page" id="page-levels">
-  <div class="sh">Key Levels · Weekly + Daily + Session (V-Peaks + PDH/PDL + Asia)</div>
+  <div class="sh">Key Levels · Weekly + Daily + Session (V-Peaks + PDH/PDL + Asia/London/NY)</div>
   <div id="lvl-list"><div class="empty">Loading levels...</div></div>
 </div>
 
@@ -984,6 +984,74 @@ function getAsiaLevels(candles15m){
   return levels;
 }
 
+// Compute NY session high/low from 15m candles
+// NY: 9:30am–4pm NY time (DST-correct)
+// Used by the following Asia session as key hunt targets
+// Score 60 (below PDH/PDL 70) — dedupes gracefully when near daily highs
+function getNYRange(candles15m){
+  if(!candles15m || candles15m.length < 4) return null;
+  const b = getSessionBoundaries();
+  const now = new Date();
+  const todayMidnightUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+
+  const nyOpenUTC  = todayMidnightUTC + b.nyOpen  * 3600000;
+  const nyCloseUTC = todayMidnightUTC + b.nyClose * 3600000;
+
+  const nyCandles = candles15m.filter(k => k.t >= nyOpenUTC && k.t < nyCloseUTC);
+
+  if(nyCandles.length < 2){
+    // Try yesterday's NY session
+    const yestMidnightUTC = todayMidnightUTC - 86400000;
+    const yestNYOpen  = yestMidnightUTC + b.nyOpen  * 3600000;
+    const yestNYClose = yestMidnightUTC + b.nyClose * 3600000;
+    const yestNY = candles15m.filter(k => k.t >= yestNYOpen && k.t < yestNYClose);
+    if(yestNY.length < 2) return null;
+    return {
+      high: Math.max(...yestNY.map(k=>k.bh)),
+      low:  Math.min(...yestNY.map(k=>k.bl)),
+      highWick: Math.max(...yestNY.map(k=>k.h)),
+      lowWick:  Math.min(...yestNY.map(k=>k.l)),
+      complete: true, source: 'yesterday',
+      candleCount: yestNY.length
+    };
+  }
+
+  const curSession = getCurrentSession();
+  const isComplete = curSession === 'AFTER_HOURS' || curSession === 'ASIA';
+  return {
+    high: Math.max(...nyCandles.map(k=>k.bh)),
+    low:  Math.min(...nyCandles.map(k=>k.bl)),
+    highWick: Math.max(...nyCandles.map(k=>k.h)),
+    lowWick:  Math.min(...nyCandles.map(k=>k.l)),
+    complete: isComplete,
+    source: 'today',
+    candleCount: nyCandles.length
+  };
+}
+
+// NY levels — active during Asia session (next morning hunts above/below NY range)
+// Score 60 — lower than PDH/PDL so they lose dedupe battle when coincident
+function getNYLevels(candles15m){
+  const ny = getNYRange(candles15m);
+  if(!ny || !ny.complete) return [];
+  return [
+    {
+      price: ny.high,
+      bh: ny.high, bl: ny.high * 0.999,
+      type: 'resistance', strength: 'strong',
+      tested: false, score: 60, tf: 'SESSION',
+      source: 'NY High', isSessionLevel: true
+    },
+    {
+      price: ny.low,
+      bh: ny.low * 1.001, bl: ny.low,
+      type: 'support', strength: 'strong',
+      tested: false, score: 60, tf: 'SESSION',
+      source: 'NY Low', isSessionLevel: true
+    }
+  ];
+}
+
 // Compute London session high/low from 15m candles
 // London: 08:00–16:00 London time (DST-correct)
 // During NY session, London range is complete and acts as key level
@@ -1129,6 +1197,37 @@ function renderSessionBanner(candles15m, coinId){
     } else {
       html += `<div class="sb-row"><span class="sb-trap watch">Price inside London range — watch breakout direction</span></div>`;
     }
+  }
+
+  // Show NY range during Asia session (next morning hunting NY high/low)
+  const ny = getNYRange(candles15m);
+  if(ny && (session === 'ASIA' || session === 'AFTER_HOURS') && ny.complete && price > 0){
+    const nyRangeSize = ((ny.high - ny.low)/ny.low*100).toFixed(2);
+    const isAboveNY = price > ny.high;
+    const isBelowNY = price < ny.low;
+    const srcNote = ny.source === 'yesterday' ? ' (prev day)' : '';
+    html += `<div class="sb-row" style="margin-top:3px;border-top:1px solid rgba(255,255,255,.04);padding-top:5px">
+      <span class="sb-label">NY Range${srcNote}</span>
+      <span class="sb-range" style="color:#c9d6e3">$${fmt(ny.low)} – $${fmt(ny.high)}</span>
+      <span style="color:#4a5a6a;font-size:9px">(${nyRangeSize}%)</span>
+    </div>`;
+    if(isAboveNY){
+      html += `<div class="sb-row"><span class="sb-trap short">WATCH: Fail to gain NY High → SHORT</span></div>`;
+    } else if(isBelowNY){
+      html += `<div class="sb-row"><span class="sb-trap long">WATCH: Fail to lose NY Low → LONG</span></div>`;
+    } else {
+      html += `<div class="sb-row"><span class="sb-trap watch">Price inside NY range — watch breakout direction</span></div>`;
+    }
+  }
+
+  // Show NY range building during NY session
+  if(ny && session === 'NY' && !ny.complete && ny.candleCount >= 2 && price > 0){
+    const nyRangeSize = ((ny.high - ny.low)/ny.low*100).toFixed(2);
+    html += `<div class="sb-row" style="margin-top:3px;border-top:1px solid rgba(255,255,255,.04);padding-top:5px">
+      <span class="sb-label">NY Range (building)</span>
+      <span class="sb-range" style="color:#7b8fa8">$${fmt(ny.low)} – $${fmt(ny.high)}</span>
+      <span style="color:#4a5a6a;font-size:9px">(${nyRangeSize}%)</span>
+    </div>`;
   }
 
   // Show London range building during London session
@@ -1743,8 +1842,9 @@ function collectLevels(wC, dC, p, c15m){
   const pdhl  = findPDHL(dC).map(l=>({...l,tf:'PDH/PDL'}));
   const asia   = c15m ? getAsiaLevels(c15m).map(l=>({...l,tf:'SESSION'})) : [];
   const london = c15m ? getLondonLevels(c15m).map(l=>({...l,tf:'SESSION'})) : [];
+  const ny     = c15m ? getNYLevels(c15m).map(l=>({...l,tf:'SESSION'})) : [];
 
-  const all = [...wLvls,...dLvls,...pdhl,...asia,...london].sort((a,b)=>b.price-a.price);
+  const all = [...wLvls,...dLvls,...pdhl,...asia,...london,...ny].sort((a,b)=>b.price-a.price);
 
   // Dedupe within 0.4%
   const dd = [];
@@ -2277,7 +2377,7 @@ async function runCoin(coinId){
     if(m15Entry?.c){
       s.candles15m = m15Entry.c;
       // Combine Asia + London session levels for the 15m engine
-      s.asiaLevels = [...getAsiaLevels(m15Entry.c), ...getLondonLevels(m15Entry.c)];
+      s.asiaLevels = [...getAsiaLevels(m15Entry.c), ...getLondonLevels(m15Entry.c), ...getNYLevels(m15Entry.c)];
     }
     if(wCandles && dCandles) s.allLevels = collectLevels(wCandles, dCandles, s.price, s.candles15m);
     else if(dCandles)        s.allLevels = collectLevels(dCandles, dCandles, s.price, s.candles15m);
