@@ -128,6 +128,10 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 .tfc-prices{display:flex;gap:14px;margin-top:8px;padding-top:8px;border-top:1px solid #1a2230;flex-wrap:wrap}
 .tcp{font-family:'IBM Plex Mono',monospace;font-size:9px}
 .tcp-l{color:#3d5068;margin-right:4px}
+.tfc.collapsed .tfc-reason,.tfc.collapsed .tfc-prices,.tfc.collapsed .tfc-head+.tfc-head{display:none}
+.tfc .tfc-toggle{display:none;margin-left:auto;color:#3d5068;font-size:12px;cursor:pointer}
+.tfc.collapsed .tfc-toggle{display:inline}
+.tfc:not(.collapsed) .tfc-toggle{display:inline;transform:rotate(180deg)}
 
 /* TF TAB BAR */
 .tf-bar{display:flex;gap:6px;padding:10px 16px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid #1a2230;background:#0c0f14}
@@ -226,6 +230,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   <div class="topbar-r">
     <span id="tb-price">—</span>
     <span id="tb-chg"></span>
+    <button class="topbar-gear" onclick="toggleSettings()" style="background:none;border:none;color:#5d7a99;font-size:16px;cursor:pointer;padding:4px">⚙</button>
     <span class="dot" id="dot"></span>
   </div>
 </div>
@@ -237,63 +242,13 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
 
-<!-- PAGE: SIGNAL -->
-<div class="page active" id="page-signal">
-  <div class="hero wait" id="hero">
-    <div class="hero-glow"></div>
-    <div class="hero-top">
-      <div class="hero-dir" id="hero-dir">—</div>
-      <div class="hero-meta">
-        <div class="hero-tfs" id="hero-tfs">0 / 5 TFs</div>
-        <div class="hero-conf" id="hero-conf">—</div>
-        <div class="hero-conflbl" id="hero-conflbl">confidence</div>
-      </div>
-    </div>
-    <div class="hero-reason" id="hero-reason">Fetching candle data...</div>
-    <div class="hero-conflict" id="hero-conflict" style="display:none"></div>
+<!-- SETTINGS OVERLAY & PANEL -->
+<div id="settings-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:250" onclick="toggleSettings()"></div>
+<div id="settings-panel" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:260;background:#0a0e14;border-top:2px solid #00e676;border-radius:16px 16px 0 0;max-height:85vh;overflow-y:auto;padding:20px 16px calc(20px + env(safe-area-inset-bottom,0px))">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <span style="font-family:'Bebas Neue';font-size:20px;color:#00e676;letter-spacing:.1em">SETTINGS</span>
+    <button onclick="toggleSettings()" style="background:none;border:none;color:#5d7a99;font-size:22px;cursor:pointer">&times;</button>
   </div>
-  <div class="nm-card">
-    <div class="nm-lbl">Next Major Move · HTF</div>
-    <div class="nm-val UNCLEAR" id="nm-val">—</div>
-    <div class="nm-sub" id="nm-sub">Analysing weekly + daily bodies...</div>
-    <div class="nm-divider" id="nm-divider" style="display:none"></div>
-    <div class="nm-story-lbl" id="nm-story-lbl" style="display:none">SESSION STORY</div>
-    <div class="nm-story" id="nm-story" style="display:none"></div>
-  </div>
-  <div class="session-banner" id="session-banner" style="display:none"></div>
-  <div class="sh">Timeframe Breakdown</div>
-  <div class="tf-cards" id="tf-cards"></div>
-</div>
-
-<!-- PAGE: CHART -->
-<div class="page" id="page-chart">
-  <div class="tf-bar" id="tf-bar">
-    <button class="tf-btn" data-iv="W">1W</button>
-    <button class="tf-btn" data-iv="D">1D</button>
-    <button class="tf-btn active" data-iv="240">4H</button>
-    <button class="tf-btn" data-iv="60">1H</button>
-    <button class="tf-btn" data-iv="15">15m</button>
-  </div>
-  <div class="chart-wrap" id="tv-wrap"></div>
-</div>
-
-<!-- PAGE: LEVELS -->
-<div class="page" id="page-levels">
-  <div class="sh">Key Levels · Weekly + Daily + Session (V-Peaks + PDH/PDL + Asia/London/NY)</div>
-  <div id="lvl-list"><div class="empty">Loading levels...</div></div>
-</div>
-
-<!-- PAGE: STATS -->
-<div class="page" id="page-stats">
-  <div class="sh" style="display:flex;justify-content:space-between;align-items:center">
-    <span>Performance Stats</span>
-    <span id="stats-auto-lbl" style="font-size:9px;color:#3d5068;letter-spacing:.06em">AUTO-CHECKING</span>
-  </div>
-  <div id="stats-content"><div class="empty">Loading stats...</div></div>
-</div>
-
-<!-- PAGE: SETTINGS -->
-<div class="page" id="page-settings">
   <div class="sh">Notifications · Telegram</div>
 
   <div class="setting-row">
@@ -366,7 +321,82 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
       <label class="toggle"><input type="checkbox" id="alert-toast" checked><span class="toggle-slider"></span></label>
     </div>
   </div>
+
+  <div class="setting-row">
+    <div class="setting-lbl">Trade Settings</div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:4px">Min R:R Ratio</div>
+        <input class="setting-input" id="min-rr" type="number" step="0.1" value="1.5" style="width:120px" onchange="localStorage.setItem('min_rr',this.value)">
+      </div>
+      <div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:4px">Account Size ($)</div>
+        <input class="setting-input" id="account-size" type="number" value="10000" style="width:160px" onchange="localStorage.setItem('account_size',this.value)">
+      </div>
+      <div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:4px">Risk Per Trade (%)</div>
+        <input class="setting-input" id="risk-pct" type="number" step="0.1" value="1" style="width:120px" onchange="localStorage.setItem('risk_pct',this.value)">
+      </div>
+    </div>
+  </div>
 </div>
+
+<!-- PAGE: SIGNAL -->
+<div class="page active" id="page-signal">
+  <div class="hero wait" id="hero">
+    <div class="hero-glow"></div>
+    <div class="hero-top">
+      <div class="hero-dir" id="hero-dir">—</div>
+      <div class="hero-meta">
+        <div class="hero-tfs" id="hero-tfs">0 / 5 TFs</div>
+        <div class="hero-conf" id="hero-conf">—</div>
+        <div class="hero-conflbl" id="hero-conflbl">confidence</div>
+      </div>
+    </div>
+    <div class="hero-reason" id="hero-reason">Fetching candle data...</div>
+    <div class="hero-conflict" id="hero-conflict" style="display:none"></div>
+  </div>
+  <div class="nm-card">
+    <div class="nm-lbl">Next Major Move · HTF</div>
+    <div class="nm-val UNCLEAR" id="nm-val">—</div>
+    <div class="nm-sub" id="nm-sub">Analysing weekly + daily bodies...</div>
+    <div class="nm-divider" id="nm-divider" style="display:none"></div>
+    <div class="nm-story-lbl" id="nm-story-lbl" style="display:none">SESSION STORY</div>
+    <div class="nm-story" id="nm-story" style="display:none"></div>
+  </div>
+  <div class="session-banner" id="session-banner" style="display:none"></div>
+  <div class="sh">Timeframe Breakdown</div>
+  <div class="tf-cards" id="tf-cards"></div>
+</div>
+
+<!-- PAGE: CHART -->
+<div class="page" id="page-chart">
+  <div class="tf-bar" id="tf-bar">
+    <button class="tf-btn" data-iv="W">1W</button>
+    <button class="tf-btn" data-iv="D">1D</button>
+    <button class="tf-btn active" data-iv="240">4H</button>
+    <button class="tf-btn" data-iv="60">1H</button>
+    <button class="tf-btn" data-iv="15">15m</button>
+  </div>
+  <div class="chart-wrap" id="tv-wrap"></div>
+</div>
+
+<!-- PAGE: LEVELS -->
+<div class="page" id="page-levels">
+  <div class="sh">Key Levels · Weekly + Daily + Session (V-Peaks + PDH/PDL + Asia/London/NY)</div>
+  <div id="lvl-list"><div class="empty">Loading levels...</div></div>
+</div>
+
+<!-- PAGE: STATS -->
+<div class="page" id="page-stats">
+  <div class="sh" style="display:flex;justify-content:space-between;align-items:center">
+    <span>Performance Stats</span>
+    <span id="stats-auto-lbl" style="font-size:9px;color:#3d5068;letter-spacing:.06em">AUTO-CHECKING</span>
+  </div>
+  <div id="stats-content"><div class="empty">Loading stats...</div></div>
+</div>
+
+<!-- PAGE: SETTINGS -->
 
 <!-- LOG PAGE -->
 <div class="page" id="page-log">
@@ -398,9 +428,6 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   </button>
   <button class="nb" onclick="nav('stats',this)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>Stats
-  </button>
-  <button class="nb" onclick="nav('settings',this)">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Alerts
   </button>
 </nav>
 
@@ -481,6 +508,14 @@ function renderTopFromState(){
 }
 
 // ── SETTINGS ──────────────────────────────────────────────
+function toggleSettings(){
+  const p=document.getElementById('settings-panel');
+  const o=document.getElementById('settings-overlay');
+  const show=p.style.display==='none';
+  p.style.display=show?'block':'none';
+  o.style.display=show?'block':'none';
+}
+
 function loadSettings(){
   document.getElementById('tg-token').value  = localStorage.getItem('tg_token')||'';
   document.getElementById('tg-chatid').value = localStorage.getItem('tg_chatid')||'';
@@ -489,6 +524,9 @@ function loadSettings(){
   document.getElementById('alert-atlevel').checked = localStorage.getItem('alert_atlevel')==='true';
   document.getElementById('alert-htfonly').checked = localStorage.getItem('alert_htfonly')==='true';
   document.getElementById('alert-toast').checked   = localStorage.getItem('alert_toast')!=='false';
+  document.getElementById('min-rr').value = localStorage.getItem('min_rr') || '1.5';
+  document.getElementById('account-size').value = localStorage.getItem('account_size') || '10000';
+  document.getElementById('risk-pct').value = localStorage.getItem('risk_pct') || '1';
 }
 function saveTelegram(){
   const token  = document.getElementById('tg-token').value.trim();
@@ -502,7 +540,7 @@ function saveTelegram(){
   localStorage.setItem('alert_htfonly',document.getElementById('alert-htfonly').checked);
   localStorage.setItem('alert_toast',  document.getElementById('alert-toast').checked);
   document.getElementById('tg-status').textContent='Saving...';
-  sendTelegram('✅ DMC Signal alerts are active!\ntbracko.github.io/dmc-signal').then(ok=>{
+  sendTelegram('✅ DMS Signal alerts are active!\ntbracko.github.io/dms-signal').then(ok=>{
     document.getElementById('tg-status').textContent = ok ? '✓ Test message sent! Check Telegram.' : '✗ Failed — check token and chat ID';
   });
 }
@@ -571,7 +609,7 @@ function maybeAlert(sig, tf, type, level, target, rr, coinId, state){
     const msg = `${icon} <b>DMS AT LEVEL</b> · ${coinLabel} [${tf}]
 👁 Approaching $${fmt(level)} — watch 15m candle
 
-<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
+<a href="https://tbracko.github.io/dms-signal">Open DMS</a>`;
     sendTelegram(msg);
   } else {
     const rrLine  = rr    ? `
@@ -590,7 +628,7 @@ ${dir}
 Entry now: <b>$${fmt(px)}</b>
 Level: <b>$${fmt(level)}</b>${tpLine}${slLine}${rrLine}
 
-<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
+<a href="https://tbracko.github.io/dms-signal">Open DMS</a>`;
     sendTelegram(msg);
   }
 }
@@ -1922,7 +1960,7 @@ function renderHero(){
   document.getElementById('hero-conflbl').textContent=label+' CONF';
   const best=[...TFS].sort((a,b)=>b.w-a.w).find(tf=>results[tf.l]&&results[tf.l].type!=='NONE');
   const confPfx = activeW>0 ? `[${pct}% conf · ${label}] ` : '';
-  document.getElementById('hero-reason').textContent=best?(confPfx+results[best.l].reason):'No active DMC setup';
+  document.getElementById('hero-reason').textContent=best?(confPfx+results[best.l].reason):'No active DMS setup';
 
   // ── CONFLICT WARNING ──────────────────────────────────────────────────
   // Show a warning on the hero card when the 15m signal contradicts
@@ -2006,12 +2044,13 @@ function renderNM(nm){
 function renderCards(){
   document.getElementById('tf-cards').innerHTML=TFS.map(tf=>{
     const r=results[tf.l];
-    if(!r)return`<div class="tfc none"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type NONE">···</span><span class="tfc-sig WAIT" style="margin-left:auto">—</span></div><div class="tfc-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div></div>`;
+    const isCollapsed = tf.l !== '15m' ? ' collapsed' : '';
+    if(!r)return`<div class="tfc none${isCollapsed}" onclick="this.classList.toggle('collapsed')"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type NONE">···</span><span class="tfc-toggle">▼</span><span class="tfc-sig WAIT" style="margin-left:auto">—</span></div><div class="tfc-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div></div>`;
     const cls=r.sig==='LONG'?'long':r.sig==='SHORT'?'short':'neutral';
     const tl=r.type==='FAIL_GAIN'?'FAIL TO GAIN':r.type==='FAIL_LOSE'?'FAIL TO LOSE':r.type==='BLIND_ENTRY'?'BLIND ENTRY':r.type==='BREAKOUT'?'BREAKOUT':r.type==='AT_LEVEL'?'AT LEVEL':'NO SETUP';
     const rrBadge=r.rr?`<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:2px 6px;border-radius:4px;background:rgba(255,193,7,.1);color:#ffc107;border:1px solid rgba(255,193,7,.2);margin-left:auto">R:R ${r.rr}</span>`:'';
     const lvlScore=r.score?`<span style="font-family:'IBM Plex Mono',monospace;font-size:8px;color:#3d5068;margin-left:6px">score ${r.score}</span>`:'';
-    return`<div class="tfc ${cls}"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type ${r.type}">${tl}</span>${rrBadge}</div><div class="tfc-head" style="margin-top:5px;margin-bottom:0">${r.sig!=='NEUTRAL'?`<span class="tfc-sig ${r.sig}">${r.sig}</span>`:''}<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:${r.strength==='strong'?'#00e676':r.strength==='med'?'#ffc107':'#3d5068'};margin-left:4px">${r.strength||''}</span>${lvlScore}</div><div class="tfc-reason" style="margin-top:6px">${r.reason}</div>${r.detail?`<div class="tfc-reason" style="color:#3d5068;margin-top:3px;font-size:8px">${r.detail}</div>`:''
+    return`<div class="tfc ${cls}${isCollapsed}" onclick="this.classList.toggle('collapsed')"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type ${r.type}">${tl}</span><span class="tfc-toggle">▼</span>${rrBadge}</div><div class="tfc-head" style="margin-top:5px;margin-bottom:0">${r.sig!=='NEUTRAL'?`<span class="tfc-sig ${r.sig}">${r.sig}</span>`:''}<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:${r.strength==='strong'?'#00e676':r.strength==='med'?'#ffc107':'#3d5068'};margin-left:4px">${r.strength||''}</span>${lvlScore}</div><div class="tfc-reason" style="margin-top:6px">${r.reason}</div>${r.detail?`<div class="tfc-reason" style="color:#3d5068;margin-top:3px;font-size:8px">${r.detail}</div>`:''
     }${r.level?`<div class="tfc-prices"><span class="tcp"><span class="tcp-l">LVL</span>$${fmt(r.level)}</span>${r.target?`<span class="tcp"><span class="tcp-l">TP</span><span style="color:${r.sig==='LONG'?'#00e676':'#ff3d5a'}">$${fmt(r.target)}</span></span>`:''  }${r.stopPrice?`<span class="tcp"><span class="tcp-l">SL</span><span style="color:#ff6b6b">$${fmt(r.stopPrice)}</span></span>`:''}</div>`:''}</div>`;
   }).join('');
 }
@@ -2540,15 +2579,57 @@ function manualRefresh(){
 }
 function schedule(){} // no-op, replaced by scheduleAll
 
+// ── WEBSOCKET: Real-time 15m candle updates ──────────────
+function connectWS(coinId){
+  const s=coinState[coinId];
+  const sym=COINS[coinId].bnSym.toLowerCase();
+  try{
+    const ws=new WebSocket('wss://stream.binance.com:9443/ws/'+sym+'@kline_15m');
+    ws.onmessage=function(evt){
+      try{
+        const d=JSON.parse(evt.data);
+        if(!d.k) return;
+        const k=d.k;
+        const candle={t:k.t,o:+k.o,h:+k.h,l:+k.l,c:+k.c,bh:Math.max(+k.o,+k.c),bl:Math.min(+k.o,+k.c)};
+        // Update price immediately
+        s.price=+k.c;
+        if(coinId===activeCoin){
+          document.getElementById('tb-price').textContent='$'+fmt(+k.c);
+        }
+        // Update last 15m candle in state
+        if(s.candles15m&&s.candles15m.length){
+          const last=s.candles15m[s.candles15m.length-1];
+          if(last.t===candle.t) s.candles15m[s.candles15m.length-1]=candle;
+          else if(k.x) s.candles15m.push(candle); // new candle closed
+        }
+        // On candle CLOSE, re-run 15m signal
+        if(k.x && s.candles15m && s.candles15m.length>20){
+          const dCandles=null; // will use cached
+          processTF(4, s.candles15m, dCandles, coinId);
+          checkAutoOutcomes(coinId);
+        }
+      }catch(e){console.warn('WS parse',e);}
+    };
+    ws.onclose=function(){
+      console.log('WS closed for',coinId,'— reconnecting in 5s');
+      setTimeout(()=>connectWS(coinId),5000);
+    };
+    ws.onerror=function(){ws.close();};
+  }catch(e){console.warn('WS error',coinId,e);}
+}
+
 window.addEventListener('DOMContentLoaded',()=>{
   loadSettings();
   renderLog();
   document.getElementById('tf-cards').innerHTML=TFS.map(tf=>`<div class="tfc none"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type NONE">···</span><span class="tfc-sig WAIT" style="margin-left:auto">—</span></div><div class="tfc-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div></div>`).join('');
-  // Launch all coins with small stagger — Binance handles parallel requests fine
-  // BTC first (active coin, renders UI), then ETH + SOL with 2s gaps
-  runCoin('bitcoin').then(() => scheduleAll());
-  setTimeout(() => runCoin('ethereum'), 2000);
-  setTimeout(() => runCoin('solana'),   4000);
+  // BTC first (active coin, renders UI immediately), then ETH + SOL staggered
+  // Staggering avoids Binance rate limits from 15+ simultaneous requests
+  runCoin('bitcoin').then(() => {
+    scheduleAll();
+    connectWS('bitcoin');
+  });
+  setTimeout(() => runCoin('ethereum').then(() => connectWS('ethereum')), 2000);
+  setTimeout(() => runCoin('solana').then(() => connectWS('solana')), 4000);
 });
 </script>
 </body>
