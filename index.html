@@ -384,7 +384,8 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <div class="page" id="page-log">
   <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px 4px">
     <div class="sh" style="padding:0">Signal History</div>
-    <button onclick="clearLog()" style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#3d5068;background:none;border:1px solid #1a2230;border-radius:5px;padding:5px 10px;cursor:pointer;letter-spacing:.06em">CLEAR</button>
+    <button onclick="clearDedup()" style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:5px 12px;border-radius:6px;border:1px solid rgba(255,152,0,.3);background:rgba(255,152,0,.06);color:#ff9800;cursor:pointer;margin-right:6px">Clear Signal Lock</button>
+        <button onclick="clearLog()" style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#3d5068;background:none;border:1px solid #1a2230;border-radius:5px;padding:5px 10px;cursor:pointer;letter-spacing:.06em">CLEAR</button>
   </div>
   <div style="padding:4px 16px 10px;font-family:'IBM Plex Mono',monospace;font-size:9px;color:#3d5068">
     Persists across sessions · last 50 signals
@@ -534,6 +535,8 @@ async function sendTelegram(msg){
 }
 
 function maybeAlert(sig, tf, type, level, target, rr, coinId, state){
+  // Also respect localStorage dedup for Telegram (prevents re-alert on refresh)
+  if(isDedupSuppressed(coinId, tf, type, level)) return;
   coinId = coinId || activeCoin;
   state = state || coinState[coinId];
   const alertKey = `${coinId}_${tf}_${type}_${Math.round(level)}`;
@@ -2037,7 +2040,32 @@ function renderLevels(){
 }
 
 // ── SIGNAL LOG (persisted to localStorage) ───────────────
-const LOG_KEY = 'dms_signal_log';
+const LOG_KEY    = 'dms_signal_log';
+const DEDUP_KEY  = 'dms_signal_dedup'; // persists across refreshes
+
+function loadDedup(){ try{ return JSON.parse(localStorage.getItem(DEDUP_KEY)||'{}'); }catch{ return {}; } }
+function saveDedup(d){ localStorage.setItem(DEDUP_KEY, JSON.stringify(d)); }
+
+// Window: 4h for trap signals, 8h for blind entries
+// Returns true if signal was already fired recently and should be suppressed
+function isDedupSuppressed(coinId, tf, type, level){
+  const d = loadDedup();
+  const key = `${coinId}:${tf}:${type}:${Math.round(level)}`;
+  const window = type === 'BLIND_ENTRY' ? 28800000 : 14400000; // 8h / 4h
+  const now = Date.now();
+  // Prune stale entries while we're here
+  let changed = false;
+  for(const k of Object.keys(d)){ if(now - d[k] > 28800000){ delete d[k]; changed=true; } }
+  if(changed) saveDedup(d);
+  return d[key] && (now - d[key]) < window;
+}
+
+function markDedupFired(coinId, tf, type, level){
+  const d = loadDedup();
+  const key = `${coinId}:${tf}:${type}:${Math.round(level)}`;
+  d[key] = Date.now();
+  saveDedup(d);
+}
 const MAX_LOG = 50;
 
 function loadLog(){
@@ -2053,11 +2081,14 @@ function addLog(sig, tf, reason, type, level, target, rr, stopPrice, coinId){
   const dateStr = now.toLocaleDateString('en-GB',{day:'2-digit',month:'short'});
   const timeStr = now.toTimeString().slice(0,5);
 
-  // Avoid duplicate: same sig+tf+level within last 2 hours
-  const recent = entries[0];
-  if(recent && recent.sig===sig && recent.tf===tf && recent.coin===coinId
-     && Math.abs((recent.level||0)-(level||0))<10
-     && (now - new Date(recent.ts)) < 7200000) return;
+  // Avoid duplicate: scan last 20 entries for same sig+tf+type+level+coin within 4h
+  const window4h = 14400000;
+  const recentDup = entries.slice(0,20).find(e =>
+    e.sig === sig && e.tf === tf && e.coin === coinId && e.type === type
+    && Math.abs((e.level||0) - (level||0)) < level * 0.005
+    && (now - new Date(e.ts)) < window4h
+  );
+  if(recentDup) return;
 
   const s = coinState[coinId];
   const entry = {
@@ -2101,6 +2132,13 @@ function clearLog(){
   if(!confirm('Clear all signal history?')) return;
   localStorage.removeItem(LOG_KEY);
   renderLog();
+}
+
+function clearDedup(){
+  localStorage.removeItem(DEDUP_KEY);
+  // Also clear in-memory sentAlerts for all coins
+  Object.values(coinState).forEach(s => s.sentAlerts = {});
+  showToast('Signal lock cleared', 'All signals can now re-fire', false);
 }
 
 function renderLog(){
@@ -2385,16 +2423,13 @@ function processTF(i, candles, dCandles, coinId){
   const d = dms(candles, a, dCandles, tf.l, htfCarrier);
   s.results[tf.l] = d;
   // Alerts fire for all coins regardless of active view
-  if(d.type!=='NONE'){
-    // 1 ATR dedup: same level (within 0.5%) can't re-fire until price moves 1 ATR away from it
-    const levelKey = tf.l + '_' + Math.round(d.level);
-    const lastPrice = s.lastSignalLevel[levelKey];
-    const atrVal = atr(candles);
-    const movedFarEnough = !lastPrice || Math.abs(s.price - lastPrice) >= atrVal;
-    if(movedFarEnough){
-      s.lastSignalLevel[levelKey] = s.price; // record current price at signal time
+  if(d.type!=='NONE' && d.type!=='AT_LEVEL'){
+    // PRIMARY DEDUP: localStorage-backed — survives page refreshes
+    // Same coin+tf+type+level can't re-fire within 4h (8h for blind entries)
+    if(!isDedupSuppressed(coinId, tf.l, d.type, d.level)){
+      markDedupFired(coinId, tf.l, d.type, d.level);
       maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, coinId, s);
-      if(d.type!=='AT_LEVEL') addLog(d.sig, tf.l, d.reason, d.type, d.level, d.target, d.rr, d.stopPrice, coinId);
+      addLog(d.sig, tf.l, d.reason, d.type, d.level, d.target, d.rr, d.stopPrice, coinId);
     }
   }
   // Only re-render UI if this coin is the one currently being viewed
