@@ -7,6 +7,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>DMS Signal · BTC</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;600&family=Sora:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js" defer></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{background:#07090d;color:#dce8f5;font-family:'Sora',system-ui,sans-serif;min-height:100%;-webkit-text-size-adjust:100%}
@@ -331,11 +332,46 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
       </div>
       <div>
         <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:4px">Account Size ($)</div>
-        <input class="setting-input" id="account-size" type="number" value="10000" style="width:160px" onchange="localStorage.setItem('account_size',this.value)">
+        <input class="setting-input" id="account-size" type="number" value="100" style="width:160px" onchange="localStorage.setItem('account_size',this.value)">
       </div>
       <div>
         <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:4px">Risk Per Trade (%)</div>
         <input class="setting-input" id="risk-pct" type="number" step="0.1" value="1" style="width:120px" onchange="localStorage.setItem('risk_pct',this.value)">
+      </div>
+    </div>
+  </div>
+
+  <div class="sh" style="margin-top:16px">Auto-Trading · Hyperliquid</div>
+
+  <div class="setting-row">
+    <div class="setting-lbl">Enable Auto-Trading</div>
+    <div class="toggle-row">
+      <div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:2px">Execute trades on Hyperliquid</div>
+        <div style="font-family:'Sora',sans-serif;font-size:11px;color:#3d5068">Signals with >50% confidence will auto-execute</div>
+      </div>
+      <label class="toggle"><input type="checkbox" id="hl-auto-trade" onchange="localStorage.setItem('hl_auto_trade',this.checked);if(typeof HL!=='undefined')HL.enabled=this.checked"><span class="toggle-slider"></span></label>
+    </div>
+  </div>
+
+  <div class="setting-row">
+    <div class="setting-lbl">Wallet Private Key</div>
+    <div style="font-family:'Sora',sans-serif;font-size:11px;color:#ff6b6b;margin-bottom:6px">Use an API wallet, NOT your main wallet. Key stored in localStorage only.</div>
+    <input class="setting-input" id="hl-wallet-key" type="password" placeholder="0xabc123..." autocomplete="off" autocorrect="off" spellcheck="false" style="font-size:11px">
+    <button class="setting-save" onclick="saveHLWallet()">SAVE &amp; CONNECT</button>
+    <div class="setting-status" id="hl-status"></div>
+  </div>
+
+  <div class="setting-row">
+    <div class="setting-lbl">Safety Limits</div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:4px">Max Trades Per Day</div>
+        <input class="setting-input" id="hl-max-trades" type="number" value="10" style="width:120px" onchange="localStorage.setItem('hl_max_trades',this.value)">
+      </div>
+      <div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:4px">Min Confidence (%)</div>
+        <input class="setting-input" id="hl-min-conf" type="number" value="50" style="width:120px" onchange="localStorage.setItem('hl_min_conf',this.value)">
       </div>
     </div>
   </div>
@@ -525,8 +561,18 @@ function loadSettings(){
   document.getElementById('alert-htfonly').checked = localStorage.getItem('alert_htfonly')==='true';
   document.getElementById('alert-toast').checked   = localStorage.getItem('alert_toast')!=='false';
   document.getElementById('min-rr').value = localStorage.getItem('min_rr') || '1.5';
-  document.getElementById('account-size').value = localStorage.getItem('account_size') || '10000';
+  document.getElementById('account-size').value = localStorage.getItem('account_size') || '100';
   document.getElementById('risk-pct').value = localStorage.getItem('risk_pct') || '1';
+  // Hyperliquid settings
+  document.getElementById('hl-auto-trade').checked = localStorage.getItem('hl_auto_trade') === 'true';
+  document.getElementById('hl-max-trades').value = localStorage.getItem('hl_max_trades') || '10';
+  document.getElementById('hl-min-conf').value = localStorage.getItem('hl_min_conf') || '50';
+  // Don't display the key, just show status if configured
+  if(localStorage.getItem('hl_wallet_key')){
+    document.getElementById('hl-wallet-key').value = localStorage.getItem('hl_wallet_key');
+    document.getElementById('hl-status').textContent = 'Key saved · will connect on startup';
+    document.getElementById('hl-status').style.color = '#ffc107';
+  }
 }
 function saveTelegram(){
   const token  = document.getElementById('tg-token').value.trim();
@@ -2459,6 +2505,19 @@ function processTF(i, candles, dCandles, coinId){
       markDedupFired(coinId, tf.l, d.type, d.level);
       maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, coinId, s);
       addLog(d.sig, tf.l, d.reason, d.type, d.level, d.target, d.rr, d.stopPrice, coinId);
+      // ── AUTO-TRADE: trigger Hyperliquid execution if enabled ──
+      if(HL.enabled && HL.wallet && d.sig !== 'NEUTRAL' && d.stopPrice){
+        // Compute overall coin confidence (same formula as renderHero)
+        let wL=0, wS=0, aW=0;
+        TFS.forEach(t=>{ const r=s.results[t.l]; if(!r)return; if(r.type!=='NONE')aW+=t.w; if(r.sig==='LONG')wL+=t.w; if(r.sig==='SHORT')wS+=t.w; });
+        const conf = aW>0 ? Math.round(Math.max(wL,wS)/aW*100) : 0;
+        const minConf = parseInt(localStorage.getItem('hl_min_conf') || '50');
+        // Only trade if confidence meets threshold and signal direction aligns with majority
+        const majorSig = wL > wS ? 'LONG' : wS > wL ? 'SHORT' : null;
+        if(conf >= minConf && d.sig === majorSig){
+          HL.executeTrade(coinId, { ...d, tf: tf.l }, conf).catch(e=>console.error('HL auto-trade error:', e));
+        }
+      }
     }
   }
   // Only re-render UI if this coin is the one currently being viewed
@@ -2622,6 +2681,254 @@ function connectWS(coinId){
   }catch(e){console.warn('WS error',coinId,e);}
 }
 
+// ── HYPERLIQUID AUTO-TRADING MODULE ───────────────────────
+const HL = {
+  API: 'https://api.hyperliquid.xyz',
+  wallet: null,
+  address: '',
+  assetMap: {},        // "BTC" -> index
+  szDecimals: {},      // "BTC" -> decimal places for size
+  enabled: false,
+  tradesToday: 0,
+  lastTradeDay: '',
+  activeTrades: {},    // coinId -> { oid, side, size, asset }
+
+  // ── Minimal msgpack encoder (handles our specific action structures) ──
+  msgpack(obj) {
+    const buf = [];
+    const writeStr = (s) => {
+      const b = new TextEncoder().encode(s);
+      if (b.length < 32) buf.push(0xa0 | b.length);
+      else if (b.length < 256) { buf.push(0xd9); buf.push(b.length); }
+      else { buf.push(0xda); buf.push(b.length >> 8); buf.push(b.length & 0xff); }
+      for (const c of b) buf.push(c);
+    };
+    const writeInt = (n) => {
+      if (n >= 0 && n < 128) { buf.push(n); }
+      else if (n >= 0 && n < 256) { buf.push(0xcc); buf.push(n); }
+      else if (n >= 0 && n < 65536) { buf.push(0xcd); buf.push(n >> 8); buf.push(n & 0xff); }
+      else if (n >= 0) { buf.push(0xce); buf.push((n >>> 24) & 0xff); buf.push((n >>> 16) & 0xff); buf.push((n >>> 8) & 0xff); buf.push(n & 0xff); }
+      else if (n >= -32) { buf.push(n & 0xff); }
+      else if (n >= -128) { buf.push(0xd0); buf.push(n & 0xff); }
+    };
+    const enc = (v) => {
+      if (v === null || v === undefined) { buf.push(0xc0); }
+      else if (typeof v === 'boolean') { buf.push(v ? 0xc3 : 0xc2); }
+      else if (typeof v === 'number' && Number.isInteger(v)) { writeInt(v); }
+      else if (typeof v === 'string') { writeStr(v); }
+      else if (Array.isArray(v)) {
+        if (v.length < 16) buf.push(0x90 | v.length); else { buf.push(0xdc); buf.push(v.length >> 8); buf.push(v.length & 0xff); }
+        for (const item of v) enc(item);
+      } else if (typeof v === 'object') {
+        const keys = Object.keys(v);
+        if (keys.length < 16) buf.push(0x80 | keys.length); else { buf.push(0xde); buf.push(keys.length >> 8); buf.push(keys.length & 0xff); }
+        for (const k of keys) { enc(k); enc(v[k]); }
+      }
+    };
+    enc(obj);
+    return new Uint8Array(buf);
+  },
+
+  // ── Initialize: create wallet + fetch asset meta ──
+  async init() {
+    const key = localStorage.getItem('hl_wallet_key');
+    if (!key || typeof ethers === 'undefined') return false;
+    try {
+      this.wallet = new ethers.Wallet(key);
+      this.address = this.wallet.address;
+      await this.fetchMeta();
+      this.enabled = localStorage.getItem('hl_auto_trade') === 'true';
+      this.tradesToday = 0;
+      this.lastTradeDay = new Date().toDateString();
+      console.log('HL ready:', this.address, '| Assets:', Object.keys(this.assetMap).join(', '));
+      return true;
+    } catch (e) {
+      console.error('HL init failed:', e);
+      return false;
+    }
+  },
+
+  // ── Fetch asset universe (maps name -> index) ──
+  async fetchMeta() {
+    const res = await fetch(this.API + '/info', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'meta' })
+    });
+    const meta = await res.json();
+    meta.universe.forEach((a, i) => {
+      this.assetMap[a.name] = i;
+      this.szDecimals[a.name] = a.szDecimals;
+    });
+  },
+
+  // ── Get account balance ──
+  async getBalance() {
+    if (!this.wallet) return 0;
+    const res = await fetch(this.API + '/info', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'clearinghouseState', user: this.address })
+    });
+    const data = await res.json();
+    return parseFloat(data.marginSummary?.accountValue || '0');
+  },
+
+  // ── Compute action hash for phantom agent signing ──
+  computeActionHash(action, nonce, vaultAddress) {
+    const packed = this.msgpack(action);
+    // Nonce as 8 bytes big-endian
+    const nonceBuf = new Uint8Array(8);
+    let n = BigInt(nonce);
+    for (let i = 7; i >= 0; i--) { nonceBuf[i] = Number(n & 0xFFn); n >>= 8n; }
+    // Vault address (20 bytes) or single zero byte
+    const vaultBuf = vaultAddress ? ethers.utils.arrayify(vaultAddress) : new Uint8Array([0]);
+    // Concatenate: packed + nonce + vault
+    const combined = new Uint8Array(packed.length + nonceBuf.length + vaultBuf.length);
+    combined.set(packed);
+    combined.set(nonceBuf, packed.length);
+    combined.set(vaultBuf, packed.length + nonceBuf.length);
+    return ethers.utils.keccak256(combined);
+  },
+
+  // ── Sign L1 action (phantom agent EIP-712) ──
+  async signL1Action(action, nonce) {
+    const hash = this.computeActionHash(action, nonce, null);
+    const domain = {
+      name: 'Exchange', version: '1',
+      chainId: 1337,
+      verifyingContract: '0x0000000000000000000000000000000000000000'
+    };
+    const types = {
+      Agent: [
+        { name: 'source', type: 'string' },
+        { name: 'connectionId', type: 'bytes32' }
+      ]
+    };
+    const value = { source: 'a', connectionId: hash };
+    const sig = await this.wallet._signTypedData(domain, types, value);
+    return ethers.utils.splitSignature(sig);
+  },
+
+  // ── Place a single order ──
+  async placeOrder(asset, isBuy, size, price, orderType, reduceOnly = false) {
+    const assetIdx = this.assetMap[asset];
+    if (assetIdx === undefined) throw new Error('Unknown asset: ' + asset);
+    const szDec = this.szDecimals[asset] || 3;
+    const sizeStr = parseFloat(size.toFixed(szDec)).toString();
+    const priceStr = price >= 10 ? parseFloat(price.toFixed(1)).toString() : parseFloat(price.toFixed(4)).toString();
+    // Build order wire (key order matters for msgpack hash!)
+    const orderWire = { a: assetIdx, b: isBuy, p: priceStr, s: sizeStr, r: reduceOnly, t: orderType, c: null };
+    const action = { type: 'order', orders: [orderWire], grouping: 'na' };
+    const nonce = Date.now();
+    const signature = await this.signL1Action(action, nonce);
+    const res = await fetch(this.API + '/exchange', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, nonce, signature: { r: signature.r, s: signature.s, v: signature.v } })
+    });
+    const result = await res.json();
+    console.log('HL order:', asset, isBuy ? 'BUY' : 'SELL', sizeStr, '@', priceStr, '→', result);
+    return result;
+  },
+
+  // ── Execute full trade: entry + SL + TP ──
+  async executeTrade(coinId, signal, confidence) {
+    const SYM = { bitcoin: 'BTC', ethereum: 'ETH', solana: 'SOL' };
+    const asset = SYM[coinId];
+    if (!asset || !this.enabled || !this.wallet) return null;
+
+    // Daily trade limit
+    const today = new Date().toDateString();
+    if (today !== this.lastTradeDay) { this.tradesToday = 0; this.lastTradeDay = today; }
+    const maxTrades = parseInt(localStorage.getItem('hl_max_trades') || '10');
+    if (this.tradesToday >= maxTrades) {
+      console.warn('HL: daily trade limit reached (' + maxTrades + ')');
+      return null;
+    }
+
+    // Skip if already in a position for this coin
+    if (this.activeTrades[coinId]) {
+      console.log('HL: already in trade for', coinId);
+      return null;
+    }
+
+    const { sig, level, target, stopPrice, rr, type } = signal;
+    if (!stopPrice) { console.warn('HL: no stop price, skipping'); return null; }
+
+    const isBuy = sig === 'LONG';
+    const currentPrice = coinState[coinId].price;
+
+    // Position sizing: risk-based
+    const accountSize = parseFloat(localStorage.getItem('account_size') || '100');
+    const riskPct = parseFloat(localStorage.getItem('risk_pct') || '1');
+    const riskAmount = accountSize * riskPct / 100;
+    const slDistance = Math.abs(currentPrice - stopPrice);
+    if (slDistance < currentPrice * 0.001) { console.warn('HL: SL too tight'); return null; }
+
+    const size = riskAmount / slDistance;
+    const szDec = this.szDecimals[asset] || 3;
+    const minSize = Math.pow(10, -szDec);
+    if (size < minSize) { console.warn('HL: size too small:', size); return null; }
+
+    // Entry: IOC limit with 0.5% slippage
+    const slip = currentPrice * 0.005;
+    const entryPx = isBuy ? currentPrice + slip : currentPrice - slip;
+
+    try {
+      // 1. Market entry
+      const entryRes = await this.placeOrder(asset, isBuy, size, entryPx, { limit: { tif: 'Ioc' } });
+      if (entryRes.status === 'err') { console.error('HL entry failed:', entryRes.response); return null; }
+
+      // 2. Stop Loss (trigger, reduce only)
+      const slPx = isBuy ? stopPrice * 0.98 : stopPrice * 1.02; // 2% protection beyond stop
+      await this.placeOrder(asset, !isBuy, size, slPx,
+        { trigger: { triggerPx: (isBuy ? stopPrice : stopPrice).toFixed(1), isMarket: true, tpsl: 'sl' } }, true);
+
+      // 3. Take Profit (if target exists)
+      if (target) {
+        const tpPx = isBuy ? target * 1.02 : target * 0.98;
+        await this.placeOrder(asset, !isBuy, size, tpPx,
+          { trigger: { triggerPx: target.toFixed(1), isMarket: true, tpsl: 'tp' } }, true);
+      }
+
+      // Track active trade
+      this.activeTrades[coinId] = { asset, side: sig, size, entry: currentPrice, sl: stopPrice, tp: target };
+      this.tradesToday++;
+
+      // Log to signal log
+      const tradeNote = `AUTO-TRADE: ${sig} ${asset} | Size: ${size.toFixed(szDec)} | Entry: $${fmt(currentPrice)} | SL: $${fmt(stopPrice)}${target ? ' | TP: $' + fmt(target) : ''} | R:R ${rr || '?'}`;
+      console.log(tradeNote);
+
+      // Toast notification
+      showToast('TRADE: ' + sig + ' ' + asset + ' @ $' + fmt(currentPrice), 'SL: $' + fmt(stopPrice) + (target ? ' | TP: $' + fmt(target) : ''), sig === 'SHORT');
+
+      return entryRes;
+    } catch (e) {
+      console.error('HL trade error:', e);
+      showToast('TRADE FAILED: ' + e.message);
+      return null;
+    }
+  }
+};
+
+// ── Save Hyperliquid wallet & test connection ──
+async function saveHLWallet() {
+  const keyEl = document.getElementById('hl-wallet-key');
+  const statusEl = document.getElementById('hl-status');
+  const key = keyEl.value.trim();
+  if (!key) { statusEl.textContent = 'Enter a private key'; statusEl.style.color = '#ff3d5a'; return; }
+  if (!key.startsWith('0x') || key.length !== 66) { statusEl.textContent = 'Invalid key format (need 0x + 64 hex chars)'; statusEl.style.color = '#ff3d5a'; return; }
+  localStorage.setItem('hl_wallet_key', key);
+  statusEl.textContent = 'Connecting...'; statusEl.style.color = '#ffc107';
+  try {
+    const ok = await HL.init();
+    if (!ok) throw new Error('Init failed');
+    const bal = await HL.getBalance();
+    statusEl.textContent = 'Connected: ' + HL.address.slice(0, 6) + '...' + HL.address.slice(-4) + ' | Balance: $' + bal.toFixed(2);
+    statusEl.style.color = '#00e676';
+  } catch (e) {
+    statusEl.textContent = 'Failed: ' + e.message; statusEl.style.color = '#ff3d5a';
+  }
+}
+
 window.addEventListener('DOMContentLoaded',()=>{
   loadSettings();
   renderLog();
@@ -2634,6 +2941,18 @@ window.addEventListener('DOMContentLoaded',()=>{
   });
   setTimeout(() => runCoin('ethereum').then(() => connectWS('ethereum')), 2000);
   setTimeout(() => runCoin('solana').then(() => connectWS('solana')), 4000);
+  // Initialize Hyperliquid auto-trading (non-blocking)
+  if(localStorage.getItem('hl_wallet_key')){
+    HL.init().then(ok => {
+      if(ok){
+        const st = document.getElementById('hl-status');
+        HL.getBalance().then(b => {
+          st.textContent = 'Connected: ' + HL.address.slice(0,6) + '...' + HL.address.slice(-4) + ' | $' + b.toFixed(2);
+          st.style.color = '#00e676';
+        }).catch(() => { st.textContent = 'Connected (balance fetch failed)'; st.style.color = '#ffc107'; });
+      }
+    }).catch(e => console.warn('HL auto-init failed:', e));
+  }
 });
 </script>
 </body>
