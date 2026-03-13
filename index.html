@@ -2454,9 +2454,16 @@ function processTF(i, candles, dCandles, coinId){
     // PRIMARY DEDUP: localStorage-backed — survives page refreshes
     // Same coin+tf+type+level can't re-fire within 4h (8h for blind entries)
     if(!isDedupSuppressed(coinId, tf.l, d.type, d.level)){
-      markDedupFired(coinId, tf.l, d.type, d.level);
       maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, coinId, s);
+      markDedupFired(coinId, tf.l, d.type, d.level); // mark AFTER alert fires so maybeAlert's own dedup check passes
       addLog(d.sig, tf.l, d.reason, d.type, d.level, d.target, d.rr, d.stopPrice, coinId);
+    }
+  }
+  // AT_LEVEL watch zone alerts (opt-in via alert_atlevel setting)
+  if(d.type==='AT_LEVEL'){
+    if(!isDedupSuppressed(coinId, tf.l, d.type, d.level)){
+      maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, coinId, s);
+      markDedupFired(coinId, tf.l, d.type, d.level);
     }
   }
   // Only re-render UI if this coin is the one currently being viewed
