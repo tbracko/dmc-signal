@@ -1907,25 +1907,27 @@ function nextMove(h4C, h1C){
 }
 
 // ── COLLECT ALL LEVELS FOR LEVELS PAGE ───────────────────
-function collectLevels(wC, dC, p, c15m){
-  const wLvls = findVPeaks(wC,'1W').map(l=>({...l,tf:'1W'}));
-  const dLvls = findVPeaks(dC,'1D').map(l=>({...l,tf:'1D'}));
-  const pdhl  = findPDHL(dC).map(l=>({...l,tf:'PDH/PDL'}));
+function collectLevels(wC, dC, p, c15m, h4C, h1C){
+  const wLvls  = findVPeaks(wC,'1W').map(l=>({...l,tf:'1W'}));
+  const dLvls  = findVPeaks(dC,'1D').map(l=>({...l,tf:'1D'}));
+  const h4Lvls = h4C ? findVPeaks(h4C,'4H').map(l=>({...l,tf:'4H'})) : [];
+  const h1Lvls = h1C ? findVPeaks(h1C,'1H').map(l=>({...l,tf:'1H'})) : [];
+  const pdhl   = findPDHL(dC).map(l=>({...l,tf:'PDH/PDL'}));
   const asia   = c15m ? getAsiaLevels(c15m).map(l=>({...l,tf:'SESSION'})) : [];
   const london = c15m ? getLondonLevels(c15m).map(l=>({...l,tf:'SESSION'})) : [];
   const ny     = c15m ? getNYLevels(c15m).map(l=>({...l,tf:'SESSION'})) : [];
 
-  const all = [...wLvls,...dLvls,...pdhl,...asia,...london,...ny].sort((a,b)=>b.price-a.price);
+  const all = [...wLvls,...dLvls,...h4Lvls,...h1Lvls,...pdhl,...asia,...london,...ny].sort((a,b)=>b.price-a.price);
 
-  // Dedupe within 0.4%
+  // Dedupe within 0.3% — tighter threshold since 4H/1H levels are closer together
   const dd = [];
   for(const l of all){
-    if(!dd.find(d=>Math.abs(d.price-l.price)/l.price<0.004)) dd.push(l);
+    if(!dd.find(d=>Math.abs(d.price-l.price)/l.price<0.003)) dd.push(l);
   }
 
-  // Return 8 above + 8 below current price, sorted by proximity
-  const above = dd.filter(l=>l.price>p).slice(0,8);
-  const below = dd.filter(l=>l.price<p).slice(-8).reverse();
+  // Return 12 above + 12 below current price (more levels now with 4H/1H included)
+  const above = dd.filter(l=>l.price>p).slice(0,12);
+  const below = dd.filter(l=>l.price<p).slice(-12).reverse();
   return [...above,...below].sort((a,b)=>b.price-a.price);
 }
 
@@ -2454,16 +2456,9 @@ function processTF(i, candles, dCandles, coinId){
     // PRIMARY DEDUP: localStorage-backed — survives page refreshes
     // Same coin+tf+type+level can't re-fire within 4h (8h for blind entries)
     if(!isDedupSuppressed(coinId, tf.l, d.type, d.level)){
-      maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, coinId, s);
-      markDedupFired(coinId, tf.l, d.type, d.level); // mark AFTER alert fires so maybeAlert's own dedup check passes
-      addLog(d.sig, tf.l, d.reason, d.type, d.level, d.target, d.rr, d.stopPrice, coinId);
-    }
-  }
-  // AT_LEVEL watch zone alerts (opt-in via alert_atlevel setting)
-  if(d.type==='AT_LEVEL'){
-    if(!isDedupSuppressed(coinId, tf.l, d.type, d.level)){
-      maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, coinId, s);
       markDedupFired(coinId, tf.l, d.type, d.level);
+      maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, coinId, s);
+      addLog(d.sig, tf.l, d.reason, d.type, d.level, d.target, d.rr, d.stopPrice, coinId);
     }
   }
   // Only re-render UI if this coin is the one currently being viewed
@@ -2540,8 +2535,10 @@ async function runCoin(coinId){
       // Combine Asia + London session levels for the 15m engine
       s.asiaLevels = [...getAsiaLevels(m15Entry.c), ...getLondonLevels(m15Entry.c), ...getNYLevels(m15Entry.c)];
     }
-    if(wCandles && dCandles) s.allLevels = collectLevels(wCandles, dCandles, s.price, s.candles15m);
-    else if(dCandles)        s.allLevels = collectLevels(dCandles, dCandles, s.price, s.candles15m);
+    const h4Candles = h4Entry?.c || null;
+    const h1Candles = h1Entry?.c || null;
+    if(wCandles && dCandles) s.allLevels = collectLevels(wCandles, dCandles, s.price, s.candles15m, h4Candles, h1Candles);
+    else if(dCandles)        s.allLevels = collectLevels(dCandles, dCandles, s.price, s.candles15m, h4Candles, h1Candles);
     if(isActive){
       syncActiveState();
       renderLevels();
