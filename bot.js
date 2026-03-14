@@ -27,13 +27,13 @@ const TG_CHATID = process.env.TG_CHATID;
 const WANT_LONG     = process.env.ALERT_LONG    !== 'false';
 const WANT_SHORT    = process.env.ALERT_SHORT   !== 'false';
 const WANT_ATLEVEL  = process.env.ALERT_ATLEVEL === 'true';
-const WANT_HTF_ONLY = process.env.ALERT_HTF_ONLY === 'true'; // only 1D/1H
+const WANT_HTF_ONLY = process.env.ALERT_HTF_ONLY === 'true';
 const MIN_RR        = parseFloat(process.env.MIN_RR || '1.5');
-const INTERVAL_MS   = parseInt(process.env.INTERVAL_MS || '120000', 10); // 2 min default
+const INTERVAL_MS   = parseInt(process.env.INTERVAL_MS || '120000', 10);
 const DEDUP_FILE    = path.join(__dirname, '.dedup.json');
 
 if(!TG_TOKEN || !TG_CHATID){
-  console.error('ERROR: TG_TOKEN and TG_CHATID must be set. Copy .env.example to .env and fill them in.');
+  console.error('ERROR: TG_TOKEN and TG_CHATID must be set.');
   process.exit(1);
 }
 
@@ -52,7 +52,7 @@ const TFS = [
 ];
 const BINANCE = 'https://api.binance.com/api/v3';
 
-// ── DEDUP (file-backed, mirrors localStorage dedup in the browser app) ───────
+// ── DEDUP ─────────────────────────────────────────────────────────────────────
 function loadDedup(){
   try{ return JSON.parse(fs.readFileSync(DEDUP_FILE,'utf8')); }catch{ return {}; }
 }
@@ -61,7 +61,7 @@ function saveDedup(d){ fs.writeFileSync(DEDUP_FILE, JSON.stringify(d)); }
 function isDedupSuppressed(coinId, tf, type, level){
   const d   = loadDedup();
   const key = `${coinId}:${tf}:${type}:${Math.round(level)}`;
-  const win = type === 'BLIND_ENTRY' ? 28800000 : 14400000; // 8h / 4h
+  const win = type === 'BLIND_ENTRY' ? 28800000 : 14400000;
   const now = Date.now();
   let changed = false;
   for(const k of Object.keys(d)){ if(now - d[k] > 28800000){ delete d[k]; changed=true; } }
@@ -75,7 +75,7 @@ function markDedupFired(coinId, tf, type, level){
   saveDedup(d);
 }
 
-// ── TELEGRAM ─────────────────────────────────────────────────────────────────
+// ── TELEGRAM ──────────────────────────────────────────────────────────────────
 async function sendTelegram(msg){
   try{
     const r = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`,{
@@ -380,7 +380,7 @@ function findDMCLevels(c, dCandles, tf, asiaLevels){
 }
 
 function findNextLevel(levels, currentPrice, direction){
-  const qualityLevels = levels.filter(l => l.score >= 25);
+  const qualityLevels = levels.filter(l => l.score >= 12);
   const pool   = qualityLevels.length >= 2 ? qualityLevels : levels;
   const sorted = [...pool].sort((a,b)=>a.price-b.price);
   if(direction==='long'){
@@ -394,7 +394,7 @@ function findNextLevel(levels, currentPrice, direction){
 }
 
 function findStopLevel(levels, trapPrice, direction){
-  const qualityLevels = levels.filter(l => l.score >= 25);
+  const qualityLevels = levels.filter(l => l.score >= 12);
   const pool   = qualityLevels.length >= 2 ? qualityLevels : levels;
   const sorted = [...pool].sort((a,b)=>a.price-b.price);
   if(direction==='short'){
@@ -414,7 +414,7 @@ function calcRR(entry, target, trapLevel, stopLevel){
   return (reward / risk).toFixed(1);
 }
 
-// ── DMS SIGNAL ENGINE (exact port from index.html) ───────────────────────────
+// ── DMS SIGNAL ENGINE ─────────────────────────────────────────────────────────
 function dms(c, a, dCandles, tf, htfBias){
   const n = c.length;
   const minCandles = (tf==='1W'||tf==='1D') ? 10 : 20;
@@ -547,7 +547,7 @@ function dms(c, a, dCandles, tf, htfBias){
   return { sig:'NEUTRAL', type:'NONE', level:null, target:null, reason:'Between levels' };
 }
 
-// ── HTF BIAS (nextMove) ───────────────────────────────────────────────────────
+// ── HTF BIAS ──────────────────────────────────────────────────────────────────
 function nextMove(h4C, h1C){
   const n4=h4C.length, n1=h1C.length;
   if(n4<8||n1<8) return { dir:'UNCLEAR', reason:'Insufficient data' };
@@ -581,9 +581,7 @@ function nextMove(h4C, h1C){
 // ── ALERT FORMATTING & SENDING ────────────────────────────────────────────────
 async function maybeAlert(sig, tf, type, level, target, rr, stopPrice, coinId, price, allLevels){
   if(isDedupSuppressed(coinId, tf, type, level)) return;
-
   if(WANT_HTF_ONLY && tf!=='1D' && tf!=='1H') return;
-
   if((type==='FAIL_GAIN' || (type==='BREAKOUT' && sig==='SHORT')) && !WANT_SHORT) return;
   if((type==='FAIL_LOSE' || type==='BLIND_ENTRY') && !WANT_LONG) return;
   if(type==='AT_LEVEL'){
@@ -591,31 +589,23 @@ async function maybeAlert(sig, tf, type, level, target, rr, stopPrice, coinId, p
     if(sig !== 'NEUTRAL') return;
   }
 
-  const icon    = sig==='LONG' ? '🟢' : sig==='SHORT' ? '🔴' : '🟡';
+  const icon      = sig==='LONG' ? '🟢' : sig==='SHORT' ? '🔴' : '🟡';
   const coinLabel = COINS[coinId].label;
-  const dir     = type==='FAIL_GAIN' ? 'FAIL TO GAIN' : type==='FAIL_LOSE' ? 'FAIL TO LOSE' : type==='BLIND_ENTRY' ? 'BLIND ENTRY' : type==='BREAKOUT' ? 'BREAKOUT' : 'AT LEVEL';
-  const rrTxt   = rr ? ` · R:R ${rr}` : '';
+  const dir       = type==='FAIL_GAIN' ? 'FAIL TO GAIN' : type==='FAIL_LOSE' ? 'FAIL TO LOSE' : type==='BLIND_ENTRY' ? 'BLIND ENTRY' : 'AT LEVEL';
+  const rrTxt     = rr ? ` · R:R ${rr}` : '';
 
   let msg;
   if(type==='AT_LEVEL'){
-    msg = `${icon} <b>DMS AT LEVEL</b> · ${coinLabel} [${tf}]
-👁 Approaching $${fmt(level)} — watch 15m candle
-
-<a href="https://tbracko.github.io/dms-signal">Open DMS</a>`;
+    msg = `${icon} <b>DMS AT LEVEL</b> · ${coinLabel} [${tf}]\n👁 Approaching $${fmt(level)} — watch 15m candle\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
   } else {
-    const rrLine = rr      ? `\nR:R <b>${rr}</b>` : '';
-    const tpLine = target  ? `\nTake Profit: <b>$${fmt(target)}</b>` : '';
+    const rrLine  = rr     ? `\nR:R <b>${rr}</b>` : '';
+    const tpLine  = target ? `\nTake Profit: <b>$${fmt(target)}</b>` : '';
     const slLevel = stopPrice || findStopLevel(
       allLevels.length ? allLevels : [{ price:level, type:sig==='SHORT'?'resistance':'support' }],
       level, sig==='SHORT'?'short':'long'
     );
-    const slLine = slLevel ? `\nStop Loss: <b>$${fmt(slLevel)}</b>` : '';
-    msg = `${icon} <b>DMS ${dir}</b> · ${coinLabel} [${tf}]${rrTxt}
-
-Entry now: <b>$${fmt(price)}</b>
-Level: <b>$${fmt(level)}</b>${tpLine}${slLine}${rrLine}
-
-<a href="https://tbracko.github.io/dms-signal">Open DMS</a>`;
+    const slLine  = slLevel ? `\nStop Loss: <b>$${fmt(slLevel)}</b>` : '';
+    msg = `${icon} <b>DMS ${dir}</b> · ${coinLabel} [${tf}]${rrTxt}\n\nEntry now: <b>$${fmt(price)}</b>\nLevel: <b>$${fmt(level)}</b>${tpLine}${slLine}${rrLine}\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
   }
 
   markDedupFired(coinId, tf, type, level);
@@ -625,7 +615,7 @@ Level: <b>$${fmt(level)}</b>${tpLine}${slLine}${rrLine}
 
 // ── PER-COIN SCAN ─────────────────────────────────────────────────────────────
 async function scanCoin(coinId){
-  const sym = COINS[coinId].bnSym;
+  const sym   = COINS[coinId].bnSym;
   const label = COINS[coinId].label;
   try{
     const [priceData, ...allCandles] = await Promise.all([
@@ -634,20 +624,16 @@ async function scanCoin(coinId){
     ]);
     const price = priceData.price;
     const [wC, dC, h4C, h1C, m15C] = allCandles;
+    if(!dC) return;
 
-    if(!dC) return; // need at least daily candles
-
-    // Compute HTF bias
     let htfDir = 'UNCLEAR';
-    if(h4C && h1C)      htfDir = nextMove(h4C, h1C).dir;
-    else if(h4C)         htfDir = nextMove(h4C, h4C).dir;
+    if(h4C && h1C) htfDir = nextMove(h4C, h1C).dir;
+    else if(h4C)   htfDir = nextMove(h4C, h4C).dir;
 
-    // Compute Asia + session levels for 15m
     const asiaLevels = m15C
       ? [...getAsiaLevels(m15C), ...getLondonLevels(m15C), ...getNYLevels(m15C)]
       : [];
 
-    // Collect all levels (for stop level calculation in alerts)
     const allLevels = (() => {
       const wLvls = wC ? findVPeaks(wC,'1W') : [];
       const dLvls = findVPeaks(dC,'1D');
@@ -658,25 +644,20 @@ async function scanCoin(coinId){
       return dd;
     })();
 
-    // Process each timeframe
     const tfsToRun = [
-      wC  && dC  ? { i:0, c:wC,  dC } : null,
-      dC         ? { i:1, c:dC,  dC } : null,
-      h4C && dC  ? { i:2, c:h4C, dC } : null,
-      h1C && dC  ? { i:3, c:h1C, dC } : null,
-      m15C && dC ? { i:4, c:m15C,dC } : null,
+      wC  && dC  ? { i:0, c:wC,   dC } : null,
+      dC         ? { i:1, c:dC,   dC } : null,
+      h4C && dC  ? { i:2, c:h4C,  dC } : null,
+      h1C && dC  ? { i:3, c:h1C,  dC } : null,
+      m15C && dC ? { i:4, c:m15C, dC } : null,
     ].filter(Boolean);
 
     for(const { i, c, dC: dc } of tfsToRun){
       const tf = TFS[i];
       const a  = atr(c);
-
-      // Build htfBias carrier (same as browser app)
       const htfCarrier = Object.assign(String(htfDir), { __asiaLevels: asiaLevels });
       const d = dms(c, a, dc, tf.l, htfCarrier);
-
       if(d.type==='NONE') continue;
-
       if(!isDedupSuppressed(coinId, tf.l, d.type, d.level)){
         await maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, d.stopPrice, coinId, price, allLevels);
       }
@@ -690,7 +671,6 @@ async function scanCoin(coinId){
 async function scanAll(){
   const coins = Object.keys(COINS);
   console.log(`[${new Date().toISOString()}] Scanning ${coins.map(c=>COINS[c].label).join(', ')}...`);
-  // Stagger coins 2s apart to spread Binance load
   for(let i=0; i<coins.length; i++){
     if(i>0) await new Promise(r=>setTimeout(r,2000));
     await scanCoin(coins[i]);
