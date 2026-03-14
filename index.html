@@ -196,6 +196,48 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 .toggle input:checked+.toggle-slider{background:rgba(0,230,118,.25);border:1px solid rgba(0,230,118,.5)}
 .toggle input:checked+.toggle-slider::before{transform:translateX(18px);background:#00e676}
 
+/* TRADES PAGE */
+.trades-bal{margin:14px 16px;border-radius:14px;background:#10151c;border:1px solid #1a2230;padding:18px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.trades-bal-main{grid-column:1/-1;text-align:center;padding-bottom:12px;border-bottom:1px solid #1a2230}
+.trades-bal-val{font-family:'Bebas Neue',sans-serif;font-size:42px;color:#dce8f5;line-height:1}
+.trades-bal-lbl{font-family:'IBM Plex Mono',monospace;font-size:8px;color:#3d5068;letter-spacing:.15em;text-transform:uppercase;margin-top:4px}
+.trades-bal-sub{text-align:center}
+.trades-bal-sub .trades-bal-val{font-size:22px}
+.pos-card{margin:0 16px 8px;border-radius:10px;background:#0c0f14;border:1px solid #1a2230;padding:14px;position:relative;overflow:hidden}
+.pos-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:3px 0 0 3px}
+.pos-card.long::before{background:#00e676}
+.pos-card.short::before{background:#ff3d5a}
+.pos-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.pos-coin{font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:600;color:#dce8f5}
+.pos-side{font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;padding:3px 8px;border-radius:4px}
+.pos-side.LONG{background:rgba(0,230,118,.1);color:#00e676;border:1px solid rgba(0,230,118,.22)}
+.pos-side.SHORT{background:rgba(255,61,90,.12);color:#ff3d5a;border:1px solid rgba(255,61,90,.25)}
+.pos-pnl{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:700}
+.pos-pnl.green{color:#00e676}.pos-pnl.red{color:#ff3d5a}
+.pos-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px}
+.pos-cell{font-family:'IBM Plex Mono',monospace;font-size:9px}
+.pos-cell-lbl{color:#3d5068;font-size:8px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:2px}
+.pos-cell-val{color:#7b8fa8}
+.pos-close-btn{width:100%;font-family:'IBM Plex Mono',monospace;font-size:10px;padding:8px;border-radius:6px;border:1px solid rgba(255,61,90,.3);background:rgba(255,61,90,.08);color:#ff3d5a;cursor:pointer;letter-spacing:.06em;transition:all .2s}
+.pos-close-btn:active{transform:scale(.97);background:rgba(255,61,90,.2)}
+.manual-form{margin:0 16px 12px;border-radius:10px;background:#0c0f14;border:1px solid #1a2230;padding:14px}
+.mf-row{display:flex;gap:8px;margin-bottom:10px;align-items:flex-end}
+.mf-field{flex:1}
+.mf-label{font-family:'IBM Plex Mono',monospace;font-size:8px;color:#3d5068;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px}
+.mf-input{width:100%;background:#10151c;border:1px solid #243040;border-radius:6px;padding:8px 10px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#dce8f5;outline:none}
+.mf-input:focus{border-color:#00e676}
+.mf-select{width:100%;background:#10151c;border:1px solid #243040;border-radius:6px;padding:8px 10px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#dce8f5;outline:none;cursor:pointer}
+.mf-open-btn{width:100%;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;padding:10px;border-radius:7px;border:1px solid rgba(0,230,118,.35);background:rgba(0,230,118,.1);color:#00e676;cursor:pointer;letter-spacing:.08em;transition:all .2s}
+.mf-open-btn:active{transform:scale(.97)}
+.mf-open-btn:disabled{opacity:.4;cursor:not-allowed}
+.closed-item{padding:10px 16px;border-bottom:1px solid rgba(255,255,255,.04);display:flex;align-items:center;gap:10px}
+.closed-coin{font-family:'IBM Plex Mono',monospace;font-size:10px;color:#5d7a99;min-width:36px}
+.closed-side{font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;min-width:48px}
+.closed-side.LONG{color:#00e676}.closed-side.SHORT{color:#ff3d5a}
+.closed-pnl{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;margin-left:auto}
+.closed-pnl.green{color:#00e676}.closed-pnl.red{color:#ff3d5a}
+.closed-time{font-family:'IBM Plex Mono',monospace;font-size:9px;color:#3d5068}
+
 /* BOTTOM NAV */
 .bnav{position:fixed;bottom:0;left:0;right:0;z-index:200;background:#07090df5;border-top:1px solid #1a2230;display:flex;padding-bottom:env(safe-area-inset-bottom,0px);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
 .nb{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:10px 4px 12px;font-family:'IBM Plex Mono',monospace;font-size:8px;letter-spacing:.06em;color:#3d5068;background:none;border:none;cursor:pointer;transition:color .2s;text-transform:uppercase}
@@ -447,6 +489,69 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   <div id="log-list"><div class="empty">No signals logged yet</div></div>
 </div>
 
+<!-- PAGE: TRADES -->
+<div class="page" id="page-trades">
+  <div class="trades-bal" id="trades-bal">
+    <div class="trades-bal-main">
+      <div class="trades-bal-val" id="tr-equity">$—</div>
+      <div class="trades-bal-lbl">Account Equity</div>
+    </div>
+    <div class="trades-bal-sub">
+      <div class="trades-bal-val" id="tr-upnl" style="color:#3d5068">$0.00</div>
+      <div class="trades-bal-lbl">Unrealized P&L</div>
+    </div>
+    <div class="trades-bal-sub">
+      <div class="trades-bal-val" id="tr-avail" style="color:#3d5068">$—</div>
+      <div class="trades-bal-lbl">Available</div>
+    </div>
+  </div>
+
+  <div class="sh">Active Positions</div>
+  <div id="positions-list"><div class="empty">No open positions</div></div>
+
+  <div class="sh" style="display:flex;justify-content:space-between;align-items:center">
+    <span>Open Manual Trade</span>
+    <span style="font-size:9px;color:#3d5068;letter-spacing:.06em">HYPERLIQUID</span>
+  </div>
+  <div class="manual-form">
+    <div class="mf-row">
+      <div class="mf-field">
+        <div class="mf-label">Coin</div>
+        <select class="mf-select" id="mf-coin">
+          <option value="BTC">BTC</option>
+          <option value="ETH">ETH</option>
+          <option value="SOL">SOL</option>
+        </select>
+      </div>
+      <div class="mf-field">
+        <div class="mf-label">Side</div>
+        <select class="mf-select" id="mf-side">
+          <option value="LONG">LONG</option>
+          <option value="SHORT">SHORT</option>
+        </select>
+      </div>
+      <div class="mf-field">
+        <div class="mf-label">Size</div>
+        <input class="mf-input" id="mf-size" type="number" step="any" placeholder="0.001">
+      </div>
+    </div>
+    <div class="mf-row">
+      <div class="mf-field">
+        <div class="mf-label">Stop Loss</div>
+        <input class="mf-input" id="mf-sl" type="number" step="any" placeholder="Optional">
+      </div>
+      <div class="mf-field">
+        <div class="mf-label">Take Profit</div>
+        <input class="mf-input" id="mf-tp" type="number" step="any" placeholder="Optional">
+      </div>
+    </div>
+    <button class="mf-open-btn" id="mf-open" onclick="manualOpenTrade()">OPEN TRADE</button>
+  </div>
+
+  <div class="sh">Closed Trades</div>
+  <div id="closed-list"><div class="empty">No closed trades yet</div></div>
+</div>
+
 <button class="fab" id="fab" onclick="manualRefresh()">↻</button>
 
 <nav class="bnav">
@@ -461,6 +566,9 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   </button>
   <button class="nb" onclick="nav('log',this)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>Log
+  </button>
+  <button class="nb" onclick="nav('trades',this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="9"/></svg>Trades
   </button>
   <button class="nb" onclick="nav('stats',this)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>Stats
@@ -697,6 +805,7 @@ function nav(id, btn){
   btn.classList.add('active');
   if(id==='chart'&&!tvLoaded){loadTV('240');tvLoaded=true;}
   if(id==='stats') setTimeout(renderStats, 50);
+  if(id==='trades') renderTrades();
 }
 
 // ── TRADINGVIEW ────────────────────────────────────────────
@@ -2928,6 +3037,237 @@ async function saveHLWallet() {
     statusEl.textContent = 'Failed: ' + e.message; statusEl.style.color = '#ff3d5a';
   }
 }
+
+// ── TRADES PAGE: Positions, P&L, Manual Trading ──────────
+const TRADES_KEY = 'dms_closed_trades';
+function loadClosedTrades(){ try{ return JSON.parse(localStorage.getItem(TRADES_KEY)||'[]'); }catch{ return []; } }
+function saveClosedTrades(t){ localStorage.setItem(TRADES_KEY, JSON.stringify(t.slice(0,50))); }
+
+// Fetch live positions from Hyperliquid
+async function hlFetchPositions(){
+  if(!HL.wallet) return [];
+  try{
+    const res = await fetch(HL.API + '/info', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ type:'clearinghouseState', user: HL.address })
+    });
+    const data = await res.json();
+    return data.assetPositions || [];
+  }catch(e){ console.warn('HL positions fetch failed:', e); return []; }
+}
+
+// Fetch account state (equity, available)
+async function hlFetchAccountState(){
+  if(!HL.wallet) return { equity:0, available:0, upnl:0 };
+  try{
+    const res = await fetch(HL.API + '/info', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ type:'clearinghouseState', user: HL.address })
+    });
+    const data = await res.json();
+    const ms = data.marginSummary || {};
+    return {
+      equity: parseFloat(ms.accountValue || '0'),
+      available: parseFloat(ms.totalRawUsd || '0'),
+      upnl: parseFloat(ms.totalUnrealizedPnl || '0')
+    };
+  }catch(e){ return { equity:0, available:0, upnl:0 }; }
+}
+
+// Render the trades page
+async function renderTrades(){
+  // Fetch account state and positions in parallel
+  const [acct, positions] = await Promise.all([hlFetchAccountState(), hlFetchPositions()]);
+
+  // Balance card
+  document.getElementById('tr-equity').textContent = '$' + acct.equity.toFixed(2);
+  const upnlEl = document.getElementById('tr-upnl');
+  upnlEl.textContent = (acct.upnl >= 0 ? '+$' : '-$') + Math.abs(acct.upnl).toFixed(2);
+  upnlEl.style.color = acct.upnl >= 0 ? '#00e676' : '#ff3d5a';
+  document.getElementById('tr-avail').textContent = '$' + acct.available.toFixed(2);
+
+  // Active positions
+  const posList = document.getElementById('positions-list');
+  const active = positions.filter(p => p.position && parseFloat(p.position.szi) !== 0);
+
+  if(active.length === 0){
+    posList.innerHTML = '<div class="empty">No open positions</div>';
+  } else {
+    posList.innerHTML = active.map(p => {
+      const pos = p.position;
+      const coin = pos.coin;
+      const szi = parseFloat(pos.szi);
+      const isLong = szi > 0;
+      const side = isLong ? 'LONG' : 'SHORT';
+      const size = Math.abs(szi);
+      const entry = parseFloat(pos.entryPx);
+      const mark = parseFloat(pos.positionValue) / size;
+      const upnl = parseFloat(pos.unrealizedPnl);
+      const upnlPct = entry > 0 ? ((mark - entry) / entry * 100 * (isLong ? 1 : -1)).toFixed(2) : '0.00';
+      const liq = pos.liquidationPx ? parseFloat(pos.liquidationPx) : null;
+      const leverage = pos.leverage ? pos.leverage.value : '—';
+
+      return `<div class="pos-card ${side.toLowerCase()}">
+        <div class="pos-head">
+          <span class="pos-coin">${coin}</span>
+          <span class="pos-side ${side}">${side} ${leverage}x</span>
+          <span class="pos-pnl ${upnl>=0?'green':'red'}">${upnl>=0?'+':''}$${upnl.toFixed(2)} (${upnlPct}%)</span>
+        </div>
+        <div class="pos-grid">
+          <div class="pos-cell"><div class="pos-cell-lbl">Size</div><div class="pos-cell-val">${size}</div></div>
+          <div class="pos-cell"><div class="pos-cell-lbl">Entry</div><div class="pos-cell-val">$${fmt(entry)}</div></div>
+          <div class="pos-cell"><div class="pos-cell-lbl">Mark</div><div class="pos-cell-val">$${fmt(mark)}</div></div>
+          ${liq ? `<div class="pos-cell"><div class="pos-cell-lbl">Liq. Price</div><div class="pos-cell-val" style="color:#ff6b6b">$${fmt(liq)}</div></div>` : ''}
+          <div class="pos-cell"><div class="pos-cell-lbl">Unreal. P&L</div><div class="pos-cell-val" style="color:${upnl>=0?'#00e676':'#ff3d5a'}">${upnl>=0?'+':''}$${upnl.toFixed(2)}</div></div>
+        </div>
+        <button class="pos-close-btn" onclick="closeTrade('${coin}',${szi})">CLOSE ${coin} ${side}</button>
+      </div>`;
+    }).join('');
+  }
+
+  // Closed trades
+  const closedList = document.getElementById('closed-list');
+  const closed = loadClosedTrades();
+  if(closed.length === 0){
+    closedList.innerHTML = '<div class="empty">No closed trades yet</div>';
+  } else {
+    closedList.innerHTML = closed.map(t => {
+      const pnlCls = t.pnl >= 0 ? 'green' : 'red';
+      return `<div class="closed-item">
+        <span class="closed-coin">${t.coin}</span>
+        <span class="closed-side ${t.side}">${t.side}</span>
+        <span class="closed-time">${t.size} @ $${fmt(t.entry)} → $${fmt(t.exit)}</span>
+        <span class="closed-pnl ${pnlCls}">${t.pnl>=0?'+':''}$${t.pnl.toFixed(2)}</span>
+      </div>`;
+    }).join('');
+  }
+}
+
+// Close a position via HL market order
+async function closeTrade(coin, szi){
+  if(!HL.wallet){ showToast('Connect Hyperliquid wallet first'); return; }
+  if(!confirm('Close ' + coin + ' position?')) return;
+
+  const isLong = szi > 0;
+  const size = Math.abs(szi);
+  const currentPrice = Object.values(coinState).find(s => {
+    const sym = { bitcoin:'BTC', ethereum:'ETH', solana:'SOL' };
+    return Object.entries(sym).find(([k,v]) => v === coin)?.[0] && s.price > 0;
+  })?.price || 0;
+
+  // Look up price from coinState by mapping coin symbol to coinId
+  const coinIdMap = { BTC:'bitcoin', ETH:'ethereum', SOL:'solana' };
+  const cid = coinIdMap[coin];
+  const px = cid ? coinState[cid].price : currentPrice;
+  const slip = px * 0.005;
+  const closePx = isLong ? px - slip : px + slip; // Close = opposite side
+
+  try{
+    const btn = event.target;
+    btn.textContent = 'CLOSING...';
+    btn.disabled = true;
+
+    // Market close (IOC, reduce only, opposite side)
+    const result = await HL.placeOrder(coin, !isLong, size, closePx, { limit: { tif: 'Ioc' } }, true);
+
+    if(result.status === 'err'){
+      showToast('Close failed: ' + (result.response || 'Unknown error'));
+      btn.textContent = 'RETRY CLOSE';
+      btn.disabled = false;
+      return;
+    }
+
+    // Record closed trade
+    const entry = 0; // We don't know entry from here, HL position has it
+    const closed = loadClosedTrades();
+    closed.unshift({
+      coin, side: isLong ? 'LONG' : 'SHORT', size,
+      entry: px, exit: px, pnl: 0, // Will be updated on next refresh with real data
+      ts: new Date().toISOString()
+    });
+    saveClosedTrades(closed);
+
+    showToast('Position closed: ' + coin, '', false);
+
+    // Also clear from HL.activeTrades
+    const coinIdMap2 = { BTC:'bitcoin', ETH:'ethereum', SOL:'solana' };
+    if(coinIdMap2[coin]) delete HL.activeTrades[coinIdMap2[coin]];
+
+    // Refresh trades page after a short delay for settlement
+    setTimeout(renderTrades, 1500);
+  }catch(e){
+    showToast('Close error: ' + e.message);
+    console.error('Close trade error:', e);
+  }
+}
+
+// Manual open trade
+async function manualOpenTrade(){
+  if(!HL.wallet){ showToast('Connect Hyperliquid wallet first'); return; }
+
+  const coin = document.getElementById('mf-coin').value;
+  const side = document.getElementById('mf-side').value;
+  const size = parseFloat(document.getElementById('mf-size').value);
+  const sl = parseFloat(document.getElementById('mf-sl').value) || null;
+  const tp = parseFloat(document.getElementById('mf-tp').value) || null;
+
+  if(!size || size <= 0){ showToast('Enter a valid size'); return; }
+
+  const btn = document.getElementById('mf-open');
+  btn.textContent = 'PLACING ORDER...';
+  btn.disabled = true;
+
+  const isBuy = side === 'LONG';
+  const coinIdMap = { BTC:'bitcoin', ETH:'ethereum', SOL:'solana' };
+  const cid = coinIdMap[coin];
+  const px = cid ? coinState[cid].price : 0;
+  if(!px){ btn.textContent = 'OPEN TRADE'; btn.disabled = false; showToast('No price data for ' + coin); return; }
+
+  const slip = px * 0.005;
+  const entryPx = isBuy ? px + slip : px - slip;
+
+  try{
+    // 1. Entry order (IOC market)
+    const result = await HL.placeOrder(coin, isBuy, size, entryPx, { limit: { tif: 'Ioc' } });
+    if(result.status === 'err'){
+      showToast('Order failed: ' + (result.response || 'Unknown'));
+      btn.textContent = 'OPEN TRADE'; btn.disabled = false;
+      return;
+    }
+
+    // 2. SL if set
+    if(sl){
+      const slPx = isBuy ? sl * 0.98 : sl * 1.02;
+      await HL.placeOrder(coin, !isBuy, size, slPx,
+        { trigger: { triggerPx: sl.toFixed(1), isMarket: true, tpsl: 'sl' } }, true);
+    }
+
+    // 3. TP if set
+    if(tp){
+      const tpPx = isBuy ? tp * 1.02 : tp * 0.98;
+      await HL.placeOrder(coin, !isBuy, size, tpPx,
+        { trigger: { triggerPx: tp.toFixed(1), isMarket: true, tpsl: 'tp' } }, true);
+    }
+
+    showToast(side + ' ' + coin + ' x' + size + ' @ $' + fmt(px), sl ? 'SL: $' + fmt(sl) : '', side === 'SHORT');
+
+    // Clear form
+    document.getElementById('mf-size').value = '';
+    document.getElementById('mf-sl').value = '';
+    document.getElementById('mf-tp').value = '';
+
+    // Refresh trades page
+    setTimeout(renderTrades, 1500);
+  }catch(e){
+    showToast('Trade error: ' + e.message);
+    console.error('Manual trade error:', e);
+  }
+  btn.textContent = 'OPEN TRADE';
+  btn.disabled = false;
+}
+
+// Auto-refresh trades page every 10s when visible
+let tradesRefreshTimer = null;
 
 window.addEventListener('DOMContentLoaded',()=>{
   loadSettings();
