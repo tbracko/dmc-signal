@@ -2879,16 +2879,32 @@ const HL = {
     });
   },
 
-  // ── Get account balance ──
+  // ── Get account balance (perps + spot) ──
   async getBalance() {
     if (!this.wallet) return 0;
-    const queryAddr = this.masterAddress || this.address;
-    const res = await fetch(this.API + '/info', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr })
-    });
-    const data = await res.json();
-    return parseFloat(data.marginSummary?.accountValue || '0');
+    const queryAddr = (this.masterAddress || this.address).toLowerCase();
+    // Fetch perps clearinghouse + spot balances in parallel
+    const [perpsRes, spotRes] = await Promise.all([
+      fetch(this.API + '/info', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr })
+      }),
+      fetch(this.API + '/info', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'spotClearinghouseState', user: queryAddr })
+      })
+    ]);
+    const perpsData = await perpsRes.json();
+    const spotData = await spotRes.json();
+    const perpsVal = parseFloat(perpsData.marginSummary?.accountValue || '0');
+    // Spot: sum all balances (typically USDC)
+    let spotVal = 0;
+    if (spotData.balances) {
+      for (const b of spotData.balances) {
+        if (b.coin === 'USDC' || b.coin === 'USDT') spotVal += parseFloat(b.total || '0');
+      }
+    }
+    return perpsVal + spotVal;
   },
 
   // ── Compute action hash for phantom agent signing ──
@@ -3060,7 +3076,7 @@ function saveClosedTrades(t){ localStorage.setItem(TRADES_KEY, JSON.stringify(t.
 async function hlFetchPositions(){
   if(!HL.wallet) return [];
   try{
-    const queryAddr = HL.masterAddress || HL.address;
+    const queryAddr = (HL.masterAddress || HL.address).toLowerCase();
     const res = await fetch(HL.API + '/info', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ type:'clearinghouseState', user: queryAddr })
@@ -3072,21 +3088,36 @@ async function hlFetchPositions(){
 
 // Fetch account state (equity, available)
 async function hlFetchAccountState(){
-  if(!HL.wallet) return { equity:0, available:0, upnl:0 };
+  if(!HL.wallet) return { equity:0, available:0, upnl:0, spotBal:0 };
   try{
-    const queryAddr = HL.masterAddress || HL.address;
-    const res = await fetch(HL.API + '/info', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ type:'clearinghouseState', user: queryAddr })
-    });
-    const data = await res.json();
-    const ms = data.marginSummary || {};
+    const queryAddr = (HL.masterAddress || HL.address).toLowerCase();
+    const [perpsRes, spotRes] = await Promise.all([
+      fetch(HL.API + '/info', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ type:'clearinghouseState', user: queryAddr })
+      }),
+      fetch(HL.API + '/info', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ type:'spotClearinghouseState', user: queryAddr })
+      })
+    ]);
+    const perpsData = await perpsRes.json();
+    const spotData = await spotRes.json();
+    const ms = perpsData.marginSummary || {};
+    let spotBal = 0;
+    if (spotData.balances) {
+      for (const b of spotData.balances) {
+        if (b.coin === 'USDC' || b.coin === 'USDT') spotBal += parseFloat(b.total || '0');
+      }
+    }
+    const perpsEquity = parseFloat(ms.accountValue || '0');
     return {
-      equity: parseFloat(ms.accountValue || '0'),
-      available: parseFloat(ms.totalRawUsd || '0'),
-      upnl: parseFloat(ms.totalUnrealizedPnl || '0')
+      equity: perpsEquity + spotBal,
+      available: parseFloat(ms.totalRawUsd || '0') + spotBal,
+      upnl: parseFloat(ms.totalUnrealizedPnl || '0'),
+      spotBal: spotBal
     };
-  }catch(e){ return { equity:0, available:0, upnl:0 }; }
+  }catch(e){ return { equity:0, available:0, upnl:0, spotBal:0 }; }
 }
 
 // Render the trades page
