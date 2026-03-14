@@ -397,8 +397,14 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   </div>
 
   <div class="setting-row">
-    <div class="setting-lbl">Wallet Private Key</div>
-    <div style="font-family:'Sora',sans-serif;font-size:11px;color:#ff6b6b;margin-bottom:6px">Use an API wallet, NOT your main wallet. Key stored in localStorage only.</div>
+    <div class="setting-lbl">Master Account Address</div>
+    <div style="font-family:'Sora',sans-serif;font-size:11px;color:#5d7a99;margin-bottom:6px">Your main Hyperliquid wallet address. Funds &amp; positions live here.</div>
+    <input class="setting-input" id="hl-master-addr" type="text" placeholder="0x1a41..." autocomplete="off" autocorrect="off" spellcheck="false" style="font-size:11px" onchange="localStorage.setItem('hl_master_addr',this.value.trim());if(typeof HL!=='undefined')HL.masterAddress=this.value.trim()">
+  </div>
+
+  <div class="setting-row">
+    <div class="setting-lbl">API Wallet Private Key</div>
+    <div style="font-family:'Sora',sans-serif;font-size:11px;color:#ff6b6b;margin-bottom:6px">Your API wallet key (agent). Trades on behalf of the master account above.</div>
     <input class="setting-input" id="hl-wallet-key" type="password" placeholder="0xabc123..." autocomplete="off" autocorrect="off" spellcheck="false" style="font-size:11px">
     <button class="setting-save" onclick="saveHLWallet()">SAVE &amp; CONNECT</button>
     <div class="setting-status" id="hl-status"></div>
@@ -675,6 +681,7 @@ function loadSettings(){
   document.getElementById('hl-auto-trade').checked = localStorage.getItem('hl_auto_trade') === 'true';
   document.getElementById('hl-max-trades').value = localStorage.getItem('hl_max_trades') || '10';
   document.getElementById('hl-min-conf').value = localStorage.getItem('hl_min_conf') || '50';
+  document.getElementById('hl-master-addr').value = localStorage.getItem('hl_master_addr') || '';
   // Don't display the key, just show status if configured
   if(localStorage.getItem('hl_wallet_key')){
     document.getElementById('hl-wallet-key').value = localStorage.getItem('hl_wallet_key');
@@ -2795,6 +2802,7 @@ const HL = {
   API: 'https://api.hyperliquid.xyz',
   wallet: null,
   address: '',
+  masterAddress: '',   // master account where funds & positions live
   assetMap: {},        // "BTC" -> index
   szDecimals: {},      // "BTC" -> decimal places for size
   enabled: false,
@@ -2845,11 +2853,12 @@ const HL = {
     try {
       this.wallet = new ethers.Wallet(key);
       this.address = this.wallet.address;
+      this.masterAddress = localStorage.getItem('hl_master_addr') || '';
       await this.fetchMeta();
       this.enabled = localStorage.getItem('hl_auto_trade') === 'true';
       this.tradesToday = 0;
       this.lastTradeDay = new Date().toDateString();
-      console.log('HL ready:', this.address, '| Assets:', Object.keys(this.assetMap).join(', '));
+      console.log('HL ready:', this.address, '| Master:', this.masterAddress || 'not set', '| Assets:', Object.keys(this.assetMap).join(', '));
       return true;
     } catch (e) {
       console.error('HL init failed:', e);
@@ -2873,9 +2882,10 @@ const HL = {
   // ── Get account balance ──
   async getBalance() {
     if (!this.wallet) return 0;
+    const queryAddr = this.masterAddress || this.address;
     const res = await fetch(this.API + '/info', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'clearinghouseState', user: this.address })
+      body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr })
     });
     const data = await res.json();
     return parseFloat(data.marginSummary?.accountValue || '0');
@@ -2989,7 +2999,7 @@ const HL = {
       // 2. Stop Loss (trigger, reduce only)
       const slPx = isBuy ? stopPrice * 0.98 : stopPrice * 1.02; // 2% protection beyond stop
       await this.placeOrder(asset, !isBuy, size, slPx,
-        { trigger: { triggerPx: (isBuy ? stopPrice : stopPrice).toFixed(1), isMarket: true, tpsl: 'sl' } }, true);
+        { trigger: { triggerPx: stopPrice.toFixed(1), isMarket: true, tpsl: 'sl' } }, true);
 
       // 3. Take Profit (if target exists)
       if (target) {
@@ -3028,10 +3038,13 @@ async function saveHLWallet() {
   localStorage.setItem('hl_wallet_key', key);
   statusEl.textContent = 'Connecting...'; statusEl.style.color = '#ffc107';
   try {
+    const masterAddr = document.getElementById('hl-master-addr').value.trim();
+    if (masterAddr) localStorage.setItem('hl_master_addr', masterAddr);
     const ok = await HL.init();
     if (!ok) throw new Error('Init failed');
     const bal = await HL.getBalance();
-    statusEl.textContent = 'Connected: ' + HL.address.slice(0, 6) + '...' + HL.address.slice(-4) + ' | Balance: $' + bal.toFixed(2);
+    const dispAddr = HL.masterAddress ? HL.masterAddress.slice(0,6) + '...' + HL.masterAddress.slice(-4) : HL.address.slice(0,6) + '...' + HL.address.slice(-4);
+    statusEl.textContent = 'Connected: ' + dispAddr + ' | Balance: $' + bal.toFixed(2);
     statusEl.style.color = '#00e676';
   } catch (e) {
     statusEl.textContent = 'Failed: ' + e.message; statusEl.style.color = '#ff3d5a';
@@ -3047,9 +3060,10 @@ function saveClosedTrades(t){ localStorage.setItem(TRADES_KEY, JSON.stringify(t.
 async function hlFetchPositions(){
   if(!HL.wallet) return [];
   try{
+    const queryAddr = HL.masterAddress || HL.address;
     const res = await fetch(HL.API + '/info', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ type:'clearinghouseState', user: HL.address })
+      body: JSON.stringify({ type:'clearinghouseState', user: queryAddr })
     });
     const data = await res.json();
     return data.assetPositions || [];
@@ -3060,9 +3074,10 @@ async function hlFetchPositions(){
 async function hlFetchAccountState(){
   if(!HL.wallet) return { equity:0, available:0, upnl:0 };
   try{
+    const queryAddr = HL.masterAddress || HL.address;
     const res = await fetch(HL.API + '/info', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ type:'clearinghouseState', user: HL.address })
+      body: JSON.stringify({ type:'clearinghouseState', user: queryAddr })
     });
     const data = await res.json();
     const ms = data.marginSummary || {};
