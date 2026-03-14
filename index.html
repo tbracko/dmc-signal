@@ -3301,8 +3301,9 @@ window.addEventListener('DOMContentLoaded',()=>{
     HL.init().then(ok => {
       if(ok){
         const st = document.getElementById('hl-status');
+        const dispAddr = HL.masterAddress || HL.address;
         HL.getBalance().then(b => {
-          st.textContent = 'Connected: ' + HL.address.slice(0,6) + '...' + HL.address.slice(-4) + ' | $' + b.toFixed(2);
+          st.textContent = 'Connected: ' + dispAddr.slice(0,6) + '...' + dispAddr.slice(-4) + ' | $' + b.toFixed(2);
           st.style.color = '#00e676';
         }).catch(() => { st.textContent = 'Connected (balance fetch failed)'; st.style.color = '#ffc107'; });
       }
