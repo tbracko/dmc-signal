@@ -867,8 +867,8 @@ async function getCandles(tf, coinId){
   switch(tf.l){
     case'1W': return bnKlines(sym,'1w',104);  // 104 weekly candles (~2 years)
     case'1D': return bnKlines(sym,'1d',180);  // 180 daily candles (~6 months)
-    case'4H': return bnKlines(sym,'4h',200);  // 200 four-hour candles (~33 days)
-    case'1H': return bnKlines(sym,'1h',120);  // 120 hourly candles (~5 days)
+    case'4H': return bnKlines(sym,'4h',500);  // 500 four-hour candles (~83 days)
+    case'1H': return bnKlines(sym,'1h',500);  // 500 hourly candles (~20 days)
     case'15m':return bnKlines(sym,'15m',192); // 192 fifteen-minute candles (~48h)
   }
 }
@@ -940,8 +940,9 @@ function detectFlippedLevel(c, formationIdx, originalType, levelPrice){
 
 function findVPeaks(c, tf){
   const n = c.length, L = [];
-  const lookback = 2; // 2 bars each side — catches more obvious DMC levels
-  const wickRatio = 0.25; // wick must be at least 35% of candle range for rejection
+  // Lower TFs: use lookback=2 for more levels; HTF: lookback=2 for key levels
+  const lookback = 2;
+  const wickRatio = 0.25;
 
   for(let i=lookback; i<n-lookback; i++){
     const x = c[i];
@@ -1556,7 +1557,9 @@ function calcRR(entry, target, trapLevel, stopLevel){
   const risk    = Math.abs(entry - stopRef) * 1.05;
   const reward  = Math.abs(entry - target);
   if(risk < 1) return null;
-  return (reward / risk).toFixed(1);
+  const rr = reward / risk;
+  // Cap R:R at 2.5 — beyond this, targets are unrealistically far
+  return Math.min(rr, 2.5).toFixed(1);
 }
 
 // Find the next level BEHIND the entry (for stop placement)
@@ -1612,10 +1615,10 @@ function dms(c, a, dCandles, tf, htfBias){
   // AT LEVEL: tested or lower-score level — wait for 15m confirmation.
   // The actual trap (FAIL_GAIN / FAIL_LOSE) always comes from the 15m card.
   if(tf !== '15m'){
-    const isHTF = (tf === '1W' || tf === '1D');
+    const isHTF = (tf === '1W' || tf === '1D' || tf === '4H' || tf === '1H');
 
     // BLIND ENTRY: untested, strong, price is touching it right now
-    // Only on 1W/1D — 4H/1H still just show AT_LEVEL context
+    // Enabled on all HTF (1W/1D/4H/1H) — with 500 candles, 4H/1H have quality levels
     //
     // DIRECTIONAL APPROACH CHECK (key fix):
     // For a SHORT blind entry at resistance → price must be approaching FROM BELOW
@@ -2079,17 +2082,20 @@ function collectLevels(wC, dC, p, c15m, h4C, h1C){
   const london = c15m ? getLondonLevels(c15m).map(l=>({...l,tf:'SESSION'})) : [];
   const ny     = c15m ? getNYLevels(c15m).map(l=>({...l,tf:'SESSION'})) : [];
 
-  const all = [...wLvls,...dLvls,...h4Lvls,...h1Lvls,...pdhl,...asia,...london,...ny].sort((a,b)=>b.price-a.price);
+  // Sort by score (highest first) so dedup keeps strongest levels
+  const all = [...wLvls,...dLvls,...h4Lvls,...h1Lvls,...pdhl,...asia,...london,...ny].sort((a,b)=>b.score-a.score);
 
-  // Dedupe within 0.3% — tighter threshold since 4H/1H levels are closer together
+  // Dedupe within 0.15% — tight enough to keep distinct levels, loose enough to merge duplicates
   const dd = [];
   for(const l of all){
-    if(!dd.find(d=>Math.abs(d.price-l.price)/l.price<0.003)) dd.push(l);
+    if(!dd.find(d=>Math.abs(d.price-l.price)/l.price<0.0015)) dd.push(l);
   }
+  // Re-sort by price descending
+  dd.sort((a,b)=>b.price-a.price);
 
-  // Return 12 above + 12 below current price (more levels now with 4H/1H included)
-  const above = dd.filter(l=>l.price>p).slice(0,12);
-  const below = dd.filter(l=>l.price<p).slice(-12).reverse();
+  // Return 16 above + 16 below current price (more levels for better R:R targets)
+  const above = dd.filter(l=>l.price>p).slice(0,16);
+  const below = dd.filter(l=>l.price<p).slice(-16).reverse();
   return [...above,...below].sort((a,b)=>b.price-a.price);
 }
 
@@ -2682,6 +2688,9 @@ async function runCoin(coinId){
     const dCandles = dEntry?.c || null;
     const wCandles = wEntry?.c || null;
 
+    // Cache daily candles for WS-triggered 15m processing
+    if(dCandles) s.dailyCandles = dCandles;
+
     // Process each TF — pass dCandles as context (may be null if 1D failed, graceful)
     if(dCandles) processTF(1, dCandles, dCandles, coinId);
     if(wCandles && dCandles) processTF(0, wCandles, dCandles, coinId);
@@ -2781,11 +2790,17 @@ function connectWS(coinId){
           if(last.t===candle.t) s.candles15m[s.candles15m.length-1]=candle;
           else if(k.x) s.candles15m.push(candle); // new candle closed
         }
-        // On candle CLOSE, re-run 15m signal
+        // On candle CLOSE, re-run 15m signal + trigger full refresh
         if(k.x && s.candles15m && s.candles15m.length>20){
-          const dCandles=null; // will use cached
+          const dCandles = s.dailyCandles || null;
           processTF(4, s.candles15m, dCandles, coinId);
           checkAutoOutcomes(coinId);
+          // Also trigger a full coin refresh every 4 candle closes (1h)
+          // This ensures HTF signals fire even in background tabs
+          s.wsCloseCount = (s.wsCloseCount || 0) + 1;
+          if(s.wsCloseCount % 4 === 0){
+            runCoin(coinId).catch(e=>console.warn('BG refresh',coinId,e));
+          }
         }
       }catch(e){console.warn('WS parse',e);}
     };
@@ -2879,7 +2894,7 @@ const HL = {
     });
   },
 
-  // ── Get account balance (perps + spot) ──
+  // ── Get account balance (perps + spot, supports unified accounts) ──
   async getBalance() {
     if (!this.wallet) return 0;
     const queryAddr = (this.masterAddress || this.address).toLowerCase();
@@ -2896,15 +2911,26 @@ const HL = {
     ]);
     const perpsData = await perpsRes.json();
     const spotData = await spotRes.json();
-    const perpsVal = parseFloat(perpsData.marginSummary?.accountValue || '0');
-    // Spot: sum all balances (typically USDC)
+    console.log('HL perps response:', JSON.stringify(perpsData).slice(0, 500));
+    console.log('HL spot response:', JSON.stringify(spotData).slice(0, 500));
+    // Perps balance: try multiple possible fields
+    const ms = perpsData.marginSummary || {};
+    const perpsVal = parseFloat(ms.accountValue || '0');
+    // Cross margin balance (unified accounts store balance here)
+    const cms = perpsData.crossMarginSummary || {};
+    const crossVal = parseFloat(cms.accountValue || '0');
+    // Spot: sum USDC/USDT balances
     let spotVal = 0;
     if (spotData.balances) {
       for (const b of spotData.balances) {
         if (b.coin === 'USDC' || b.coin === 'USDT') spotVal += parseFloat(b.total || '0');
       }
     }
-    return perpsVal + spotVal;
+    // Unified accounts: crossMarginSummary already includes spot — don't double-count
+    // Use the highest non-zero value, not sum, to avoid double-counting
+    const total = Math.max(perpsVal, crossVal, spotVal);
+    console.log('HL balance — perps:', perpsVal, 'cross:', crossVal, 'spot:', spotVal, '→ total:', total);
+    return total;
   },
 
   // ── Compute action hash for phantom agent signing ──
@@ -2925,8 +2951,9 @@ const HL = {
   },
 
   // ── Sign L1 action (phantom agent EIP-712) ──
-  async signL1Action(action, nonce) {
-    const hash = this.computeActionHash(action, nonce, null);
+  // vaultAddress = master account when agent wallet is trading on behalf
+  async signL1Action(action, nonce, vaultAddress) {
+    const hash = this.computeActionHash(action, nonce, vaultAddress || null);
     const domain = {
       name: 'Exchange', version: '1',
       chainId: 1337,
@@ -2954,13 +2981,18 @@ const HL = {
     const orderWire = { a: assetIdx, b: isBuy, p: priceStr, s: sizeStr, r: reduceOnly, t: orderType, c: null };
     const action = { type: 'order', orders: [orderWire], grouping: 'na' };
     const nonce = Date.now();
-    const signature = await this.signL1Action(action, nonce);
+    // Agent wallet: sign with master address as vaultAddress
+    const vault = this.masterAddress || null;
+    const signature = await this.signL1Action(action, nonce, vault);
+    const payload = { action, nonce, signature: { r: signature.r, s: signature.s, v: signature.v } };
+    // Include vaultAddress in POST body when trading on behalf of master account
+    if (vault) payload.vaultAddress = vault;
     const res = await fetch(this.API + '/exchange', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, nonce, signature: { r: signature.r, s: signature.s, v: signature.v } })
+      body: JSON.stringify(payload)
     });
     const result = await res.json();
-    console.log('HL order:', asset, isBuy ? 'BUY' : 'SELL', sizeStr, '@', priceStr, '→', result);
+    console.log('HL order:', asset, isBuy ? 'BUY' : 'SELL', sizeStr, '@', priceStr, '| vault:', vault, '→', result);
     return result;
   },
 
@@ -2985,11 +3017,24 @@ const HL = {
       return null;
     }
 
-    const { sig, level, target, stopPrice, rr, type } = signal;
+    const { sig, level, stopPrice, rr, type } = signal;
+    let { target } = signal;
     if (!stopPrice) { console.warn('HL: no stop price, skipping'); return null; }
 
     const isBuy = sig === 'LONG';
     const currentPrice = coinState[coinId].price;
+
+    // Cap TP at R:R 2.5 — prevents unrealistically far targets
+    const maxRR = 2.5;
+    const risk = Math.abs(currentPrice - stopPrice);
+    const maxReward = risk * maxRR;
+    if (target) {
+      const actualReward = Math.abs(target - currentPrice);
+      if (actualReward > maxReward) {
+        target = isBuy ? currentPrice + maxReward : currentPrice - maxReward;
+        console.log('HL: capped TP from signal target to R:R 2.5 →', target.toFixed(1));
+      }
+    }
 
     // Position sizing: risk-based
     const accountSize = parseFloat(localStorage.getItem('account_size') || '100');
@@ -3104,6 +3149,7 @@ async function hlFetchAccountState(){
     const perpsData = await perpsRes.json();
     const spotData = await spotRes.json();
     const ms = perpsData.marginSummary || {};
+    const cms = perpsData.crossMarginSummary || {};
     let spotBal = 0;
     if (spotData.balances) {
       for (const b of spotData.balances) {
@@ -3111,9 +3157,13 @@ async function hlFetchAccountState(){
       }
     }
     const perpsEquity = parseFloat(ms.accountValue || '0');
+    const crossEquity = parseFloat(cms.accountValue || '0');
+    // Unified accounts: take the max to avoid double-counting
+    const bestEquity = Math.max(perpsEquity, crossEquity, spotBal);
+    const bestAvail = Math.max(parseFloat(ms.totalRawUsd || '0'), parseFloat(cms.totalRawUsd || '0'), spotBal);
     return {
-      equity: perpsEquity + spotBal,
-      available: parseFloat(ms.totalRawUsd || '0') + spotBal,
+      equity: bestEquity,
+      available: bestAvail,
       upnl: parseFloat(ms.totalUnrealizedPnl || '0'),
       spotBal: spotBal
     };
