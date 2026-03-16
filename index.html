@@ -2969,15 +2969,40 @@ const HL = {
     return ethers.utils.splitSignature(sig);
   },
 
+  // ── Float to wire: match Python SDK's Decimal.normalize() — strips trailing zeros ──
+  floatToWire(x) {
+    // Match Python's: str(Decimal(str(x)).quantize(...).normalize())
+    const s = parseFloat(parseFloat(x).toPrecision(8)).toString();
+    // Ensure no trailing zeros after decimal (toPrecision handles most, but double-check)
+    if (s.includes('.')) return s.replace(/\.?0+$/, '') || '0';
+    return s;
+  },
+
+  // ── Build order type wire — key order must match Python SDK exactly ──
+  orderTypeToWire(orderType) {
+    if (orderType.limit) {
+      return { limit: { tif: orderType.limit.tif } };
+    } else if (orderType.trigger) {
+      // Key order: isMarket, triggerPx, tpsl (must match Python SDK)
+      return { trigger: {
+        isMarket: orderType.trigger.isMarket,
+        triggerPx: this.floatToWire(orderType.trigger.triggerPx),
+        tpsl: orderType.trigger.tpsl
+      }};
+    }
+    return orderType;
+  },
+
   // ── Place a single order ──
   async placeOrder(asset, isBuy, size, price, orderType, reduceOnly = false) {
     const assetIdx = this.assetMap[asset];
     if (assetIdx === undefined) throw new Error('Unknown asset: ' + asset);
     const szDec = this.szDecimals[asset] || 3;
-    const sizeStr = parseFloat(size.toFixed(szDec)).toString();
-    const priceStr = price >= 10 ? parseFloat(price.toFixed(1)).toString() : parseFloat(price.toFixed(4)).toString();
-    // Build order wire (key order matters for msgpack hash!)
-    const orderWire = { a: assetIdx, b: isBuy, p: priceStr, s: sizeStr, r: reduceOnly, t: orderType, c: null };
+    // Format numbers matching Python SDK: Decimal.normalize() strips trailing zeros
+    const sizeStr = this.floatToWire(parseFloat(size.toFixed(szDec)));
+    const priceStr = this.floatToWire(price);
+    // Build order wire — key order: a, b, p, s, r, t (NO "c" field — omitted per SDK)
+    const orderWire = { a: assetIdx, b: isBuy, p: priceStr, s: sizeStr, r: reduceOnly, t: this.orderTypeToWire(orderType) };
     const action = { type: 'order', orders: [orderWire], grouping: 'na' };
     const nonce = Date.now();
     // Agent wallet: sign with master address as vaultAddress
@@ -2986,12 +3011,13 @@ const HL = {
     const payload = { action, nonce, signature: { r: signature.r, s: signature.s, v: signature.v } };
     // Include vaultAddress in POST body when trading on behalf of master account
     if (vault) payload.vaultAddress = vault;
+    console.log('HL order wire:', JSON.stringify(action), '| vault:', vault);
     const res = await fetch(this.API + '/exchange', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
     const result = await res.json();
-    console.log('HL order:', asset, isBuy ? 'BUY' : 'SELL', sizeStr, '@', priceStr, '| vault:', vault, '→', result);
+    console.log('HL order result:', asset, isBuy ? 'BUY' : 'SELL', sizeStr, '@', priceStr, '→', JSON.stringify(result));
     return result;
   },
 
@@ -3059,13 +3085,13 @@ const HL = {
       // 2. Stop Loss (trigger, reduce only)
       const slPx = isBuy ? stopPrice * 0.98 : stopPrice * 1.02; // 2% protection beyond stop
       await this.placeOrder(asset, !isBuy, size, slPx,
-        { trigger: { triggerPx: stopPrice.toFixed(1), isMarket: true, tpsl: 'sl' } }, true);
+        { trigger: { isMarket: true, triggerPx: stopPrice, tpsl: 'sl' } }, true);
 
       // 3. Take Profit (if target exists)
       if (target) {
         const tpPx = isBuy ? target * 1.02 : target * 0.98;
         await this.placeOrder(asset, !isBuy, size, tpPx,
-          { trigger: { triggerPx: target.toFixed(1), isMarket: true, tpsl: 'tp' } }, true);
+          { trigger: { isMarket: true, triggerPx: target, tpsl: 'tp' } }, true);
       }
 
       // Track active trade
@@ -3334,14 +3360,14 @@ async function manualOpenTrade(){
     if(sl){
       const slPx = isBuy ? sl * 0.98 : sl * 1.02;
       await HL.placeOrder(coin, !isBuy, size, slPx,
-        { trigger: { triggerPx: sl.toFixed(1), isMarket: true, tpsl: 'sl' } }, true);
+        { trigger: { isMarket: true, triggerPx: sl, tpsl: 'sl' } }, true);
     }
 
     // 3. TP if set
     if(tp){
       const tpPx = isBuy ? tp * 1.02 : tp * 0.98;
       await HL.placeOrder(coin, !isBuy, size, tpPx,
-        { trigger: { triggerPx: tp.toFixed(1), isMarket: true, tpsl: 'tp' } }, true);
+        { trigger: { isMarket: true, triggerPx: tp, tpsl: 'tp' } }, true);
     }
 
     showToast(side + ' ' + coin + ' x' + size + ' @ $' + fmt(px), sl ? 'SL: $' + fmt(sl) : '', side === 'SHORT');
