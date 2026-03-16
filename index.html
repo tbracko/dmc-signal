@@ -722,8 +722,8 @@ async function sendTelegram(msg){
 }
 
 function maybeAlert(sig, tf, type, level, target, rr, coinId, state){
-  // Also respect localStorage dedup for Telegram (prevents re-alert on refresh)
-  if(isDedupSuppressed(coinId, tf, type, level)) return;
+  // NOTE: localStorage dedup is already checked in processTF before calling maybeAlert
+  // Do NOT check isDedupSuppressed here — it was already marked fired right before this call
   coinId = coinId || activeCoin;
   state = state || coinState[coinId];
   const alertKey = `${coinId}_${tf}_${type}_${Math.round(level)}`;
@@ -1530,21 +1530,20 @@ function findDMCLevels(c, dCandles, tf, asiaLevels){
 
 // ── TARGET: next obvious level in opposite direction ──────
 function findNextLevel(levels, currentPrice, direction){
-  // Only use meaningful levels for target calculation — score >= 25 filters weak noise
-  // Falls back to all levels if no quality levels found (avoids no-target edge case)
-  const qualityLevels = levels.filter(l => l.score >= 25);
+  // Use all levels with score >= 10 — lower threshold catches more 4H/1H levels
+  const qualityLevels = levels.filter(l => l.score >= 10);
   const pool = qualityLevels.length >= 2 ? qualityLevels : levels;
   const sorted = [...pool].sort((a,b)=>a.price-b.price);
+  // Max target distance: 5% from current price — beyond this, targets are unrealistic
+  const maxDist = currentPrice * 0.05;
   if(direction==='long'){
-    // Nearest quality level ABOVE current price
-    const candidates = sorted.filter(l=>l.price > currentPrice * 1.003);
+    const candidates = sorted.filter(l=>l.price > currentPrice * 1.002 && l.price < currentPrice + maxDist);
     if(candidates.length) return {price:candidates[0].price, source:candidates[0].source};
   } else {
-    // Nearest quality level BELOW current price
-    const candidates = sorted.filter(l=>l.price < currentPrice * 0.995);
+    const candidates = sorted.filter(l=>l.price < currentPrice * 0.998 && l.price > currentPrice - maxDist);
     if(candidates.length) return {price:candidates[candidates.length-1].price, source:candidates[candidates.length-1].source};
   }
-  // Fallback: ATR extension
+  // Fallback: 2.5% move from entry — conservative but realistic
   return {price: direction==='long' ? currentPrice*1.025 : currentPrice*0.975, source:'ATR est.'};
 }
 
@@ -1566,17 +1565,17 @@ function calcRR(entry, target, trapLevel, stopLevel){
 // For SHORT: next level ABOVE the trap resistance (where shorts are wrong)
 // For LONG:  next level BELOW the trap support (where longs are wrong)
 function findStopLevel(levels, trapPrice, direction){
-  // Use quality levels for stop placement — weak nearby levels make stops too tight
-  const qualityLevels = levels.filter(l => l.score >= 25);
+  // Use levels with score >= 10 for stop placement
+  const qualityLevels = levels.filter(l => l.score >= 10);
   const pool = qualityLevels.length >= 2 ? qualityLevels : levels;
   const sorted = [...pool].sort((a,b)=>a.price-b.price);
+  // Max stop distance: 3% from trap — prevents absurdly wide stops
+  const maxStopDist = trapPrice * 0.03;
   if(direction==='short'){
-    // Stop = next meaningful resistance ABOVE the trap
-    const candidates = sorted.filter(l=>l.price > trapPrice * 1.003);
+    const candidates = sorted.filter(l=>l.price > trapPrice * 1.002 && l.price < trapPrice + maxStopDist);
     return candidates.length ? candidates[0].price : trapPrice * 1.015;
   } else {
-    // Stop = next meaningful support BELOW the trap
-    const candidates = sorted.filter(l=>l.price < trapPrice * 0.997);
+    const candidates = sorted.filter(l=>l.price < trapPrice * 0.998 && l.price > trapPrice - maxStopDist);
     return candidates.length ? candidates[candidates.length-1].price : trapPrice * 0.985;
   }
 }
