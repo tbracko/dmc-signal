@@ -2933,14 +2933,25 @@ const HL = {
   },
 
   // ── Compute action hash for phantom agent signing ──
+  // Must match Python SDK: action_hash(action, vault_address, nonce, expires_after)
   computeActionHash(action, nonce, vaultAddress) {
     const packed = this.msgpack(action);
     // Nonce as 8 bytes big-endian
     const nonceBuf = new Uint8Array(8);
     let n = BigInt(nonce);
     for (let i = 7; i >= 0; i--) { nonceBuf[i] = Number(n & 0xFFn); n >>= 8n; }
-    // Vault address (20 bytes) or single zero byte
-    const vaultBuf = vaultAddress ? ethers.utils.arrayify(vaultAddress) : new Uint8Array([0]);
+    // Vault address: 0x00 if no vault, 0x01 + 20-byte address if vault
+    // This MUST match Python SDK: b"\x00" or b"\x01" + address_bytes
+    let vaultBuf;
+    if (vaultAddress) {
+      const addrBytes = ethers.utils.arrayify(vaultAddress);
+      vaultBuf = new Uint8Array(1 + addrBytes.length);
+      vaultBuf[0] = 1; // 0x01 flag
+      vaultBuf.set(addrBytes, 1);
+    } else {
+      vaultBuf = new Uint8Array([0]); // 0x00 = no vault
+    }
+    // expires_after: None in normal usage = no extra bytes
     // Concatenate: packed + nonce + vault
     const combined = new Uint8Array(packed.length + nonceBuf.length + vaultBuf.length);
     combined.set(packed);
