@@ -264,7 +264,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <body>
 
 <div class="topbar">
-  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v3.3</span></span>
+  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v3.4</span></span>
   <select id="coin-sel" onchange="switchCoin(this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:4px 8px;cursor:pointer;letter-spacing:.04em">
     <option value="bitcoin" data-sym="BTCUSDT" data-label="BTC/USD" selected>BTC/USD</option>
     <option value="hyperliquid" data-sym="HYPEUSDT" data-label="HYPE/USD">HYPE/USD</option>
@@ -3316,11 +3316,27 @@ async function hlFetchAccountState(){
     const crossEquity = parseFloat(cms.accountValue || '0');
     // Unified accounts: take the max to avoid double-counting
     const bestEquity = Math.max(perpsEquity, crossEquity, spotBal);
-    const bestAvail = Math.max(parseFloat(ms.totalRawUsd || '0'), parseFloat(cms.totalRawUsd || '0'), spotBal);
+    // Unrealized P&L: check both margin summaries
+    const msUpnl = parseFloat(ms.totalUnrealizedPnl || '0');
+    const cmsUpnl = parseFloat(cms.totalUnrealizedPnl || '0');
+    // Also compute from positions as most reliable source
+    let posUpnl = 0;
+    const positions = perpsData.assetPositions || [];
+    for (const p of positions) {
+      if (p.position) posUpnl += parseFloat(p.position.unrealizedPnl || '0');
+    }
+    // Use position-based UPNL if available, otherwise best from summaries
+    const upnl = posUpnl !== 0 ? posUpnl : (msUpnl || cmsUpnl);
+    // Available: equity minus margin used
+    const msMarginUsed = parseFloat(ms.totalMarginUsed || '0');
+    const cmsMarginUsed = parseFloat(cms.totalMarginUsed || '0');
+    const marginUsed = Math.max(msMarginUsed, cmsMarginUsed);
+    const available = bestEquity - marginUsed;
+    console.log('HL account — equity:', bestEquity, 'upnl:', upnl, '(ms:', msUpnl, 'cms:', cmsUpnl, 'pos:', posUpnl, ') margin used:', marginUsed, 'avail:', available);
     return {
       equity: bestEquity,
-      available: bestAvail,
-      upnl: parseFloat(ms.totalUnrealizedPnl || '0'),
+      available: available,
+      upnl: upnl,
       spotBal: spotBal
     };
   }catch(e){ return { equity:0, available:0, upnl:0, spotBal:0 }; }
