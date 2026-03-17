@@ -264,7 +264,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <body>
 
 <div class="topbar">
-  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v3.2</span></span>
+  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v3.3</span></span>
   <select id="coin-sel" onchange="switchCoin(this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:4px 8px;cursor:pointer;letter-spacing:.04em">
     <option value="bitcoin" data-sym="BTCUSDT" data-label="BTC/USD" selected>BTC/USD</option>
     <option value="hyperliquid" data-sym="HYPEUSDT" data-label="HYPE/USD">HYPE/USD</option>
@@ -2387,8 +2387,13 @@ function renderLog(){
 
     // Status update buttons (only for open trades)
     const exitNoteEl = e.exitNote ? `<div style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#ff9800;margin-top:5px;padding:4px 8px;background:rgba(255,152,0,.05);border-radius:4px;border:1px solid rgba(255,152,0,.15)">${e.exitNote}</div>` : '';
+    // Trade button data — encode signal info for click-to-trade
+    const coinSym = (e.coin&&COINS[e.coin]) ? COINS[e.coin].shortLabel : 'BTC';
+    const tradeBtn = (e.status==='open' && e.sig !== 'NEUTRAL' && e.stopPrice) ? `
+        <button onclick="prefillTrade('${coinSym}','${e.sig}',${e.stopPrice||0},${e.target||0})" style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:4px 12px;border-radius:5px;border:1px solid rgba(255,193,7,.4);background:rgba(255,193,7,.1);color:#ffc107;cursor:pointer;font-weight:600">⚡ TRADE</button>` : '';
     const btns = e.status==='open' ? `
       <div style="display:flex;gap:6px;margin-top:8px">
+        ${tradeBtn}
         <button onclick="updateLogStatus(${e.id},'hit')" style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:4px 10px;border-radius:5px;border:1px solid rgba(0,230,118,.3);background:rgba(0,230,118,.08);color:#00e676;cursor:pointer">✓ TP HIT</button>
         <button onclick="updateLogStatus(${e.id},'stopped')" style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:4px 10px;border-radius:5px;border:1px solid rgba(255,61,90,.3);background:rgba(255,61,90,.08);color:#ff3d5a;cursor:pointer">✗ STOPPED</button>
       </div>` : '';
@@ -3367,7 +3372,7 @@ async function renderTrades(){
           ${liq ? `<div class="pos-cell"><div class="pos-cell-lbl">Liq. Price</div><div class="pos-cell-val" style="color:#ff6b6b">$${fmt(liq)}</div></div>` : ''}
           <div class="pos-cell"><div class="pos-cell-lbl">Unreal. P&L</div><div class="pos-cell-val" style="color:${upnl>=0?'#00e676':'#ff3d5a'}">${upnl>=0?'+':''}$${upnl.toFixed(2)}</div></div>
         </div>
-        <button class="pos-close-btn" onclick="closeTrade('${coin}',${szi})">CLOSE ${coin} ${side}</button>
+        <button class="pos-close-btn" onclick="closeTrade('${coin}',${szi},${entry})">CLOSE ${coin} ${side}</button>
       </div>`;
     }).join('');
   }
@@ -3391,21 +3396,17 @@ async function renderTrades(){
 }
 
 // Close a position via HL market order
-async function closeTrade(coin, szi){
+async function closeTrade(coin, szi, entryPx){
   if(!HL.wallet){ showToast('Connect Hyperliquid wallet first'); return; }
   if(!confirm('Close ' + coin + ' position?')) return;
 
   const isLong = szi > 0;
   const size = Math.abs(szi);
-  const currentPrice = Object.values(coinState).find(s => {
-    const sym = { bitcoin:'BTC', hyperliquid:'HYPE', solana:'SOL' };
-    return Object.entries(sym).find(([k,v]) => v === coin)?.[0] && s.price > 0;
-  })?.price || 0;
 
-  // Look up price from coinState by mapping coin symbol to coinId
+  // Look up current price from coinState
   const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana' };
   const cid = coinIdMap[coin];
-  const px = cid ? coinState[cid].price : currentPrice;
+  const px = cid ? coinState[cid].price : 0;
   const slip = px * 0.01; // 1% slippage for IOC close to ensure fill
   const closePx = isLong ? px - slip : px + slip; // Close = opposite side
 
@@ -3432,12 +3433,14 @@ async function closeTrade(coin, szi){
       return;
     }
 
-    // Record closed trade
-    const entry = 0; // We don't know entry from here, HL position has it
+    // Record closed trade with real P&L
+    const exitPrice = result.avgPx ? +result.avgPx : px;
+    const realEntry = entryPx || exitPrice;
+    const pnl = isLong ? (exitPrice - realEntry) * size : (realEntry - exitPrice) * size;
     const closed = loadClosedTrades();
     closed.unshift({
       coin, side: isLong ? 'LONG' : 'SHORT', size,
-      entry: px, exit: px, pnl: 0, // Will be updated on next refresh with real data
+      entry: realEntry, exit: exitPrice, pnl: pnl,
       ts: new Date().toISOString()
     });
     saveClosedTrades(closed);
@@ -3454,6 +3457,41 @@ async function closeTrade(coin, szi){
     showToast('Close error: ' + e.message);
     console.error('Close trade error:', e);
   }
+}
+
+// Pre-fill trade form from log entry and switch to Trades page
+function prefillTrade(coin, sig, sl, tp){
+  // Switch to trades page
+  const tradesBtn = document.querySelector('.nb[onclick*="trades"]');
+  if(tradesBtn) tradesBtn.click();
+
+  // Set form values
+  setTimeout(() => {
+    document.getElementById('mf-coin').value = coin;
+    document.getElementById('mf-side').value = sig;
+    if(sl) document.getElementById('mf-sl').value = sl.toFixed(2);
+    if(tp) document.getElementById('mf-tp').value = tp.toFixed(2);
+
+    // Auto-calculate suggested size from risk settings
+    const accountSize = parseFloat(localStorage.getItem('account_size') || '100');
+    const riskPct = parseFloat(localStorage.getItem('risk_pct') || '1');
+    const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana' };
+    const cid = coinIdMap[coin];
+    const px = cid ? coinState[cid].price : 0;
+    if(px && sl){
+      const riskAmount = accountSize * riskPct / 100;
+      const slDist = Math.abs(px - sl);
+      if(slDist > px * 0.001){
+        const szDec = HL.szDecimals[coin] || 3;
+        const suggestedSize = (riskAmount / slDist).toFixed(szDec);
+        document.getElementById('mf-size').value = suggestedSize;
+      }
+    }
+
+    // Scroll the form into view
+    document.getElementById('mf-coin').scrollIntoView({ behavior:'smooth', block:'center' });
+    showToast(`${sig} ${coin} pre-filled`, sl ? `SL: $${fmt(sl)}` : '', sig === 'SHORT');
+  }, 300);
 }
 
 // Manual open trade
