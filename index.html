@@ -264,10 +264,10 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <body>
 
 <div class="topbar">
-  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v3.0</span></span>
+  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v3.2</span></span>
   <select id="coin-sel" onchange="switchCoin(this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:4px 8px;cursor:pointer;letter-spacing:.04em">
     <option value="bitcoin" data-sym="BTCUSDT" data-label="BTC/USD" selected>BTC/USD</option>
-    <option value="ethereum" data-sym="ETHUSDT" data-label="ETH/USD">ETH/USD</option>
+    <option value="hyperliquid" data-sym="HYPEUSDT" data-label="HYPE/USD">HYPE/USD</option>
     <option value="solana" data-sym="SOLUSDT" data-label="SOL/USD">SOL/USD</option>
   </select>
   <div class="topbar-r">
@@ -525,7 +525,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
         <div class="mf-label">Coin</div>
         <select class="mf-select" id="mf-coin">
           <option value="BTC">BTC</option>
-          <option value="ETH">ETH</option>
+          <option value="HYPE">HYPE</option>
           <option value="SOL">SOL</option>
         </select>
       </div>
@@ -583,22 +583,22 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 
 <script>
 'use strict';
-const BINANCE='https://api.binance.com/api/v3', REFRESH=120000;
+const BINANCE='https://api.binance.com/api/v3', BYBIT='https://api.bybit.com/v5/market', REFRESH=120000;
 const TFS=[{l:'1W',iv:'W',w:5},{l:'1D',iv:'D',w:4},{l:'4H',iv:'240',w:3},{l:'1H',iv:'60',w:2},{l:'15m',iv:'15',w:1}];
 
 // ── MULTI-COIN STATE ──────────────────────────────────────
 // Each coin runs its own independent engine loop
 const COINS = {
-  bitcoin:  { id:'bitcoin',  label:'BTC/USD', sym:'BINANCE:BTCUSDT', shortLabel:'BTC', bnSym:'BTCUSDT' },
-  ethereum: { id:'ethereum', label:'ETH/USD', sym:'BINANCE:ETHUSDT', shortLabel:'ETH', bnSym:'ETHUSDT' },
-  solana:   { id:'solana',   label:'SOL/USD', sym:'BINANCE:SOLUSDT', shortLabel:'SOL', bnSym:'SOLUSDT' },
+  bitcoin:     { id:'bitcoin',     label:'BTC/USD',  sym:'BINANCE:BTCUSDT', shortLabel:'BTC',  apiSym:'BTCUSDT',  exchange:'binance' },
+  hyperliquid: { id:'hyperliquid', label:'HYPE/USD', sym:'BYBIT:HYPEUSDT',  shortLabel:'HYPE', apiSym:'HYPEUSDT', exchange:'bybit' },
+  solana:      { id:'solana',      label:'SOL/USD',  sym:'BINANCE:SOLUSDT', shortLabel:'SOL',  apiSym:'SOLUSDT',  exchange:'binance' },
 };
 let activeCoin = 'bitcoin'; // currently viewed coin
 
 // Per-coin state — keyed by coin id
 const coinState = {
   bitcoin:  { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
-  ethereum: { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
+  hyperliquid: { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
   solana:   { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
 };
 
@@ -834,10 +834,9 @@ document.getElementById('tf-bar').addEventListener('click',e=>{
 // ── API ───────────────────────────────────────────────────
 async function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
 
-// ── BINANCE API — no key, no rate limits, real OHLC candles ──────────────
-// Endpoint: GET /api/v3/klines?symbol=BTCUSDT&interval=1w&limit=52
-// Returns: [[openTime, open, high, low, close, vol, closeTime, ...], ...]
-// Intervals: 1w, 1d, 4h, 1h, 15m
+// ── EXCHANGE APIs — multi-exchange candle + price fetching ──────────────
+
+// Binance: GET /api/v3/klines — returns [[openTime, o, h, l, c, vol, ...], ...]
 async function bnKlines(sym, interval, limit){
   const url=`${BINANCE}/klines?symbol=${sym}&interval=${interval}&limit=${limit}`;
   const r=await fetch(url);
@@ -850,11 +849,45 @@ async function bnKlines(sym, interval, limit){
   }));
 }
 
+// Bybit: GET /v5/market/kline — returns { result: { list: [[ts, o, h, l, c, vol, turnover], ...] } }
+// Note: Bybit returns newest-first, so we reverse. Intervals: 1,3,5,15,30,60,120,240,360,720,D,W,M
+async function bybitKlines(sym, interval, limit){
+  const url=`${BYBIT}/kline?category=spot&symbol=${sym}&interval=${interval}&limit=${limit}`;
+  const r=await fetch(url);
+  if(!r.ok) throw new Error(`Bybit ${interval}: ${r.status}`);
+  const json=await r.json();
+  if(json.retCode!==0) throw new Error(`Bybit ${interval}: ${json.retMsg}`);
+  const raw=json.result?.list;
+  if(!Array.isArray(raw)||raw.length<4) throw new Error(`Bybit ${interval}: empty`);
+  // Bybit returns newest first — reverse to oldest first (matches Binance order)
+  return raw.reverse().map(k=>({
+    t:+k[0], o:+k[1], h:+k[2], l:+k[3], c:+k[4],
+    bh:Math.max(+k[1],+k[4]), bl:Math.min(+k[1],+k[4])
+  }));
+}
+
+// Interval mapping per exchange
+const INTERVAL_MAP = {
+  binance: { '1W':'1w', '1D':'1d', '4H':'4h', '1H':'1h', '15m':'15m' },
+  bybit:   { '1W':'W',  '1D':'D',  '4H':'240', '1H':'60', '15m':'15' }
+};
+
 async function getPrice(coinId){
   coinId=coinId||activeCoin;
-  const sym=COINS[coinId].bnSym;
-  // Binance ticker — returns price + 24h change instantly
-  const r=await fetch(`${BINANCE}/ticker/24hr?symbol=${sym}`);
+  const coin=COINS[coinId];
+  if(coin.exchange==='bybit'){
+    const r=await fetch(`${BYBIT}/tickers?category=spot&symbol=${coin.apiSym}`);
+    if(!r.ok) throw new Error('Bybit price: '+r.status);
+    const json=await r.json();
+    const t=json.result?.list?.[0];
+    if(!t) throw new Error('Bybit price: no data');
+    const price=+t.lastPrice;
+    const prevPrice=+t.prevPrice24h||price;
+    const change=prevPrice>0?((price-prevPrice)/prevPrice*100):0;
+    return{price, change};
+  }
+  // Default: Binance
+  const r=await fetch(`${BINANCE}/ticker/24hr?symbol=${coin.apiSym}`);
   if(!r.ok) throw new Error('Price: '+r.status);
   const d=await r.json();
   return{price:+d.lastPrice, change:+d.priceChangePercent};
@@ -862,15 +895,13 @@ async function getPrice(coinId){
 
 async function getCandles(tf, coinId){
   coinId=coinId||activeCoin;
-  const sym=COINS[coinId].bnSym;
-  // Each call returns real OHLC candles for the exact interval — no aggregation needed
-  switch(tf.l){
-    case'1W': return bnKlines(sym,'1w',104);  // 104 weekly candles (~2 years)
-    case'1D': return bnKlines(sym,'1d',180);  // 180 daily candles (~6 months)
-    case'4H': return bnKlines(sym,'4h',500);  // 500 four-hour candles (~83 days)
-    case'1H': return bnKlines(sym,'1h',500);  // 500 hourly candles (~20 days)
-    case'15m':return bnKlines(sym,'15m',192); // 192 fifteen-minute candles (~48h)
-  }
+  const coin=COINS[coinId];
+  const iv=INTERVAL_MAP[coin.exchange][tf.l];
+  // Limit: more for higher TFs, fewer for HYPE (newer coin, less history)
+  const limits = { '1W':104, '1D':180, '4H':500, '1H':500, '15m':192 };
+  const limit = coin.exchange==='bybit' ? Math.min(limits[tf.l], 200) : limits[tf.l];
+  if(coin.exchange==='bybit') return bybitKlines(coin.apiSym, iv, limit);
+  return bnKlines(coin.apiSym, iv, limit);
 }
 
 // aggregateCandles kept for any legacy callers (unused but harmless)
@@ -2634,7 +2665,7 @@ function processTF(i, candles, dCandles, coinId){
         const conf = aW>0 ? Math.round(Math.max(wL,wS)/aW*100) : 0;
         const minConf = parseInt(localStorage.getItem('hl_min_conf') || '50');
         const majorSig = wL > wS ? 'LONG' : wS > wL ? 'SHORT' : null;
-        const SYM = { bitcoin:'BTC', ethereum:'ETH', solana:'SOL' };
+        const SYM = { bitcoin:'BTC', hyperliquid:'HYPE', solana:'SOL' };
         const sym = SYM[coinId] || coinId;
         if(conf < minConf){
           console.log(`HL auto-trade SKIP ${sym} ${d.sig}: confidence ${conf}% < min ${minConf}%`);
@@ -2781,40 +2812,62 @@ function schedule(){} // no-op, replaced by scheduleAll
 // ── WEBSOCKET: Real-time 15m candle updates ──────────────
 function connectWS(coinId){
   const s=coinState[coinId];
-  const sym=COINS[coinId].bnSym.toLowerCase();
+  const coin=COINS[coinId];
+  const sym=coin.apiSym;
+
+  function handleCandle(candle, isClosed){
+    s.price=candle.c;
+    if(coinId===activeCoin){
+      document.getElementById('tb-price').textContent='$'+fmt(candle.c);
+    }
+    if(s.candles15m&&s.candles15m.length){
+      const last=s.candles15m[s.candles15m.length-1];
+      if(last.t===candle.t) s.candles15m[s.candles15m.length-1]=candle;
+      else if(isClosed) s.candles15m.push(candle);
+    }
+    if(isClosed && s.candles15m && s.candles15m.length>20){
+      const dCandles = s.dailyCandles || null;
+      processTF(4, s.candles15m, dCandles, coinId);
+      checkAutoOutcomes(coinId);
+      s.wsCloseCount = (s.wsCloseCount || 0) + 1;
+      if(s.wsCloseCount % 4 === 0){
+        runCoin(coinId).catch(e=>console.warn('BG refresh',coinId,e));
+      }
+    }
+  }
+
   try{
-    const ws=new WebSocket('wss://stream.binance.com:9443/ws/'+sym+'@kline_15m');
-    ws.onmessage=function(evt){
-      try{
-        const d=JSON.parse(evt.data);
-        if(!d.k) return;
-        const k=d.k;
-        const candle={t:k.t,o:+k.o,h:+k.h,l:+k.l,c:+k.c,bh:Math.max(+k.o,+k.c),bl:Math.min(+k.o,+k.c)};
-        // Update price immediately
-        s.price=+k.c;
-        if(coinId===activeCoin){
-          document.getElementById('tb-price').textContent='$'+fmt(+k.c);
-        }
-        // Update last 15m candle in state
-        if(s.candles15m&&s.candles15m.length){
-          const last=s.candles15m[s.candles15m.length-1];
-          if(last.t===candle.t) s.candles15m[s.candles15m.length-1]=candle;
-          else if(k.x) s.candles15m.push(candle); // new candle closed
-        }
-        // On candle CLOSE, re-run 15m signal + trigger full refresh
-        if(k.x && s.candles15m && s.candles15m.length>20){
-          const dCandles = s.dailyCandles || null;
-          processTF(4, s.candles15m, dCandles, coinId);
-          checkAutoOutcomes(coinId);
-          // Also trigger a full coin refresh every 4 candle closes (1h)
-          // This ensures HTF signals fire even in background tabs
-          s.wsCloseCount = (s.wsCloseCount || 0) + 1;
-          if(s.wsCloseCount % 4 === 0){
-            runCoin(coinId).catch(e=>console.warn('BG refresh',coinId,e));
-          }
-        }
-      }catch(e){console.warn('WS parse',e);}
-    };
+    let ws;
+    if(coin.exchange==='bybit'){
+      // Bybit public WS — subscribe to 15m kline
+      ws=new WebSocket('wss://stream.bybit.com/v5/public/spot');
+      ws.onopen=function(){
+        ws.send(JSON.stringify({ op:'subscribe', args:['kline.15.'+sym] }));
+      };
+      ws.onmessage=function(evt){
+        try{
+          const msg=JSON.parse(evt.data);
+          if(!msg.data||!msg.topic) return;
+          const d=msg.data[0];
+          if(!d) return;
+          const candle={t:+d.start, o:+d.open, h:+d.high, l:+d.low, c:+d.close,
+            bh:Math.max(+d.open,+d.close), bl:Math.min(+d.open,+d.close)};
+          handleCandle(candle, d.confirm);
+        }catch(e){console.warn('Bybit WS parse',e);}
+      };
+    } else {
+      // Binance WS
+      ws=new WebSocket('wss://stream.binance.com:9443/ws/'+sym.toLowerCase()+'@kline_15m');
+      ws.onmessage=function(evt){
+        try{
+          const d=JSON.parse(evt.data);
+          if(!d.k) return;
+          const k=d.k;
+          const candle={t:k.t,o:+k.o,h:+k.h,l:+k.l,c:+k.c,bh:Math.max(+k.o,+k.c),bl:Math.min(+k.o,+k.c)};
+          handleCandle(candle, k.x);
+        }catch(e){console.warn('WS parse',e);}
+      };
+    }
     ws.onclose=function(){
       console.log('WS closed for',coinId,'— reconnecting in 5s');
       setTimeout(()=>connectWS(coinId),5000);
@@ -2957,7 +3010,7 @@ const HL = {
       });
       const data = await res.json();
       const positions = data.assetPositions || [];
-      const symToId = { BTC: 'bitcoin', ETH: 'ethereum', SOL: 'solana' };
+      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SOL: 'solana' };
       this.activeTrades = {};
       for (const p of positions) {
         const pos = p.position;
@@ -3095,7 +3148,7 @@ const HL = {
 
   // ── Execute full trade: entry + SL + TP ──
   async executeTrade(coinId, signal, confidence) {
-    const SYM = { bitcoin: 'BTC', ethereum: 'ETH', solana: 'SOL' };
+    const SYM = { bitcoin: 'BTC', hyperliquid: 'HYPE', solana: 'SOL' };
     const asset = SYM[coinId];
     if (!asset || !this.enabled || !this.wallet) return null;
 
@@ -3345,12 +3398,12 @@ async function closeTrade(coin, szi){
   const isLong = szi > 0;
   const size = Math.abs(szi);
   const currentPrice = Object.values(coinState).find(s => {
-    const sym = { bitcoin:'BTC', ethereum:'ETH', solana:'SOL' };
+    const sym = { bitcoin:'BTC', hyperliquid:'HYPE', solana:'SOL' };
     return Object.entries(sym).find(([k,v]) => v === coin)?.[0] && s.price > 0;
   })?.price || 0;
 
   // Look up price from coinState by mapping coin symbol to coinId
-  const coinIdMap = { BTC:'bitcoin', ETH:'ethereum', SOL:'solana' };
+  const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana' };
   const cid = coinIdMap[coin];
   const px = cid ? coinState[cid].price : currentPrice;
   const slip = px * 0.01; // 1% slippage for IOC close to ensure fill
@@ -3392,7 +3445,7 @@ async function closeTrade(coin, szi){
     showToast('Position closed: ' + coin, '', false);
 
     // Also clear from HL.activeTrades
-    const coinIdMap2 = { BTC:'bitcoin', ETH:'ethereum', SOL:'solana' };
+    const coinIdMap2 = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana' };
     if(coinIdMap2[coin]) delete HL.activeTrades[coinIdMap2[coin]];
 
     // Refresh trades page after a short delay for settlement
@@ -3420,7 +3473,7 @@ async function manualOpenTrade(){
   btn.disabled = true;
 
   const isBuy = side === 'LONG';
-  const coinIdMap = { BTC:'bitcoin', ETH:'ethereum', SOL:'solana' };
+  const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana' };
   const cid = coinIdMap[coin];
   const px = cid ? coinState[cid].price : 0;
   if(!px){ btn.textContent = 'OPEN TRADE'; btn.disabled = false; showToast('No price data for ' + coin); return; }
@@ -3480,13 +3533,13 @@ window.addEventListener('DOMContentLoaded',()=>{
   loadSettings();
   renderLog();
   document.getElementById('tf-cards').innerHTML=TFS.map(tf=>`<div class="tfc none"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type NONE">···</span><span class="tfc-sig WAIT" style="margin-left:auto">—</span></div><div class="tfc-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div></div>`).join('');
-  // BTC first (active coin, renders UI immediately), then ETH + SOL staggered
+  // BTC first (active coin, renders UI immediately), then HYPE + SOL staggered
   // Staggering avoids Binance rate limits from 15+ simultaneous requests
   runCoin('bitcoin').then(() => {
     scheduleAll();
     connectWS('bitcoin');
   });
-  setTimeout(() => runCoin('ethereum').then(() => connectWS('ethereum')), 2000);
+  setTimeout(() => runCoin('hyperliquid').then(() => connectWS('hyperliquid')), 2000);
   setTimeout(() => runCoin('solana').then(() => connectWS('solana')), 4000);
 
   // Auto-refresh all coins when page becomes visible (mobile Safari kills WS in background)
@@ -3494,7 +3547,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     if (document.visibilityState === 'visible') {
       console.log('Page became visible — refreshing all coins');
       runCoin('bitcoin').catch(e=>console.warn('vis refresh btc',e));
-      setTimeout(() => runCoin('ethereum').catch(e=>console.warn('vis refresh eth',e)), 1000);
+      setTimeout(() => runCoin('hyperliquid').catch(e=>console.warn('vis refresh hype',e)), 1000);
       setTimeout(() => runCoin('solana').catch(e=>console.warn('vis refresh sol',e)), 2000);
     }
   });
@@ -3503,7 +3556,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   setInterval(() => {
     console.log('Periodic full refresh');
     runCoin('bitcoin').catch(e=>console.warn('periodic btc',e));
-    setTimeout(() => runCoin('ethereum').catch(e=>console.warn('periodic eth',e)), 1000);
+    setTimeout(() => runCoin('hyperliquid').catch(e=>console.warn('periodic hype',e)), 1000);
     setTimeout(() => runCoin('solana').catch(e=>console.warn('periodic sol',e)), 2000);
   }, 5 * 60 * 1000);
 
