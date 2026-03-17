@@ -264,7 +264,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <body>
 
 <div class="topbar">
-  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v2.9</span></span>
+  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v3.0</span></span>
   <select id="coin-sel" onchange="switchCoin(this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:4px 8px;cursor:pointer;letter-spacing:.04em">
     <option value="bitcoin" data-sym="BTCUSDT" data-label="BTC/USD" selected>BTC/USD</option>
     <option value="ethereum" data-sym="ETHUSDT" data-label="ETH/USD">ETH/USD</option>
@@ -2633,10 +2633,22 @@ function processTF(i, candles, dCandles, coinId){
         TFS.forEach(t=>{ const r=s.results[t.l]; if(!r)return; if(r.type!=='NONE')aW+=t.w; if(r.sig==='LONG')wL+=t.w; if(r.sig==='SHORT')wS+=t.w; });
         const conf = aW>0 ? Math.round(Math.max(wL,wS)/aW*100) : 0;
         const minConf = parseInt(localStorage.getItem('hl_min_conf') || '50');
-        // Only trade if confidence meets threshold and signal direction aligns with majority
         const majorSig = wL > wS ? 'LONG' : wS > wL ? 'SHORT' : null;
-        if(conf >= minConf && d.sig === majorSig){
-          HL.executeTrade(coinId, { ...d, tf: tf.l }, conf).catch(e=>console.error('HL auto-trade error:', e));
+        const SYM = { bitcoin:'BTC', ethereum:'ETH', solana:'SOL' };
+        const sym = SYM[coinId] || coinId;
+        if(conf < minConf){
+          console.log(`HL auto-trade SKIP ${sym} ${d.sig}: confidence ${conf}% < min ${minConf}%`);
+        } else if(d.sig !== majorSig){
+          console.log(`HL auto-trade SKIP ${sym}: signal ${d.sig} != majority ${majorSig}`);
+        } else if(HL.activeTrades[coinId]){
+          console.log(`HL auto-trade SKIP ${sym}: already in ${HL.activeTrades[coinId].side} position`);
+        } else {
+          console.log(`HL auto-trade FIRE ${sym} ${d.sig} | conf: ${conf}% | SL: ${d.stopPrice}`);
+          showToast(`AUTO: ${d.sig} ${sym} (${conf}%)`, `SL: $${fmt(d.stopPrice)}`, d.sig === 'SHORT');
+          HL.executeTrade(coinId, { ...d, tf: tf.l }, conf).then(r => {
+            if(r) { showToast(`FILLED: ${d.sig} ${sym}`, '', d.sig === 'SHORT'); HL.syncPositions(); }
+            else showToast(`AUTO-TRADE: ${sym} order not filled`, '', true);
+          }).catch(e=>{ console.error('HL auto-trade error:', e); showToast('AUTO-TRADE ERROR: ' + e.message, '', true); });
         }
       }
     }
@@ -2872,7 +2884,9 @@ const HL = {
       this.enabled = localStorage.getItem('hl_auto_trade') === 'true';
       this.tradesToday = 0;
       this.lastTradeDay = new Date().toDateString();
-      console.log('HL ready:', this.address, '| Master:', this.masterAddress || 'not set', '| Assets:', Object.keys(this.assetMap).join(', '));
+      // Sync with real positions so auto-trader knows what's already open
+      await this.syncPositions();
+      console.log('HL ready:', this.address, '| Master:', this.masterAddress || 'not set', '| Auto:', this.enabled, '| Assets:', Object.keys(this.assetMap).join(', '));
       return true;
     } catch (e) {
       console.error('HL init failed:', e);
@@ -2930,6 +2944,38 @@ const HL = {
     const total = Math.max(perpsVal, crossVal, spotVal);
     console.log('HL balance — perps:', perpsVal, 'cross:', crossVal, 'spot:', spotVal, '→ total:', total);
     return total;
+  },
+
+  // ── Sync activeTrades with real Hyperliquid positions ──
+  // Prevents duplicate entries and keeps auto-trader aware of existing positions
+  async syncPositions() {
+    try {
+      const queryAddr = (this.masterAddress || this.address).toLowerCase();
+      const res = await fetch(this.API + '/info', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr })
+      });
+      const data = await res.json();
+      const positions = data.assetPositions || [];
+      const symToId = { BTC: 'bitcoin', ETH: 'ethereum', SOL: 'solana' };
+      this.activeTrades = {};
+      for (const p of positions) {
+        const pos = p.position;
+        if (!pos || parseFloat(pos.szi) === 0) continue;
+        const coinId = symToId[pos.coin];
+        if (!coinId) continue;
+        const szi = parseFloat(pos.szi);
+        this.activeTrades[coinId] = {
+          asset: pos.coin,
+          side: szi > 0 ? 'LONG' : 'SHORT',
+          size: Math.abs(szi),
+          entry: parseFloat(pos.entryPx || '0')
+        };
+      }
+      console.log('HL synced positions:', Object.keys(this.activeTrades).length, 'active →', JSON.stringify(this.activeTrades));
+    } catch (e) {
+      console.warn('HL syncPositions failed:', e);
+    }
   },
 
   // ── Compute action hash for phantom agent signing ──
@@ -3099,8 +3145,8 @@ const HL = {
     const minSize = Math.pow(10, -szDec);
     if (size < minSize) { console.warn('HL: size too small:', size); return null; }
 
-    // Entry: IOC limit with 0.5% slippage
-    const slip = currentPrice * 0.005;
+    // Entry: IOC limit with 1% slippage to ensure fill
+    const slip = currentPrice * 0.01;
     const entryPx = isBuy ? currentPrice + slip : currentPrice - slip;
 
     try {
@@ -3379,7 +3425,7 @@ async function manualOpenTrade(){
   const px = cid ? coinState[cid].price : 0;
   if(!px){ btn.textContent = 'OPEN TRADE'; btn.disabled = false; showToast('No price data for ' + coin); return; }
 
-  const slip = px * 0.005;
+  const slip = px * 0.01; // 1% slippage for IOC to ensure fill
   const entryPx = isBuy ? px + slip : px - slip;
 
   try{
