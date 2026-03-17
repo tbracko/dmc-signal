@@ -264,7 +264,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <body>
 
 <div class="topbar">
-  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v2.8</span></span>
+  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v2.9</span></span>
   <select id="coin-sel" onchange="switchCoin(this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:4px 8px;cursor:pointer;letter-spacing:.04em">
     <option value="bitcoin" data-sym="BTCUSDT" data-label="BTC/USD" selected>BTC/USD</option>
     <option value="ethereum" data-sym="ETHUSDT" data-label="ETH/USD">ETH/USD</option>
@@ -2982,9 +2982,8 @@ const HL = {
 
   // ── Float to wire: match Python SDK's Decimal.normalize() — strips trailing zeros ──
   floatToWire(x) {
-    // Match Python's: str(Decimal(str(x)).quantize(...).normalize())
-    const s = parseFloat(parseFloat(x).toPrecision(8)).toString();
-    // Ensure no trailing zeros after decimal (toPrecision handles most, but double-check)
+    // Hyperliquid requires at most 5 significant figures for prices
+    const s = parseFloat(parseFloat(x).toPrecision(5)).toString();
     if (s.includes('.')) return s.replace(/\.?0+$/, '') || '0';
     return s;
   },
@@ -3027,6 +3026,24 @@ const HL = {
     });
     const result = await res.json();
     console.log('HL order result:', asset, isBuy ? 'BUY' : 'SELL', sizeStr, '@', priceStr, '→', JSON.stringify(result));
+
+    // Parse Hyperliquid response — top-level status:"ok" does NOT mean the order filled
+    // The real status is inside result.response.data.statuses[0]
+    if (result.status === 'ok' && result.response?.data?.statuses) {
+      const s = result.response.data.statuses[0];
+      if (s?.error) {
+        console.error('HL order inner error:', s.error);
+        return { status: 'err', response: s.error };
+      }
+      if (s?.filled) {
+        console.log('HL order FILLED:', s.filled.totalSz, '@', s.filled.avgPx);
+        return { status: 'ok', filled: true, totalSz: s.filled.totalSz, avgPx: s.filled.avgPx, oid: s.filled.oid, raw: result };
+      }
+      if (s?.resting) {
+        console.log('HL order RESTING (not filled):', s.resting.oid);
+        return { status: 'ok', filled: false, resting: true, oid: s.resting.oid, raw: result };
+      }
+    }
     return result;
   },
 
@@ -3090,6 +3107,7 @@ const HL = {
       // 1. Market entry
       const entryRes = await this.placeOrder(asset, isBuy, size, entryPx, { limit: { tif: 'Ioc' } });
       if (entryRes.status === 'err') { console.error('HL entry failed:', entryRes.response); return null; }
+      if (entryRes.filled === false || (!entryRes.filled && !entryRes.totalSz)) { console.error('HL entry not filled'); return null; }
 
       // 2. Stop Loss (trigger, reduce only)
       const slPx = isBuy ? stopPrice * 0.98 : stopPrice * 1.02; // 2% protection beyond stop
@@ -3289,7 +3307,7 @@ async function closeTrade(coin, szi){
   const coinIdMap = { BTC:'bitcoin', ETH:'ethereum', SOL:'solana' };
   const cid = coinIdMap[coin];
   const px = cid ? coinState[cid].price : currentPrice;
-  const slip = px * 0.005;
+  const slip = px * 0.01; // 1% slippage for IOC close to ensure fill
   const closePx = isLong ? px - slip : px + slip; // Close = opposite side
 
   try{
@@ -3302,6 +3320,14 @@ async function closeTrade(coin, szi){
 
     if(result.status === 'err'){
       showToast('Close failed: ' + (result.response || 'Unknown error'));
+      btn.textContent = 'RETRY CLOSE';
+      btn.disabled = false;
+      return;
+    }
+
+    // Check if IOC order actually filled (status:"ok" doesn't mean it filled)
+    if(result.filled === false || (!result.filled && !result.totalSz)){
+      showToast('Close order not filled — try again or use wider slippage');
       btn.textContent = 'RETRY CLOSE';
       btn.disabled = false;
       return;
@@ -3361,6 +3387,11 @@ async function manualOpenTrade(){
     const result = await HL.placeOrder(coin, isBuy, size, entryPx, { limit: { tif: 'Ioc' } });
     if(result.status === 'err'){
       showToast('Order failed: ' + (result.response || 'Unknown'));
+      btn.textContent = 'OPEN TRADE'; btn.disabled = false;
+      return;
+    }
+    if(result.filled === false || (!result.filled && !result.totalSz)){
+      showToast('Entry order not filled — try again');
       btn.textContent = 'OPEN TRADE'; btn.disabled = false;
       return;
     }
