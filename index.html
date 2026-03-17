@@ -264,7 +264,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <body>
 
 <div class="topbar">
-  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v3.5</span></span>
+  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v3.6</span></span>
   <select id="coin-sel" onchange="switchCoin(this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:4px 8px;cursor:pointer;letter-spacing:.04em">
     <option value="bitcoin" data-sym="BTCUSDT" data-label="BTC/USD" selected>BTC/USD</option>
     <option value="hyperliquid" data-sym="HYPEUSDT" data-label="HYPE/USD">HYPE/USD</option>
@@ -992,19 +992,18 @@ function findVPeaks(c, tf){
       if(testCount >= 2) score = Math.round(score * 0.5);
       else if(testCount === 1) score = Math.round(score * 0.75);
       const strength = classifyStrength(score, range, wickUp);
-      if(strength !== 'weak'){
-        const flippedTypeR = detectFlippedLevel(c, i, 'resistance', x.bh);
-        L.push({
-          price: x.bh,
-          bh: x.bh, bl: x.bh * 0.999,
-          type: 'resistance',
-          flippedType: flippedTypeR, // 'flipped_support' if price broke above it
-          wickSize: wickUp,
-          score, strength, tested, testCount,
-          idx: i, tf,
-          source: `V-High${wickUp > range*wickRatio ? ' (wick reject)' : ''}`
-        });
-      }
+      // Include all levels — weak ones still useful when nearby; strength shown to user
+      const flippedTypeR = detectFlippedLevel(c, i, 'resistance', x.bh);
+      L.push({
+        price: x.bh,
+        bh: x.bh, bl: x.bh * 0.999,
+        type: 'resistance',
+        flippedType: flippedTypeR,
+        wickSize: wickUp,
+        score, strength, tested, testCount,
+        idx: i, tf,
+        source: `V-High${wickUp > range*wickRatio ? ' (wick reject)' : ''}`
+      });
     }
 
     // V-LOW: body low is local swing low AND lower wick shows rejection
@@ -1015,19 +1014,17 @@ function findVPeaks(c, tf){
       if(testCount >= 2) score = Math.round(score * 0.5);
       else if(testCount === 1) score = Math.round(score * 0.75);
       const strength = classifyStrength(score, range, wickDown);
-      if(strength !== 'weak'){
-        const flippedTypeS = detectFlippedLevel(c, i, 'support', x.bl);
-        L.push({
-          price: x.bl,
-          bh: x.bl * 1.001, bl: x.bl,
-          type: 'support',
-          flippedType: flippedTypeS, // 'flipped_resistance' if price broke below it
-          wickSize: wickDown,
-          score, strength, tested, testCount,
-          idx: i, tf,
-          source: `V-Low${wickDown > range*wickRatio ? ' (wick reject)' : ''}`
-        });
-      }
+      const flippedTypeS = detectFlippedLevel(c, i, 'support', x.bl);
+      L.push({
+        price: x.bl,
+        bh: x.bl * 1.001, bl: x.bl,
+        type: 'support',
+        flippedType: flippedTypeS,
+        wickSize: wickDown,
+        score, strength, tested, testCount,
+        idx: i, tf,
+        source: `V-Low${wickDown > range*wickRatio ? ' (wick reject)' : ''}`
+      });
     }
   }
   return L;
@@ -2120,12 +2117,20 @@ function collectLevels(wC, dC, p, c15m, h4C, h1C){
   for(const l of all){
     if(!dd.find(d=>Math.abs(d.price-l.price)/l.price<0.0015)) dd.push(l);
   }
-  // Re-sort by price descending
-  dd.sort((a,b)=>b.price-a.price);
 
-  // Return 16 above + 16 below current price (more levels for better R:R targets)
-  const above = dd.filter(l=>l.price>p).slice(0,16);
-  const below = dd.filter(l=>l.price<p).slice(-16).reverse();
+  // Filter: keep all levels within 15% of current price, only strong/med beyond that
+  const filtered = dd.filter(l => {
+    const dist = Math.abs(l.price - p) / p;
+    if(dist <= 0.15) return true;  // always keep nearby levels
+    return l.strength !== 'weak';   // filter weak levels only when far away
+  });
+
+  // Re-sort by price descending
+  filtered.sort((a,b)=>b.price-a.price);
+
+  // Return 20 above + 20 below current price
+  const above = filtered.filter(l=>l.price>p).slice(0,20);
+  const below = filtered.filter(l=>l.price<p).slice(-20).reverse();
   return [...above,...below].sort((a,b)=>b.price-a.price);
 }
 
