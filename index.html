@@ -264,7 +264,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <body>
 
 <div class="topbar">
-  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v2.7</span></span>
+  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v2.8</span></span>
   <select id="coin-sel" onchange="switchCoin(this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:4px 8px;cursor:pointer;letter-spacing:.04em">
     <option value="bitcoin" data-sym="BTCUSDT" data-label="BTC/USD" selected>BTC/USD</option>
     <option value="ethereum" data-sym="ETHUSDT" data-label="ETH/USD">ETH/USD</option>
@@ -3016,13 +3016,11 @@ const HL = {
     const orderWire = { a: assetIdx, b: isBuy, p: priceStr, s: sizeStr, r: reduceOnly, t: this.orderTypeToWire(orderType) };
     const action = { type: 'order', orders: [orderWire], grouping: 'na' };
     const nonce = Date.now();
-    // Agent wallet: sign with master address as vaultAddress
-    const vault = this.masterAddress || null;
-    const signature = await this.signL1Action(action, nonce, vault);
+    // Agent wallets do NOT use vaultAddress — the agent→master link is established at registration
+    // vaultAddress is only for actual Hyperliquid vault contracts
+    const signature = await this.signL1Action(action, nonce, null);
     const payload = { action, nonce, signature: { r: signature.r, s: signature.s, v: signature.v } };
-    // Include vaultAddress in POST body when trading on behalf of master account
-    if (vault) payload.vaultAddress = vault;
-    console.log('HL order wire:', JSON.stringify(action), '| vault:', vault);
+    console.log('HL order wire:', JSON.stringify(action));
     const res = await fetch(this.API + '/exchange', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -3413,6 +3411,25 @@ window.addEventListener('DOMContentLoaded',()=>{
   });
   setTimeout(() => runCoin('ethereum').then(() => connectWS('ethereum')), 2000);
   setTimeout(() => runCoin('solana').then(() => connectWS('solana')), 4000);
+
+  // Auto-refresh all coins when page becomes visible (mobile Safari kills WS in background)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      console.log('Page became visible — refreshing all coins');
+      runCoin('bitcoin').catch(e=>console.warn('vis refresh btc',e));
+      setTimeout(() => runCoin('ethereum').catch(e=>console.warn('vis refresh eth',e)), 1000);
+      setTimeout(() => runCoin('solana').catch(e=>console.warn('vis refresh sol',e)), 2000);
+    }
+  });
+
+  // Periodic full refresh every 5 minutes (ensures signals stay current even if WS drops)
+  setInterval(() => {
+    console.log('Periodic full refresh');
+    runCoin('bitcoin').catch(e=>console.warn('periodic btc',e));
+    setTimeout(() => runCoin('ethereum').catch(e=>console.warn('periodic eth',e)), 1000);
+    setTimeout(() => runCoin('solana').catch(e=>console.warn('periodic sol',e)), 2000);
+  }, 5 * 60 * 1000);
+
   // Initialize Hyperliquid auto-trading (non-blocking)
   if(localStorage.getItem('hl_wallet_key')){
     HL.init().then(ok => {
