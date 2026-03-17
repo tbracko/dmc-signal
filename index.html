@@ -264,10 +264,10 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <body>
 
 <div class="topbar">
-  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v3.1</span></span>
+  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v3.0</span></span>
   <select id="coin-sel" onchange="switchCoin(this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:4px 8px;cursor:pointer;letter-spacing:.04em">
     <option value="bitcoin" data-sym="BTCUSDT" data-label="BTC/USD" selected>BTC/USD</option>
-    <option value="hyperliquid" data-sym="HYPEUSDT" data-label="HYPE/USD">HYPE/USD</option>
+    <option value="ethereum" data-sym="ETHUSDT" data-label="ETH/USD">ETH/USD</option>
     <option value="solana" data-sym="SOLUSDT" data-label="SOL/USD">SOL/USD</option>
   </select>
   <div class="topbar-r">
@@ -525,7 +525,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
         <div class="mf-label">Coin</div>
         <select class="mf-select" id="mf-coin">
           <option value="BTC">BTC</option>
-          <option value="HYPE">HYPE</option>
+          <option value="ETH">ETH</option>
           <option value="SOL">SOL</option>
         </select>
       </div>
@@ -590,7 +590,7 @@ const TFS=[{l:'1W',iv:'W',w:5},{l:'1D',iv:'D',w:4},{l:'4H',iv:'240',w:3},{l:'1H'
 // Each coin runs its own independent engine loop
 const COINS = {
   bitcoin:  { id:'bitcoin',  label:'BTC/USD', sym:'BINANCE:BTCUSDT', shortLabel:'BTC', bnSym:'BTCUSDT' },
-  hyperliquid: { id:'hyperliquid', label:'HYPE/USD', sym:'BINANCE:HYPEUSDT', shortLabel:'HYPE', bnSym:'HYPEUSDT' },
+  ethereum: { id:'ethereum', label:'ETH/USD', sym:'BINANCE:ETHUSDT', shortLabel:'ETH', bnSym:'ETHUSDT' },
   solana:   { id:'solana',   label:'SOL/USD', sym:'BINANCE:SOLUSDT', shortLabel:'SOL', bnSym:'SOLUSDT' },
 };
 let activeCoin = 'bitcoin'; // currently viewed coin
@@ -598,7 +598,7 @@ let activeCoin = 'bitcoin'; // currently viewed coin
 // Per-coin state — keyed by coin id
 const coinState = {
   bitcoin:  { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
-  hyperliquid: { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
+  ethereum: { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
   solana:   { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
 };
 
@@ -2634,7 +2634,7 @@ function processTF(i, candles, dCandles, coinId){
         const conf = aW>0 ? Math.round(Math.max(wL,wS)/aW*100) : 0;
         const minConf = parseInt(localStorage.getItem('hl_min_conf') || '50');
         const majorSig = wL > wS ? 'LONG' : wS > wL ? 'SHORT' : null;
-        const SYM = { bitcoin:'BTC', hyperliquid:'HYPE', solana:'SOL' };
+        const SYM = { bitcoin:'BTC', ethereum:'ETH', solana:'SOL' };
         const sym = SYM[coinId] || coinId;
         if(conf < minConf){
           console.log(`HL auto-trade SKIP ${sym} ${d.sig}: confidence ${conf}% < min ${minConf}%`);
@@ -2957,7 +2957,7 @@ const HL = {
       });
       const data = await res.json();
       const positions = data.assetPositions || [];
-      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SOL: 'solana' };
+      const symToId = { BTC: 'bitcoin', ETH: 'ethereum', SOL: 'solana' };
       this.activeTrades = {};
       for (const p of positions) {
         const pos = p.position;
@@ -3095,7 +3095,7 @@ const HL = {
 
   // ── Execute full trade: entry + SL + TP ──
   async executeTrade(coinId, signal, confidence) {
-    const SYM = { bitcoin: 'BTC', hyperliquid: 'HYPE', solana: 'SOL' };
+    const SYM = { bitcoin: 'BTC', ethereum: 'ETH', solana: 'SOL' };
     const asset = SYM[coinId];
     if (!asset || !this.enabled || !this.wallet) return null;
 
@@ -3345,12 +3345,12 @@ async function closeTrade(coin, szi){
   const isLong = szi > 0;
   const size = Math.abs(szi);
   const currentPrice = Object.values(coinState).find(s => {
-    const sym = { bitcoin:'BTC', hyperliquid:'HYPE', solana:'SOL' };
+    const sym = { bitcoin:'BTC', ethereum:'ETH', solana:'SOL' };
     return Object.entries(sym).find(([k,v]) => v === coin)?.[0] && s.price > 0;
   })?.price || 0;
 
   // Look up price from coinState by mapping coin symbol to coinId
-  const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana' };
+  const coinIdMap = { BTC:'bitcoin', ETH:'ethereum', SOL:'solana' };
   const cid = coinIdMap[coin];
   const px = cid ? coinState[cid].price : currentPrice;
   const slip = px * 0.01; // 1% slippage for IOC close to ensure fill
@@ -3392,7 +3392,7 @@ async function closeTrade(coin, szi){
     showToast('Position closed: ' + coin, '', false);
 
     // Also clear from HL.activeTrades
-    const coinIdMap2 = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana' };
+    const coinIdMap2 = { BTC:'bitcoin', ETH:'ethereum', SOL:'solana' };
     if(coinIdMap2[coin]) delete HL.activeTrades[coinIdMap2[coin]];
 
     // Refresh trades page after a short delay for settlement
@@ -3420,7 +3420,7 @@ async function manualOpenTrade(){
   btn.disabled = true;
 
   const isBuy = side === 'LONG';
-  const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana' };
+  const coinIdMap = { BTC:'bitcoin', ETH:'ethereum', SOL:'solana' };
   const cid = coinIdMap[coin];
   const px = cid ? coinState[cid].price : 0;
   if(!px){ btn.textContent = 'OPEN TRADE'; btn.disabled = false; showToast('No price data for ' + coin); return; }
@@ -3480,13 +3480,13 @@ window.addEventListener('DOMContentLoaded',()=>{
   loadSettings();
   renderLog();
   document.getElementById('tf-cards').innerHTML=TFS.map(tf=>`<div class="tfc none"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type NONE">···</span><span class="tfc-sig WAIT" style="margin-left:auto">—</span></div><div class="tfc-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div></div>`).join('');
-  // BTC first (active coin, renders UI immediately), then HYPE + SOL staggered
+  // BTC first (active coin, renders UI immediately), then ETH + SOL staggered
   // Staggering avoids Binance rate limits from 15+ simultaneous requests
   runCoin('bitcoin').then(() => {
     scheduleAll();
     connectWS('bitcoin');
   });
-  setTimeout(() => runCoin('hyperliquid').then(() => connectWS('hyperliquid')), 2000);
+  setTimeout(() => runCoin('ethereum').then(() => connectWS('ethereum')), 2000);
   setTimeout(() => runCoin('solana').then(() => connectWS('solana')), 4000);
 
   // Auto-refresh all coins when page becomes visible (mobile Safari kills WS in background)
@@ -3494,7 +3494,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     if (document.visibilityState === 'visible') {
       console.log('Page became visible — refreshing all coins');
       runCoin('bitcoin').catch(e=>console.warn('vis refresh btc',e));
-      setTimeout(() => runCoin('hyperliquid').catch(e=>console.warn('vis refresh hype',e)), 1000);
+      setTimeout(() => runCoin('ethereum').catch(e=>console.warn('vis refresh eth',e)), 1000);
       setTimeout(() => runCoin('solana').catch(e=>console.warn('vis refresh sol',e)), 2000);
     }
   });
@@ -3503,7 +3503,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   setInterval(() => {
     console.log('Periodic full refresh');
     runCoin('bitcoin').catch(e=>console.warn('periodic btc',e));
-    setTimeout(() => runCoin('hyperliquid').catch(e=>console.warn('periodic hype',e)), 1000);
+    setTimeout(() => runCoin('ethereum').catch(e=>console.warn('periodic eth',e)), 1000);
     setTimeout(() => runCoin('solana').catch(e=>console.warn('periodic sol',e)), 2000);
   }, 5 * 60 * 1000);
 
