@@ -264,7 +264,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <body>
 
 <div class="topbar">
-  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v4.0</span></span>
+  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v4.1</span></span>
   <select id="coin-sel" onchange="switchCoin(this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:4px 8px;cursor:pointer;letter-spacing:.04em">
     <option value="bitcoin" data-sym="BTCUSDT" data-label="BTC/USD" selected>BTC/USD</option>
     <option value="hyperliquid" data-sym="HYPEUSDT" data-label="HYPE/USD">HYPE/USD</option>
@@ -2721,7 +2721,45 @@ function processTF(i, candles, dCandles, coinId){
         } else if(d.sig !== majorSig){
           console.log(`HL auto-trade SKIP ${sym}: signal ${d.sig} != majority ${majorSig}`);
         } else if(HL.activeTrades[coinId]){
-          console.log(`HL auto-trade SKIP ${sym}: already in ${HL.activeTrades[coinId].side} position`);
+          const existing = HL.activeTrades[coinId];
+          if(existing.side === d.sig){
+            // ── POSITION-AWARE: Same direction — add size on HTF signals (1W/1D/4H) if confidence is high ──
+            if(i <= 2 && conf >= Math.min(baseMinConf + 10, 85)){
+              console.log(`HL POSITION-AWARE: ADD to ${existing.side} ${sym} | ${tf.l} signal conf ${conf}%`);
+              showToast(`ADD TO ${existing.side} ${sym}`, `${tf.l} signal (${conf}%)`, d.sig === 'SHORT');
+              HL.executeTrade(coinId, { ...d, tf: tf.l }, conf).then(r => {
+                if(r) { showToast(`ADDED: ${d.sig} ${sym}`, '', d.sig === 'SHORT'); HL.syncPositions(); }
+              }).catch(e=>{ console.error('HL add-to-position error:', e); });
+            } else {
+              console.log(`HL auto-trade SKIP ${sym}: already in ${existing.side} (same dir, ${tf.l} tf=${i}, conf ${conf}%)`);
+            }
+          } else {
+            // ── POSITION-AWARE: Opposite direction — auto-close existing position ──
+            console.log(`HL POSITION-AWARE: CLOSE ${existing.side} ${sym} — opposite ${d.sig} signal fired (${tf.l}, conf ${conf}%)`);
+            showToast(`AUTO-CLOSE ${existing.side} ${sym}`, `Opposite ${d.sig} signal (${conf}%)`, true);
+            const isLong = existing.side === 'LONG';
+            const px = coinState[coinId].price;
+            const slip = px * 0.01;
+            const closePx = isLong ? px - slip : px + slip;
+            HL.placeOrder(existing.asset, !isLong, existing.size, closePx, { limit: { tif: 'Ioc' } }, true).then(async result => {
+              if(result.status !== 'err' && (result.filled || result.totalSz)){
+                const exitPrice = result.avgPx ? +result.avgPx : px;
+                const pnl = isLong ? (exitPrice - existing.entry) * existing.size : (existing.entry - exitPrice) * existing.size;
+                const closed = loadClosedTrades();
+                closed.unshift({ coin: existing.asset, side: existing.side, size: existing.size,
+                  entry: existing.entry, exit: exitPrice, pnl, ts: new Date().toISOString(), reason: 'opposite_signal' });
+                saveClosedTrades(closed);
+                delete HL.activeTrades[coinId];
+                showToast(`CLOSED ${existing.side} ${sym}: P&L $${pnl.toFixed(2)}`, '', pnl < 0);
+                // Now open the new opposite trade
+                HL.executeTrade(coinId, { ...d, tf: tf.l }, conf).then(r => {
+                  if(r) { showToast(`REVERSED: ${d.sig} ${sym}`, '', d.sig === 'SHORT'); HL.syncPositions(); }
+                }).catch(e => console.error('HL reverse trade error:', e));
+              } else {
+                console.error('HL auto-close failed:', result); showToast(`Auto-close ${sym} failed`, '', true);
+              }
+            }).catch(e => { console.error('HL auto-close error:', e); showToast('Auto-close error: ' + e.message, '', true); });
+          }
         } else {
           console.log(`HL auto-trade FIRE ${sym} ${d.sig} | conf: ${conf}% (min: ${minConf}%, ${trendLabel}) | SL: ${d.stopPrice}`);
           showToast(`AUTO: ${d.sig} ${sym} (${conf}% ${trendLabel})`, `SL: $${fmt(d.stopPrice)}`, d.sig === 'SHORT');
@@ -2892,6 +2930,17 @@ function connectWS(coinId){
         runCoin(coinId).catch(e=>console.warn('BG refresh',coinId,e));
       }
     }
+    // ── Trailing stop check: throttled to every 30s, any coin's price update triggers it ──
+    const now = Date.now();
+    if(HL.enabled && HL.wallet && Object.keys(HL.activeTrades).length > 0 &&
+       (!HL._lastTrailCheck || now - HL._lastTrailCheck > 30000)){
+      HL._lastTrailCheck = now;
+      HL.trailStops().catch(e => console.warn('trailStops error:', e));
+    }
+    // ── Equity auto-sync: refresh every 5 minutes ──
+    if(HL.wallet && (!HL._lastEquitySync || now - HL._lastEquitySync > 5 * 60 * 1000)){
+      HL.syncEquity().catch(e => console.warn('syncEquity error:', e));
+    }
   }
 
   try{
@@ -2946,6 +2995,8 @@ const HL = {
   tradesToday: 0,
   lastTradeDay: '',
   activeTrades: {},    // coinId -> { oid, side, size, asset }
+  cachedEquity: 0,     // auto-synced from live HL balance
+  _lastEquitySync: 0,  // timestamp of last equity sync
 
   // ── Minimal msgpack encoder (handles our specific action structures) ──
   msgpack(obj) {
@@ -2997,7 +3048,9 @@ const HL = {
       this.lastTradeDay = new Date().toDateString();
       // Sync with real positions so auto-trader knows what's already open
       await this.syncPositions();
-      console.log('HL ready:', this.address, '| Master:', this.masterAddress || 'not set', '| Auto:', this.enabled, '| Assets:', Object.keys(this.assetMap).join(', '));
+      // Auto-sync account equity for position sizing
+      await this.syncEquity();
+      console.log('HL ready:', this.address, '| Master:', this.masterAddress || 'not set', '| Auto:', this.enabled, '| Equity: $' + this.cachedEquity.toFixed(2), '| Assets:', Object.keys(this.assetMap).join(', '));
       return true;
     } catch (e) {
       console.error('HL init failed:', e);
@@ -3069,6 +3122,7 @@ const HL = {
       const data = await res.json();
       const positions = data.assetPositions || [];
       const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SOL: 'solana' };
+      const oldTrades = this.activeTrades;
       this.activeTrades = {};
       for (const p of positions) {
         const pos = p.position;
@@ -3076,16 +3130,49 @@ const HL = {
         const coinId = symToId[pos.coin];
         if (!coinId) continue;
         const szi = parseFloat(pos.szi);
-        this.activeTrades[coinId] = {
-          asset: pos.coin,
-          side: szi > 0 ? 'LONG' : 'SHORT',
-          size: Math.abs(szi),
-          entry: parseFloat(pos.entryPx || '0')
-        };
+        const entry = parseFloat(pos.entryPx || '0');
+        // Preserve trailing stop state from previous sync if position still exists
+        const prev = oldTrades[coinId];
+        if (prev && prev.side === (szi > 0 ? 'LONG' : 'SHORT') && prev.trailState) {
+          this.activeTrades[coinId] = {
+            ...prev,
+            size: Math.abs(szi),   // update size (may have changed if added to position)
+            entry: entry            // update entry (HL averages on add)
+          };
+        } else {
+          this.activeTrades[coinId] = {
+            asset: pos.coin,
+            side: szi > 0 ? 'LONG' : 'SHORT',
+            size: Math.abs(szi),
+            entry: entry,
+            initialSl: 0,          // will be set on next signal or trailStops call
+            bestPrice: entry,
+            trailState: 'initial'
+          };
+        }
       }
       console.log('HL synced positions:', Object.keys(this.activeTrades).length, 'active →', JSON.stringify(this.activeTrades));
     } catch (e) {
       console.warn('HL syncPositions failed:', e);
+    }
+  },
+
+  // ── Auto-sync account equity for position sizing ──
+  // Fetches live equity from HL and caches it; refreshes every 5 minutes
+  async syncEquity() {
+    try {
+      const bal = await this.getBalance();
+      if (bal > 0) {
+        this.cachedEquity = bal;
+        this._lastEquitySync = Date.now();
+        // Also update the UI input so user sees the live value
+        const el = document.getElementById('account-size');
+        if (el) el.value = bal.toFixed(2);
+        localStorage.setItem('account_size', bal.toFixed(2));
+        console.log('HL equity synced: $' + bal.toFixed(2));
+      }
+    } catch (e) {
+      console.warn('HL syncEquity failed:', e);
     }
   },
 
@@ -3219,9 +3306,10 @@ const HL = {
       return null;
     }
 
-    // Skip if already in a position for this coin
-    if (this.activeTrades[coinId]) {
-      console.log('HL: already in trade for', coinId);
+    // Skip if already in a position for this coin (unless same direction = adding)
+    const existingTrade = this.activeTrades[coinId];
+    if (existingTrade && existingTrade.side !== signal.sig) {
+      console.log('HL: already in opposite trade for', coinId, '— use position-aware logic');
       return null;
     }
 
@@ -3246,8 +3334,9 @@ const HL = {
       }
     }
 
-    // Position sizing: risk-based
-    const accountSize = parseFloat(localStorage.getItem('account_size') || '100');
+    // Position sizing: risk-based — use live equity if available, fallback to manual setting
+    const manualSize = parseFloat(localStorage.getItem('account_size') || '100');
+    const accountSize = (this.cachedEquity > 0) ? this.cachedEquity : manualSize;
     const riskPct = parseFloat(localStorage.getItem('risk_pct') || '1');
     const riskAmount = accountSize * riskPct / 100;
     const slDistance = Math.abs(currentPrice - stopPrice);
@@ -3280,8 +3369,15 @@ const HL = {
           { trigger: { isMarket: true, triggerPx: target, tpsl: 'tp' } }, true);
       }
 
-      // Track active trade
-      this.activeTrades[coinId] = { asset, side: sig, size, entry: currentPrice, sl: stopPrice, tp: target };
+      // Track active trade with trailing stop state
+      const actualEntry = entryRes.avgPx ? +entryRes.avgPx : currentPrice;
+      this.activeTrades[coinId] = {
+        asset, side: sig, size, entry: actualEntry,
+        sl: stopPrice, tp: target,
+        initialSl: stopPrice,
+        bestPrice: actualEntry, // tracks best price seen for trailing
+        trailState: 'initial'  // initial → breakeven → trailing
+      };
       this.tradesToday++;
 
       // Log to signal log
@@ -3296,6 +3392,106 @@ const HL = {
       console.error('HL trade error:', e);
       showToast('TRADE FAILED: ' + e.message);
       return null;
+    }
+  },
+
+  // ── Fetch open orders for an asset ──
+  async fetchOpenOrders() {
+    const queryAddr = (this.masterAddress || this.address).toLowerCase();
+    const res = await fetch(this.API + '/info', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'openOrders', user: queryAddr })
+    });
+    return await res.json();
+  },
+
+  // ── Cancel an order by oid ──
+  async cancelOrder(asset, oid) {
+    const assetIdx = this.assetMap[asset];
+    if (assetIdx === undefined) return;
+    const action = { type: 'cancel', cancels: [{ a: assetIdx, o: oid }] };
+    const nonce = Date.now();
+    const signature = await this.signL1Action(action, nonce, null);
+    const payload = { action, nonce, signature: { r: signature.r, s: signature.s, v: signature.v } };
+    const res = await fetch(this.API + '/exchange', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const result = await res.json();
+    console.log('HL cancel result:', asset, oid, JSON.stringify(result));
+    return result;
+  },
+
+  // ── Cancel all trigger orders for an asset (SL/TP) ──
+  async cancelTriggerOrders(asset) {
+    try {
+      const orders = await this.fetchOpenOrders();
+      const triggers = orders.filter(o => o.coin === asset && o.orderType && o.orderType !== 'Limit');
+      for (const o of triggers) {
+        await this.cancelOrder(asset, o.oid);
+      }
+      return triggers.length;
+    } catch (e) { console.warn('cancelTriggerOrders error:', e); return 0; }
+  },
+
+  // ── Trailing stop logic: called on each price update ──
+  // Moves SL to breakeven at 1:1 R, then trails at 1.5:1 distance
+  async trailStops() {
+    if (!this.wallet || !this.enabled) return;
+    for (const [coinId, trade] of Object.entries(this.activeTrades)) {
+      if (!trade || !trade.entry || !trade.sl) continue;
+      const s = coinState[coinId];
+      if (!s || s.price <= 0) continue;
+      const px = s.price;
+      const isLong = trade.side === 'LONG';
+      const risk = Math.abs(trade.entry - trade.initialSl);
+      if (risk <= 0) continue;
+
+      // Track best price
+      if (isLong && px > trade.bestPrice) trade.bestPrice = px;
+      if (!isLong && px < trade.bestPrice) trade.bestPrice = px;
+
+      const pnlFromEntry = isLong ? (px - trade.entry) : (trade.entry - px);
+      const rMultiple = pnlFromEntry / risk;
+
+      let newSl = null;
+
+      if (trade.trailState === 'initial' && rMultiple >= 1.0) {
+        // Move SL to breakeven (entry price)
+        newSl = trade.entry;
+        trade.trailState = 'breakeven';
+        console.log(`HL TRAIL ${trade.asset}: moved SL to BREAKEVEN $${fmt(newSl)} (1:1 R hit)`);
+        showToast(`SL → BREAKEVEN: ${trade.asset}`, `Entry: $${fmt(trade.entry)}`, false);
+      } else if (trade.trailState === 'breakeven' && rMultiple >= 1.5) {
+        // Start trailing: SL = bestPrice - 1.5*risk (long) or + 1.5*risk (short)
+        trade.trailState = 'trailing';
+        newSl = isLong ? trade.bestPrice - risk * 1.5 : trade.bestPrice + risk * 1.5;
+        console.log(`HL TRAIL ${trade.asset}: trailing SL to $${fmt(newSl)} (1.5R trail)`);
+      } else if (trade.trailState === 'trailing') {
+        // Continue trailing: only move SL forward, never back
+        const trailSl = isLong ? trade.bestPrice - risk * 1.5 : trade.bestPrice + risk * 1.5;
+        if ((isLong && trailSl > trade.sl) || (!isLong && trailSl < trade.sl)) {
+          newSl = trailSl;
+          console.log(`HL TRAIL ${trade.asset}: updated trailing SL to $${fmt(newSl)}`);
+        }
+      }
+
+      if (newSl !== null && newSl !== trade.sl) {
+        try {
+          // Cancel existing SL trigger, place new one
+          await this.cancelTriggerOrders(trade.asset);
+          const slPx = isLong ? newSl * 0.98 : newSl * 1.02;
+          await this.placeOrder(trade.asset, !isLong, trade.size, slPx,
+            { trigger: { isMarket: true, triggerPx: newSl, tpsl: 'sl' } }, true);
+          // Re-place TP if it was cancelled
+          if (trade.tp) {
+            const tpPx = isLong ? trade.tp * 1.02 : trade.tp * 0.98;
+            await this.placeOrder(trade.asset, !isLong, trade.size, tpPx,
+              { trigger: { isMarket: true, triggerPx: trade.tp, tpsl: 'tp' } }, true);
+          }
+          trade.sl = newSl;
+        } catch (e) { console.error('HL trailStops error:', e); }
+      }
     }
   }
 };
