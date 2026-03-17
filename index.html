@@ -264,7 +264,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <body>
 
 <div class="topbar">
-  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v3.6</span></span>
+  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v4.0</span></span>
   <select id="coin-sel" onchange="switchCoin(this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:4px 8px;cursor:pointer;letter-spacing:.04em">
     <option value="bitcoin" data-sym="BTCUSDT" data-label="BTC/USD" selected>BTC/USD</option>
     <option value="hyperliquid" data-sym="HYPEUSDT" data-label="HYPE/USD">HYPE/USD</option>
@@ -2260,15 +2260,34 @@ function renderCards(){
   }).join('');
 }
 
+function renderLevelItem(l){
+  const isR=l.price>price,dist=((l.price-price)/price*100).toFixed(2),cls=isR?'R':'S';
+  const strengthCol=l.strength==='strong'?'#00e676':l.strength==='med'?'#ffc107':'#5d7a99';
+  const flippedTag = l.flippedType === 'flipped_support' ? '<span style="font-size:8px;color:#64b5f6;margin-left:4px">↕ FLIPPED SUP</span>'
+    : l.flippedType === 'flipped_resistance' ? '<span style="font-size:8px;color:#64b5f6;margin-left:4px">↕ FLIPPED RES</span>' : '';
+  return`<div class="lvl-item${!l.tested?' untested':''}"><span class="lvl-badge ${cls}">${isR?'RES':'SUP'}</span><div class="lvl-info"><div class="lvl-tf">${l.tf||'—'} · ${l.source||''}${!l.tested?'<span class="lvl-untag">● UNTESTED</span>':''}${flippedTag}</div></div><div class="lvl-right"><div class="lvl-price ${cls}">$${fmt(l.price)}</div><div class="lvl-dist">${dist>0?'+':''}${dist}% · <span style='color:${strengthCol}'>${l.strength||''}</span></div></div></div>`;
+}
+
 function renderLevels(){
   if(!allLevels.length){document.getElementById('lvl-list').innerHTML='<div class="empty">No levels found</div>';return;}
-  document.getElementById('lvl-list').innerHTML=allLevels.map(l=>{
-    const isR=l.price>price,dist=((l.price-price)/price*100).toFixed(2),cls=isR?'R':'S';
-    const strengthCol=l.strength==='strong'?'#00e676':l.strength==='med'?'#ffc107':'#5d7a99';
-    const flippedTag = l.flippedType === 'flipped_support' ? '<span style="font-size:8px;color:#64b5f6;margin-left:4px">↕ FLIPPED SUP</span>'
-      : l.flippedType === 'flipped_resistance' ? '<span style="font-size:8px;color:#64b5f6;margin-left:4px">↕ FLIPPED RES</span>' : '';
-    return`<div class="lvl-item${!l.tested?' untested':''}"><span class="lvl-badge ${cls}">${isR?'RES':'SUP'}</span><div class="lvl-info"><div class="lvl-tf">${l.tf||'—'} · ${l.source||''}${!l.tested?'<span class="lvl-untag">● UNTESTED</span>':''}${flippedTag}</div></div><div class="lvl-right"><div class="lvl-price ${cls}">$${fmt(l.price)}</div><div class="lvl-dist">${dist>0?'+':''}${dist}% · <span style='color:${strengthCol}'>${l.strength||''}</span></div></div></div>`;
-  }).join('');
+
+  // Proximity zone: nearest 4 resistance + 4 support levels
+  const above = allLevels.filter(l=>l.price>price).slice(-4).reverse(); // closest 4 above
+  const below = allLevels.filter(l=>l.price<=price).slice(0,4);         // closest 4 below
+  const nearbyIds = new Set([...above,...below].map(l=>l.price));
+
+  let html = '';
+  if(above.length || below.length){
+    html += '<div style="padding:8px 16px 4px;font-family:\'IBM Plex Mono\',monospace;font-size:9px;color:#ffc107;letter-spacing:.1em">▬ NEAREST LEVELS</div>';
+    html += above.map(l=>renderLevelItem(l)).join('');
+    html += `<div style="padding:6px 16px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#00e676;text-align:center;border-top:1px solid #1a2230;border-bottom:1px solid #1a2230;background:#0a0e13">► PRICE: $${fmt(price)} ◄</div>`;
+    html += below.map(l=>renderLevelItem(l)).join('');
+    html += '<div style="padding:8px 16px 4px;margin-top:10px;font-family:\'IBM Plex Mono\',monospace;font-size:9px;color:#5d7a99;letter-spacing:.1em;border-top:1px solid #1a2230">▬ ALL LEVELS</div>';
+  }
+
+  // All levels (skip ones already shown in proximity zone)
+  html += allLevels.filter(l=>!nearbyIds.has(l.price)).map(l=>renderLevelItem(l)).join('');
+  document.getElementById('lvl-list').innerHTML = html;
 }
 
 // ── SIGNAL LOG (persisted to localStorage) ───────────────
@@ -2380,6 +2399,17 @@ function renderLog(){
 
   el.innerHTML = entries.map(e=>{
     const cls = e.sig==='LONG'?'long':e.sig==='SHORT'?'short':'neutral';
+    // Stale detection: mark signals older than 4h or where level has been broken
+    const ageMs = Date.now() - new Date(e.ts).getTime();
+    const isOld = ageMs > 4 * 3600000;
+    const coinPrice = e.coin && coinState[e.coin] ? coinState[e.coin].price : 0;
+    const levelBroken = e.status === 'open' && e.level && coinPrice > 0 && (
+      (e.sig === 'LONG' && coinPrice < e.level * 0.98) ||
+      (e.sig === 'SHORT' && coinPrice > e.level * 1.02)
+    );
+    const isStale = e.status === 'open' && (isOld || levelBroken);
+    const staleTag = isStale ? `<span style="font-size:8px;color:#5d7a99;background:#1a2230;padding:1px 5px;border-radius:3px;margin-left:4px">${levelBroken?'LEVEL BROKEN':'STALE'}</span>` : '';
+    const staleOpacity = isStale ? 'opacity:0.45;' : '';
     const statusLabel = e.status === 'review_exit' ? '⚠ REVIEW EXIT' : e.status.toUpperCase();
     const statusBadge = `<span class="log-status ${e.status}">${statusLabel}</span>`;
     const rrBadge = e.rr ? `<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#ffc107">R:R ${e.rr}</span>` : '';
@@ -2403,12 +2433,12 @@ function renderLog(){
         <button onclick="updateLogStatus(${e.id},'stopped')" style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:4px 10px;border-radius:5px;border:1px solid rgba(255,61,90,.3);background:rgba(255,61,90,.08);color:#ff3d5a;cursor:pointer">✗ STOPPED</button>
       </div>` : '';
 
-    return `<div class="log-item ${cls}">
+    return `<div class="log-item ${cls}" style="${staleOpacity}">
       <div class="log-head">
         <span class="log-coin" style="font-size:9px;font-weight:700;letter-spacing:.06em;background:#1a2230;padding:2px 5px;border-radius:3px;color:#7b8fa8;margin-right:4px">${(e.coin&&COINS[e.coin])?COINS[e.coin].shortLabel:'BTC'}</span><span class="log-sig ${e.sig}">${e.sig}</span>
         <span class="log-tf">${e.tf}</span>
         ${rrBadge}
-        ${statusBadge}
+        ${statusBadge}${staleTag}
         <span class="log-time2">${e.date} ${e.time}</span>
       </div>
       <div class="log-prices">${prices}</div>
@@ -2673,19 +2703,28 @@ function processTF(i, candles, dCandles, coinId){
         let wL=0, wS=0, aW=0;
         TFS.forEach(t=>{ const r=s.results[t.l]; if(!r)return; if(r.type!=='NONE')aW+=t.w; if(r.sig==='LONG')wL+=t.w; if(r.sig==='SHORT')wS+=t.w; });
         const conf = aW>0 ? Math.round(Math.max(wL,wS)/aW*100) : 0;
-        const minConf = parseInt(localStorage.getItem('hl_min_conf') || '50');
+        const baseMinConf = parseInt(localStorage.getItem('hl_min_conf') || '50');
         const majorSig = wL > wS ? 'LONG' : wS > wL ? 'SHORT' : null;
         const SYM = { bitcoin:'BTC', hyperliquid:'HYPE', solana:'SOL' };
         const sym = SYM[coinId] || coinId;
+
+        // HTF-aligned confidence adjustment:
+        // With trend → lower threshold (easier to enter), Counter-trend → higher threshold
+        const htfDir = s.htfDir || 'UNCLEAR';
+        const withTrend = (d.sig === 'LONG' && htfDir === 'UP') || (d.sig === 'SHORT' && htfDir === 'DOWN');
+        const counterTrend = (d.sig === 'LONG' && htfDir === 'DOWN') || (d.sig === 'SHORT' && htfDir === 'UP');
+        const minConf = counterTrend ? Math.min(baseMinConf + 20, 90) : withTrend ? Math.max(baseMinConf - 15, 25) : baseMinConf;
+        const trendLabel = withTrend ? 'WITH-TREND' : counterTrend ? 'COUNTER-TREND' : 'NEUTRAL-TREND';
+
         if(conf < minConf){
-          console.log(`HL auto-trade SKIP ${sym} ${d.sig}: confidence ${conf}% < min ${minConf}%`);
+          console.log(`HL auto-trade SKIP ${sym} ${d.sig}: conf ${conf}% < ${minConf}% (${trendLabel}, base ${baseMinConf}%)`);
         } else if(d.sig !== majorSig){
           console.log(`HL auto-trade SKIP ${sym}: signal ${d.sig} != majority ${majorSig}`);
         } else if(HL.activeTrades[coinId]){
           console.log(`HL auto-trade SKIP ${sym}: already in ${HL.activeTrades[coinId].side} position`);
         } else {
-          console.log(`HL auto-trade FIRE ${sym} ${d.sig} | conf: ${conf}% | SL: ${d.stopPrice}`);
-          showToast(`AUTO: ${d.sig} ${sym} (${conf}%)`, `SL: $${fmt(d.stopPrice)}`, d.sig === 'SHORT');
+          console.log(`HL auto-trade FIRE ${sym} ${d.sig} | conf: ${conf}% (min: ${minConf}%, ${trendLabel}) | SL: ${d.stopPrice}`);
+          showToast(`AUTO: ${d.sig} ${sym} (${conf}% ${trendLabel})`, `SL: $${fmt(d.stopPrice)}`, d.sig === 'SHORT');
           HL.executeTrade(coinId, { ...d, tf: tf.l }, conf).then(r => {
             if(r) { showToast(`FILLED: ${d.sig} ${sym}`, '', d.sig === 'SHORT'); HL.syncPositions(); }
             else showToast(`AUTO-TRADE: ${sym} order not filled`, '', true);
@@ -2722,9 +2761,12 @@ async function runCoin(coinId){
     s.price = td.price; s.change = td.change;
     if(isActive){ syncActiveState(); renderTop(td); }
 
-    // Fetch ALL 5 timeframes in parallel — Binance has no meaningful rate limit
-    // 1D candles used as context for all TF processing (passed as dCandles)
-    const allFetches = [0,1,2,3,4].map(i =>
+    // Smart refresh: HTF (1W, 1D) every 15min, LTF (4H, 1H, 15m) every cycle
+    const now = Date.now();
+    const htfStale = !s.lastHTFRefresh || (now - s.lastHTFRefresh) > 15 * 60 * 1000;
+    const fetchIndices = htfStale ? [0,1,2,3,4] : [2,3,4]; // skip 1W/1D when fresh
+
+    const allFetches = fetchIndices.map(i =>
       getCandles(TFS[i], coinId)
         .then(c => ({ i, c }))
         .catch(e => { console.warn(COINS[coinId].shortLabel, TFS[i].l, e.message); return { i, c:null }; })
@@ -2737,11 +2779,17 @@ async function runCoin(coinId){
     const h1Entry = allResults.find(r=>r.i===3);
     const m15Entry = allResults.find(r=>r.i===4);
 
-    const dCandles = dEntry?.c || null;
-    const wCandles = wEntry?.c || null;
+    // Use fresh data or cached HTF candles
+    const dCandles = dEntry?.c || s.dailyCandles || null;
+    const wCandles = wEntry?.c || s.cachedWeekly || null;
 
-    // Cache daily candles for WS-triggered 15m processing
-    if(dCandles) s.dailyCandles = dCandles;
+    // Cache HTF candles and mark refresh time
+    if(dEntry?.c) s.dailyCandles = dEntry.c;
+    if(wEntry?.c) s.cachedWeekly = wEntry.c;
+    if(htfStale && (dEntry?.c || wEntry?.c)) {
+      s.lastHTFRefresh = now;
+      console.log(COINS[coinId].shortLabel, 'HTF refreshed');
+    }
 
     // Process each TF — pass dCandles as context (may be null if 1D failed, graceful)
     if(dCandles) processTF(1, dCandles, dCandles, coinId);
@@ -3184,15 +3232,17 @@ const HL = {
     const isBuy = sig === 'LONG';
     const currentPrice = coinState[coinId].price;
 
-    // Cap TP at R:R 2.5 — prevents unrealistically far targets
-    const maxRR = 2.5;
+    // Dynamic R:R cap: with-trend trades get more room (4:1), counter-trend capped tighter (2.5:1)
+    const htfDir = coinState[coinId].htfDir || 'UNCLEAR';
+    const withTrend = (sig === 'LONG' && htfDir === 'UP') || (sig === 'SHORT' && htfDir === 'DOWN');
+    const maxRR = withTrend ? 4.0 : 2.5;
     const risk = Math.abs(currentPrice - stopPrice);
     const maxReward = risk * maxRR;
     if (target) {
       const actualReward = Math.abs(target - currentPrice);
       if (actualReward > maxReward) {
         target = isBuy ? currentPrice + maxReward : currentPrice - maxReward;
-        console.log('HL: capped TP from signal target to R:R 2.5 →', target.toFixed(1));
+        console.log(`HL: capped TP to R:R ${maxRR} (${withTrend?'with':'counter'}-trend) →`, target.toFixed(1));
       }
     }
 
