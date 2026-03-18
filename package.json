@@ -1,10 +1,15 @@
 {
-  "name": "dms-worker",
-  "version": "1.0.0",
+  "name": "dms-signal-bot",
+  "version": "4.4.0",
+  "description": "DMS Signal Bot with auto-trading on Hyperliquid",
+  "main": "bot.js",
   "scripts": {
     "start": "node bot.js"
   },
+  "dependencies": {
+    "ethers": "^5.7.2"
+  },
   "engines": {
-    "node": ">=18"
+    "node": ">=18.0.0"
   }
 }
