@@ -264,7 +264,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <body>
 
 <div class="topbar">
-  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v4.2</span></span>
+  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v4.3</span></span>
   <select id="coin-sel" onchange="switchCoin(this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:4px 8px;cursor:pointer;letter-spacing:.04em">
     <option value="bitcoin" data-sym="BTCUSDT" data-label="BTC/USD" selected>BTC/USD</option>
     <option value="hyperliquid" data-sym="HYPEUSDT" data-label="HYPE/USD">HYPE/USD</option>
@@ -2749,7 +2749,7 @@ function processTF(i, candles, dCandles, coinId){
                 closed.unshift({ coin: existing.asset, side: existing.side, size: existing.size,
                   entry: existing.entry, exit: exitPrice, pnl, ts: new Date().toISOString(), reason: 'opposite_signal' });
                 saveClosedTrades(closed);
-                delete HL.activeTrades[coinId];
+                delete HL.activeTrades[coinId]; HL.saveActiveTrades();
                 showToast(`CLOSED ${existing.side} ${sym}: P&L $${pnl.toFixed(2)}`, '', pnl < 0);
                 // Now open the new opposite trade
                 HL.executeTrade(coinId, { ...d, tf: tf.l }, conf).then(r => {
@@ -3051,6 +3051,9 @@ const HL = {
       this.enabled = localStorage.getItem('hl_auto_trade') === 'true';
       this.tradesToday = 0;
       this.lastTradeDay = new Date().toDateString();
+      // Load persisted activeTrades BEFORE sync so we can detect closes across restarts
+      this.loadActiveTrades();
+      console.log('HL loaded persisted trades:', Object.keys(this.activeTrades).length, '→', JSON.stringify(this.activeTrades));
       // Sync with real positions so auto-trader knows what's already open
       await this.syncPositions();
       // Auto-sync account equity for position sizing
@@ -3115,18 +3118,66 @@ const HL = {
     return total;
   },
 
+  // ── Persist activeTrades to/from localStorage ──
+  saveActiveTrades() {
+    try { localStorage.setItem('hl_active_trades', JSON.stringify(this.activeTrades)); } catch(e){}
+  },
+  loadActiveTrades() {
+    try {
+      const raw = localStorage.getItem('hl_active_trades');
+      if (raw) this.activeTrades = JSON.parse(raw);
+    } catch(e){}
+  },
+
+  // ── Fetch trigger orders (SL/TP) from HL for all positions ──
+  async fetchTriggerOrders() {
+    try {
+      const queryAddr = (this.masterAddress || this.address).toLowerCase();
+      const res = await fetch(this.API + '/info', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'frontendOpenOrders', user: queryAddr })
+      });
+      return await res.json();
+    } catch(e) { console.warn('fetchTriggerOrders error:', e); return []; }
+  },
+
   // ── Sync activeTrades with real Hyperliquid positions ──
   // Prevents duplicate entries and keeps auto-trader aware of existing positions
   async syncPositions() {
     try {
       const queryAddr = (this.masterAddress || this.address).toLowerCase();
-      const res = await fetch(this.API + '/info', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr })
-      });
-      const data = await res.json();
+      // Fetch positions + trigger orders in parallel
+      const [posRes, trigOrders] = await Promise.all([
+        fetch(this.API + '/info', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr })
+        }),
+        this.fetchTriggerOrders()
+      ]);
+      const data = await posRes.json();
       const positions = data.assetPositions || [];
       const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SOL: 'solana' };
+
+      // Build SL/TP map from trigger orders: { "BTC": { sl: price, tp: price } }
+      const trigMap = {};
+      if (Array.isArray(trigOrders)) {
+        for (const o of trigOrders) {
+          const coin = o.coin;
+          if (!coin) continue;
+          if (!trigMap[coin]) trigMap[coin] = {};
+          const trigPx = parseFloat(o.triggerPx || '0');
+          if (trigPx <= 0) continue;
+          // Identify SL vs TP by orderType or tpsl field
+          const ot = (o.orderType || '').toLowerCase();
+          if (ot.includes('stop') || o.tpsl === 'sl') {
+            trigMap[coin].sl = trigPx;
+          } else if (ot.includes('take profit') || o.tpsl === 'tp') {
+            trigMap[coin].tp = trigPx;
+          }
+        }
+      }
+      console.log('HL trigger orders map:', JSON.stringify(trigMap));
+
       const oldTrades = { ...this.activeTrades };
       const nowOpen = new Set();
       this.activeTrades = {};
@@ -3138,13 +3189,17 @@ const HL = {
         nowOpen.add(coinId);
         const szi = parseFloat(pos.szi);
         const entry = parseFloat(pos.entryPx || '0');
+        const trig = trigMap[pos.coin] || {};
         // Preserve trailing stop state from previous sync if position still exists
         const prev = oldTrades[coinId];
         if (prev && prev.side === (szi > 0 ? 'LONG' : 'SHORT') && prev.trailState) {
           this.activeTrades[coinId] = {
             ...prev,
-            size: Math.abs(szi),   // update size (may have changed if added to position)
-            entry: entry            // update entry (HL averages on add)
+            size: Math.abs(szi),
+            entry: entry,
+            // Always update SL/TP from live trigger orders (most accurate)
+            sl: trig.sl || prev.sl || null,
+            tp: trig.tp || prev.tp || null
           };
         } else {
           this.activeTrades[coinId] = {
@@ -3152,7 +3207,9 @@ const HL = {
             side: szi > 0 ? 'LONG' : 'SHORT',
             size: Math.abs(szi),
             entry: entry,
-            initialSl: 0,          // will be set on next signal or trailStops call
+            sl: trig.sl || null,
+            tp: trig.tp || null,
+            initialSl: trig.sl || 0,
             bestPrice: entry,
             trailState: 'initial'
           };
@@ -3166,7 +3223,6 @@ const HL = {
         const s = coinState[coinId];
         const exitPx = s ? s.price : old.entry;
         const isLong = old.side === 'LONG';
-        // Determine if it was TP or SL based on price vs entry
         const pnl = isLong ? (exitPx - old.entry) * old.size : (old.entry - exitPx) * old.size;
         let reason = 'auto_closed';
         if (old.tp && ((isLong && exitPx >= old.tp * 0.99) || (!isLong && exitPx <= old.tp * 1.01))) {
@@ -3186,12 +3242,13 @@ const HL = {
         const label = reason === 'tp_hit' ? 'TP HIT' : reason === 'sl_hit' ? 'SL HIT' : 'CLOSED';
         console.log(`HL ${label}: ${old.side} ${old.asset} | Entry: $${fmt(old.entry)} → Exit: ~$${fmt(exitPx)} | P&L: $${pnl.toFixed(2)}`);
         showToast(`${emoji} ${label}: ${old.side} ${old.asset}`, `P&L: ${pnl>=0?'+':''}$${pnl.toFixed(2)}`, pnl < 0);
-        // Send Telegram notification
         if(typeof sendTelegram === 'function'){
           sendTelegram(`${emoji} ${label}: ${old.side} ${old.asset}\nEntry: $${fmt(old.entry)} → Exit: ~$${fmt(exitPx)}\nP&L: ${pnl>=0?'+':''}$${pnl.toFixed(2)}`);
         }
       }
 
+      // Persist to localStorage so we can detect closes across app restarts
+      this.saveActiveTrades();
       console.log('HL synced positions:', Object.keys(this.activeTrades).length, 'active →', JSON.stringify(this.activeTrades));
     } catch (e) {
       console.warn('HL syncPositions failed:', e);
@@ -3419,6 +3476,7 @@ const HL = {
         bestPrice: actualEntry, // tracks best price seen for trailing
         trailState: 'initial'  // initial → breakeven → trailing
       };
+      this.saveActiveTrades();
       this.tradesToday++;
 
       // Log to signal log
@@ -3531,6 +3589,7 @@ const HL = {
               { trigger: { isMarket: true, triggerPx: trade.tp, tpsl: 'tp' } }, true);
           }
           trade.sl = newSl;
+          this.saveActiveTrades();
         } catch (e) { console.error('HL trailStops error:', e); }
       }
     }
@@ -3771,7 +3830,7 @@ async function closeTrade(coin, szi, entryPx){
 
     // Also clear from HL.activeTrades
     const coinIdMap2 = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana' };
-    if(coinIdMap2[coin]) delete HL.activeTrades[coinIdMap2[coin]];
+    if(coinIdMap2[coin]) { delete HL.activeTrades[coinIdMap2[coin]]; HL.saveActiveTrades(); }
 
     // Refresh trades page after a short delay for settlement
     setTimeout(renderTrades, 1500);
