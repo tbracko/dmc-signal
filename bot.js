@@ -1,10 +1,12 @@
 #!/usr/bin/env node
-// DMS Signal Bot v4.3 — runs every 2 minutes, sends Telegram alerts for new signals
+// DMS Signal Bot v4.4 — AUTO-TRADE edition
 // Mirrors the DMS algorithm from index.html exactly — same levels, same scoring, same signals
+// Now also executes trades on Hyperliquid with TP/SL/trailing stops
 // Node 18+ required (uses built-in fetch)
 'use strict';
-const fs   = require('fs');
-const path = require('path');
+const fs    = require('fs');
+const path  = require('path');
+const ethers = require('ethers');
 
 // ── CONFIG (env vars or .env file) ──────────────────────────────────────────
 (function loadDotEnv(){
@@ -25,6 +27,15 @@ const MIN_RR        = parseFloat(process.env.MIN_RR || '1.5');
 const INTERVAL_MS   = parseInt(process.env.INTERVAL_MS || '120000', 10);
 const DEDUP_FILE    = path.join(__dirname, '.dedup.json');
 
+// ── AUTO-TRADE CONFIG ────────────────────────────────────────────────────────
+const HL_PRIVATE_KEY  = process.env.HL_PRIVATE_KEY;   // Agent wallet private key
+const HL_MASTER_ADDR  = process.env.HL_MASTER_ADDR || '';  // Master account address (if agent wallet)
+const AUTO_TRADE      = process.env.AUTO_TRADE === 'true';
+const RISK_PCT        = parseFloat(process.env.RISK_PCT || '1');      // % of account to risk per trade
+const MIN_CONFIDENCE  = parseInt(process.env.MIN_CONFIDENCE || '50'); // base min confidence %
+const MAX_TRADES_DAY  = parseInt(process.env.MAX_TRADES_DAY || '10');
+const TRAIL_INTERVAL  = parseInt(process.env.TRAIL_INTERVAL || '30000'); // check trailing every 30s
+
 if(!TG_TOKEN || !TG_CHATID){
   console.error('ERROR: TG_TOKEN and TG_CHATID must be set.');
   process.exit(1);
@@ -32,9 +43,9 @@ if(!TG_TOKEN || !TG_CHATID){
 
 // ── COINS (matches app v4.3: BTC, HYPE, SOL) ────────────────────────────────
 const COINS = {
-  bitcoin:     { id:'bitcoin',     label:'BTC',  apiSym:'BTCUSDT',  exchange:'binance' },
-  hyperliquid: { id:'hyperliquid', label:'HYPE', apiSym:'HYPEUSDT', exchange:'bybit'   },
-  solana:      { id:'solana',      label:'SOL',  apiSym:'SOLUSDT',  exchange:'binance' },
+  bitcoin:     { id:'bitcoin',     label:'BTC',  apiSym:'BTCUSDT',  asset:'BTC',  exchange:'binance' },
+  hyperliquid: { id:'hyperliquid', label:'HYPE', apiSym:'HYPEUSDT', asset:'HYPE', exchange:'bybit'   },
+  solana:      { id:'solana',      label:'SOL',  apiSym:'SOLUSDT',  asset:'SOL',  exchange:'binance' },
 };
 
 const TFS = [
@@ -54,6 +65,12 @@ const LIMITS = { '1W':104, '1D':180, '4H':500, '1H':500, '15m':192 };
 
 const BINANCE = 'https://api.binance.com/api/v3';
 const BYBIT   = 'https://api.bybit.com/v5/market';
+const HL_API  = 'https://api.hyperliquid.xyz';
+
+// ── STATE ────────────────────────────────────────────────────────────────────
+const coinState = {};  // coinId -> { price, htfDir, results: { tf: dmsResult } }
+const ACTIVE_TRADES_FILE = path.join(__dirname, '.active_trades.json');
+const CLOSED_TRADES_FILE = path.join(__dirname, '.closed_trades.json');
 
 // ── DEDUP ─────────────────────────────────────────────────────────────────────
 function loadDedup(){
@@ -210,7 +227,6 @@ function scoreLevel(c, i, type){
   if(directional) score += 10;
   return Math.round(score);
 }
-// v4.3: lower threshold, keep all levels including weak when nearby
 function classifyStrength(score){
   if(score >= 40) return 'strong';
   if(score >= 12) return 'med';
@@ -243,7 +259,6 @@ function findVPeaks(c, tf){
       if(testCount >= 2) score = Math.round(score * 0.5);
       else if(testCount === 1) score = Math.round(score * 0.75);
       const strength = classifyStrength(score);
-      // v4.3: include ALL levels, not just non-weak
       const flippedTypeR = detectFlippedLevel(c, i, 'resistance', x.bh);
       L.push({
         price:x.bh, bh:x.bh, bl:x.bh*0.999,
@@ -590,7 +605,588 @@ function nextMove(h4C, h1C){
   return { dir:'UNCLEAR' };
 }
 
-// ── ALERT FORMATTING & SENDING ────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// ██  HYPERLIQUID TRADING MODULE                                            ██
+// ══════════════════════════════════════════════════════════════════════════════
+
+const HL = {
+  wallet: null,
+  address: '',
+  masterAddress: '',
+  assetMap: {},
+  szDecimals: {},
+  enabled: false,
+  activeTrades: {},
+  cachedEquity: 0,
+  _lastEquitySync: 0,
+  tradesToday: 0,
+  lastTradeDay: '',
+
+  // ── MSGPACK encoder (matches app exactly) ──
+  msgpack(obj) {
+    const buf = [];
+    const writeStr = (s) => {
+      const b = new TextEncoder().encode(s);
+      if (b.length < 32) buf.push(0xa0 | b.length);
+      else if (b.length < 256) { buf.push(0xd9); buf.push(b.length); }
+      else { buf.push(0xda); buf.push(b.length >> 8); buf.push(b.length & 0xff); }
+      for (const c of b) buf.push(c);
+    };
+    const writeInt = (n) => {
+      if (n >= 0 && n < 128) { buf.push(n); }
+      else if (n >= 0 && n < 256) { buf.push(0xcc); buf.push(n); }
+      else if (n >= 0 && n < 65536) { buf.push(0xcd); buf.push(n >> 8); buf.push(n & 0xff); }
+      else if (n >= 0) { buf.push(0xce); buf.push((n >>> 24) & 0xff); buf.push((n >>> 16) & 0xff); buf.push((n >>> 8) & 0xff); buf.push(n & 0xff); }
+      else if (n >= -32) { buf.push(n & 0xff); }
+      else if (n >= -128) { buf.push(0xd0); buf.push(n & 0xff); }
+    };
+    const enc = (v) => {
+      if (v === null || v === undefined) { buf.push(0xc0); }
+      else if (typeof v === 'boolean') { buf.push(v ? 0xc3 : 0xc2); }
+      else if (typeof v === 'number' && Number.isInteger(v)) { writeInt(v); }
+      else if (typeof v === 'string') { writeStr(v); }
+      else if (Array.isArray(v)) {
+        if (v.length < 16) buf.push(0x90 | v.length); else { buf.push(0xdc); buf.push(v.length >> 8); buf.push(v.length & 0xff); }
+        for (const item of v) enc(item);
+      } else if (typeof v === 'object') {
+        const keys = Object.keys(v);
+        if (keys.length < 16) buf.push(0x80 | keys.length); else { buf.push(0xde); buf.push(keys.length >> 8); buf.push(keys.length & 0xff); }
+        for (const k of keys) { enc(k); enc(v[k]); }
+      }
+    };
+    enc(obj);
+    return new Uint8Array(buf);
+  },
+
+  // ── Compute action hash for phantom agent signing ──
+  computeActionHash(action, nonce, vaultAddress) {
+    const packed = this.msgpack(action);
+    const nonceBuf = new Uint8Array(8);
+    let n = BigInt(nonce);
+    for (let i = 7; i >= 0; i--) { nonceBuf[i] = Number(n & 0xFFn); n >>= 8n; }
+    let vaultBuf;
+    if (vaultAddress) {
+      const addrBytes = ethers.utils.arrayify(vaultAddress);
+      vaultBuf = new Uint8Array(1 + addrBytes.length);
+      vaultBuf[0] = 1;
+      vaultBuf.set(addrBytes, 1);
+    } else {
+      vaultBuf = new Uint8Array([0]);
+    }
+    const combined = new Uint8Array(packed.length + nonceBuf.length + vaultBuf.length);
+    combined.set(packed);
+    combined.set(nonceBuf, packed.length);
+    combined.set(vaultBuf, packed.length + nonceBuf.length);
+    return ethers.utils.keccak256(combined);
+  },
+
+  // ── Sign L1 action (phantom agent EIP-712) ──
+  async signL1Action(action, nonce, vaultAddress) {
+    const hash = this.computeActionHash(action, nonce, vaultAddress || null);
+    const domain = {
+      name: 'Exchange', version: '1',
+      chainId: 1337,
+      verifyingContract: '0x0000000000000000000000000000000000000000'
+    };
+    const types = {
+      Agent: [
+        { name: 'source', type: 'string' },
+        { name: 'connectionId', type: 'bytes32' }
+      ]
+    };
+    const value = { source: 'a', connectionId: hash };
+    const sig = await this.wallet._signTypedData(domain, types, value);
+    return ethers.utils.splitSignature(sig);
+  },
+
+  // ── Float to wire: match Python SDK ──
+  floatToWire(x) {
+    const s = parseFloat(parseFloat(x).toPrecision(5)).toString();
+    if (s.includes('.')) return s.replace(/\.?0+$/, '') || '0';
+    return s;
+  },
+
+  // ── Build order type wire ──
+  orderTypeToWire(orderType) {
+    if (orderType.limit) {
+      return { limit: { tif: orderType.limit.tif } };
+    } else if (orderType.trigger) {
+      return { trigger: {
+        isMarket: orderType.trigger.isMarket,
+        triggerPx: this.floatToWire(orderType.trigger.triggerPx),
+        tpsl: orderType.trigger.tpsl
+      }};
+    }
+    return orderType;
+  },
+
+  // ── Initialize HL module ──
+  async init() {
+    if (!HL_PRIVATE_KEY) {
+      console.log('HL: No private key configured, auto-trade disabled.');
+      return false;
+    }
+    try {
+      this.wallet = new ethers.Wallet(HL_PRIVATE_KEY);
+      this.address = this.wallet.address;
+      this.masterAddress = HL_MASTER_ADDR;
+      await this.fetchMeta();
+      this.enabled = AUTO_TRADE;
+      this.tradesToday = 0;
+      this.lastTradeDay = new Date().toDateString();
+      this.loadActiveTrades();
+      console.log('HL loaded persisted trades:', Object.keys(this.activeTrades).length, '→', JSON.stringify(this.activeTrades));
+      await this.syncPositions();
+      await this.syncEquity();
+      console.log('HL ready:', this.address, '| Master:', this.masterAddress || 'not set', '| Auto:', this.enabled, '| Equity: $' + this.cachedEquity.toFixed(2), '| Assets:', Object.keys(this.assetMap).join(', '));
+      return true;
+    } catch (e) {
+      console.error('HL init failed:', e);
+      return false;
+    }
+  },
+
+  async fetchMeta() {
+    const res = await fetch(HL_API + '/info', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'meta' })
+    });
+    const meta = await res.json();
+    meta.universe.forEach((a, i) => {
+      this.assetMap[a.name] = i;
+      this.szDecimals[a.name] = a.szDecimals;
+    });
+  },
+
+  // ── Get balance (perps + spot) ──
+  async getBalance() {
+    if (!this.wallet) return 0;
+    const queryAddr = (this.masterAddress || this.address).toLowerCase();
+    const [perpsRes, spotRes] = await Promise.all([
+      fetch(HL_API + '/info', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr })
+      }),
+      fetch(HL_API + '/info', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'spotClearinghouseState', user: queryAddr })
+      })
+    ]);
+    const perpsData = await perpsRes.json();
+    const spotData = await spotRes.json();
+    const ms = perpsData.marginSummary || {};
+    const perpsVal = parseFloat(ms.accountValue || '0');
+    const cms = perpsData.crossMarginSummary || {};
+    const crossVal = parseFloat(cms.accountValue || '0');
+    let spotVal = 0;
+    if (spotData.balances) {
+      for (const b of spotData.balances) {
+        if (b.coin === 'USDC' || b.coin === 'USDT') spotVal += parseFloat(b.total || '0');
+      }
+    }
+    return Math.max(perpsVal, crossVal, spotVal);
+  },
+
+  async syncEquity() {
+    try {
+      const bal = await this.getBalance();
+      if (bal > 0) {
+        this.cachedEquity = bal;
+        this._lastEquitySync = Date.now();
+        console.log('HL equity synced: $' + bal.toFixed(2));
+      }
+    } catch (e) { console.warn('HL syncEquity failed:', e.message); }
+  },
+
+  // ── Persist active trades to file (replaces localStorage) ──
+  saveActiveTrades() {
+    try { fs.writeFileSync(ACTIVE_TRADES_FILE, JSON.stringify(this.activeTrades)); } catch(e){}
+  },
+  loadActiveTrades() {
+    try {
+      if (fs.existsSync(ACTIVE_TRADES_FILE)) {
+        this.activeTrades = JSON.parse(fs.readFileSync(ACTIVE_TRADES_FILE, 'utf8'));
+      }
+    } catch(e){ this.activeTrades = {}; }
+  },
+
+  // ── Fetch trigger orders (SL/TP) ──
+  async fetchTriggerOrders() {
+    try {
+      const queryAddr = (this.masterAddress || this.address).toLowerCase();
+      const res = await fetch(HL_API + '/info', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'frontendOpenOrders', user: queryAddr })
+      });
+      return await res.json();
+    } catch(e) { console.warn('fetchTriggerOrders error:', e.message); return []; }
+  },
+
+  // ── Sync positions with real HL state ──
+  async syncPositions() {
+    try {
+      const queryAddr = (this.masterAddress || this.address).toLowerCase();
+      const [posRes, trigOrders] = await Promise.all([
+        fetch(HL_API + '/info', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr })
+        }),
+        this.fetchTriggerOrders()
+      ]);
+      const data = await posRes.json();
+      const positions = data.assetPositions || [];
+      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SOL: 'solana' };
+
+      // Build SL/TP map from trigger orders
+      const trigMap = {};
+      if (Array.isArray(trigOrders)) {
+        for (const o of trigOrders) {
+          const coin = o.coin;
+          if (!coin) continue;
+          if (!trigMap[coin]) trigMap[coin] = {};
+          const trigPx = parseFloat(o.triggerPx || '0');
+          if (trigPx <= 0) continue;
+          const ot = (o.orderType || '').toLowerCase();
+          if (ot.includes('stop') || o.tpsl === 'sl') trigMap[coin].sl = trigPx;
+          else if (ot.includes('take profit') || o.tpsl === 'tp') trigMap[coin].tp = trigPx;
+        }
+      }
+
+      const oldTrades = { ...this.activeTrades };
+      const nowOpen = new Set();
+      this.activeTrades = {};
+      for (const p of positions) {
+        const pos = p.position;
+        if (!pos || parseFloat(pos.szi) === 0) continue;
+        const coinId = symToId[pos.coin];
+        if (!coinId) continue;
+        nowOpen.add(coinId);
+        const szi = parseFloat(pos.szi);
+        const entry = parseFloat(pos.entryPx || '0');
+        const trig = trigMap[pos.coin] || {};
+        const prev = oldTrades[coinId];
+        if (prev && prev.side === (szi > 0 ? 'LONG' : 'SHORT') && prev.trailState) {
+          this.activeTrades[coinId] = {
+            ...prev,
+            size: Math.abs(szi),
+            entry: entry,
+            sl: trig.sl || prev.sl || null,
+            tp: trig.tp || prev.tp || null
+          };
+        } else {
+          this.activeTrades[coinId] = {
+            asset: pos.coin,
+            side: szi > 0 ? 'LONG' : 'SHORT',
+            size: Math.abs(szi),
+            entry: entry,
+            sl: trig.sl || null,
+            tp: trig.tp || null,
+            initialSl: trig.sl || 0,
+            bestPrice: entry,
+            trailState: 'initial'
+          };
+        }
+      }
+
+      // Detect closed positions
+      for (const [coinId, old] of Object.entries(oldTrades)) {
+        if (nowOpen.has(coinId)) continue;
+        if (!old.entry || !old.asset) continue;
+        const s = coinState[coinId];
+        const exitPx = s ? s.price : old.entry;
+        const isLong = old.side === 'LONG';
+        const pnl = isLong ? (exitPx - old.entry) * old.size : (old.entry - exitPx) * old.size;
+        let reason = 'auto_closed';
+        if (old.tp && ((isLong && exitPx >= old.tp * 0.99) || (!isLong && exitPx <= old.tp * 1.01))) reason = 'tp_hit';
+        else if (old.sl && ((isLong && exitPx <= old.sl * 1.01) || (!isLong && exitPx >= old.sl * 0.99))) reason = 'sl_hit';
+
+        const closed = loadClosedTrades();
+        closed.unshift({
+          coin: old.asset, side: old.side, size: old.size,
+          entry: old.entry, exit: exitPx, pnl, ts: new Date().toISOString(), reason
+        });
+        saveClosedTrades(closed);
+
+        const emoji = reason === 'tp_hit' ? '✅' : reason === 'sl_hit' ? '🛑' : '📊';
+        const label = reason === 'tp_hit' ? 'TP HIT' : reason === 'sl_hit' ? 'SL HIT' : 'CLOSED';
+        console.log(`HL POSITION CLOSED: ${label} ${old.side} ${old.asset} | P&L: $${pnl.toFixed(2)}`);
+        await sendTelegram(`${emoji} <b>${label}: ${old.side} ${old.asset}</b>\nEntry: $${fmt(old.entry)}\nExit: $${fmt(exitPx)}\nP&L: <b>$${pnl.toFixed(2)}</b>`);
+      }
+
+      this.saveActiveTrades();
+      console.log('HL positions synced:', Object.keys(this.activeTrades).length, 'open');
+    } catch(e) { console.warn('HL syncPositions error:', e.message); }
+  },
+
+  // ── Place an order ──
+  async placeOrder(asset, isBuy, size, price, orderType, reduceOnly = false) {
+    const assetIdx = this.assetMap[asset];
+    if (assetIdx === undefined) throw new Error('Unknown asset: ' + asset);
+    const szDec = this.szDecimals[asset] || 3;
+    const sizeStr = this.floatToWire(parseFloat(size.toFixed(szDec)));
+    const priceStr = this.floatToWire(price);
+    const orderWire = { a: assetIdx, b: isBuy, p: priceStr, s: sizeStr, r: reduceOnly, t: this.orderTypeToWire(orderType) };
+    const action = { type: 'order', orders: [orderWire], grouping: 'na' };
+    const nonce = Date.now();
+    const signature = await this.signL1Action(action, nonce, null);
+    const payload = { action, nonce, signature: { r: signature.r, s: signature.s, v: signature.v } };
+    console.log('HL order:', asset, isBuy ? 'BUY' : 'SELL', sizeStr, '@', priceStr, reduceOnly ? '(reduce)' : '');
+    const res = await fetch(HL_API + '/exchange', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const result = await res.json();
+
+    if (result.status === 'ok' && result.response?.data?.statuses) {
+      const s = result.response.data.statuses[0];
+      if (s?.error) {
+        console.error('HL order error:', s.error);
+        return { status: 'err', response: s.error };
+      }
+      if (s?.filled) {
+        console.log('HL FILLED:', s.filled.totalSz, '@', s.filled.avgPx);
+        return { status: 'ok', filled: true, totalSz: s.filled.totalSz, avgPx: s.filled.avgPx, oid: s.filled.oid, raw: result };
+      }
+      if (s?.resting) {
+        console.log('HL RESTING:', s.resting.oid);
+        return { status: 'ok', filled: false, resting: true, oid: s.resting.oid, raw: result };
+      }
+    }
+    return result;
+  },
+
+  // ── Fetch open orders ──
+  async fetchOpenOrders() {
+    const queryAddr = (this.masterAddress || this.address).toLowerCase();
+    const res = await fetch(HL_API + '/info', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'openOrders', user: queryAddr })
+    });
+    return await res.json();
+  },
+
+  // ── Cancel an order ──
+  async cancelOrder(asset, oid) {
+    const assetIdx = this.assetMap[asset];
+    if (assetIdx === undefined) return;
+    const action = { type: 'cancel', cancels: [{ a: assetIdx, o: oid }] };
+    const nonce = Date.now();
+    const signature = await this.signL1Action(action, nonce, null);
+    const payload = { action, nonce, signature: { r: signature.r, s: signature.s, v: signature.v } };
+    const res = await fetch(HL_API + '/exchange', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return await res.json();
+  },
+
+  // ── Cancel all trigger orders for an asset ──
+  async cancelTriggerOrders(asset) {
+    try {
+      const orders = await this.fetchOpenOrders();
+      const triggers = orders.filter(o => o.coin === asset && o.orderType && o.orderType !== 'Limit');
+      for (const o of triggers) await this.cancelOrder(asset, o.oid);
+      return triggers.length;
+    } catch (e) { console.warn('cancelTriggerOrders error:', e.message); return 0; }
+  },
+
+  // ── Execute full trade: market entry + SL + TP ──
+  async executeTrade(coinId, signal, confidence) {
+    const asset = COINS[coinId]?.asset;
+    if (!asset || !this.enabled || !this.wallet) return null;
+
+    // Daily trade limit
+    const today = new Date().toDateString();
+    if (today !== this.lastTradeDay) { this.tradesToday = 0; this.lastTradeDay = today; }
+    if (this.tradesToday >= MAX_TRADES_DAY) {
+      console.warn('HL: daily trade limit reached (' + MAX_TRADES_DAY + ')');
+      return null;
+    }
+
+    const { sig, level, stopPrice, rr, type } = signal;
+    let { target } = signal;
+    if (!stopPrice) { console.warn('HL: no stop price, skipping'); return null; }
+
+    const isBuy = sig === 'LONG';
+    const currentPrice = coinState[coinId]?.price;
+    if (!currentPrice) { console.warn('HL: no price for', coinId); return null; }
+
+    // Dynamic R:R cap
+    const htfDir = coinState[coinId]?.htfDir || 'UNCLEAR';
+    const withTrend = (sig === 'LONG' && htfDir === 'UP') || (sig === 'SHORT' && htfDir === 'DOWN');
+    const maxRR = withTrend ? 4.0 : 2.5;
+    const risk = Math.abs(currentPrice - stopPrice);
+    const maxReward = risk * maxRR;
+    if (target) {
+      const actualReward = Math.abs(target - currentPrice);
+      if (actualReward > maxReward) {
+        target = isBuy ? currentPrice + maxReward : currentPrice - maxReward;
+        console.log(`HL: capped TP to R:R ${maxRR} (${withTrend?'with':'counter'}-trend) →`, target.toFixed(1));
+      }
+    }
+
+    // Position sizing
+    const accountSize = this.cachedEquity > 0 ? this.cachedEquity : 100;
+    const riskAmount = accountSize * RISK_PCT / 100;
+    const slDistance = Math.abs(currentPrice - stopPrice);
+    if (slDistance < currentPrice * 0.001) { console.warn('HL: SL too tight'); return null; }
+
+    const size = riskAmount / slDistance;
+    const szDec = this.szDecimals[asset] || 3;
+    const minSize = Math.pow(10, -szDec);
+    if (size < minSize) { console.warn('HL: size too small:', size); return null; }
+
+    // Entry: IOC limit with 1% slippage
+    const slip = currentPrice * 0.01;
+    const entryPx = isBuy ? currentPrice + slip : currentPrice - slip;
+
+    try {
+      // 1. Market entry
+      const entryRes = await this.placeOrder(asset, isBuy, size, entryPx, { limit: { tif: 'Ioc' } });
+      if (entryRes.status === 'err') { console.error('HL entry failed:', entryRes.response); return null; }
+      if (entryRes.filled === false || (!entryRes.filled && !entryRes.totalSz)) { console.error('HL entry not filled'); return null; }
+
+      // 2. Stop Loss
+      const slPx = isBuy ? stopPrice * 0.98 : stopPrice * 1.02;
+      await this.placeOrder(asset, !isBuy, size, slPx,
+        { trigger: { isMarket: true, triggerPx: stopPrice, tpsl: 'sl' } }, true);
+
+      // 3. Take Profit
+      if (target) {
+        const tpPx = isBuy ? target * 1.02 : target * 0.98;
+        await this.placeOrder(asset, !isBuy, size, tpPx,
+          { trigger: { isMarket: true, triggerPx: target, tpsl: 'tp' } }, true);
+      }
+
+      // Track active trade
+      const actualEntry = entryRes.avgPx ? +entryRes.avgPx : currentPrice;
+      this.activeTrades[coinId] = {
+        asset, side: sig, size, entry: actualEntry,
+        sl: stopPrice, tp: target,
+        initialSl: stopPrice,
+        bestPrice: actualEntry,
+        trailState: 'initial'
+      };
+      this.saveActiveTrades();
+      this.tradesToday++;
+
+      const tradeMsg = `${isBuy ? '🟢' : '🔴'} <b>AUTO-TRADE: ${sig} ${asset}</b>\nEntry: <b>$${fmt(actualEntry)}</b>\nSize: ${size.toFixed(szDec)}\nSL: <b>$${fmt(stopPrice)}</b>${target ? '\nTP: <b>$' + fmt(target) + '</b>' : ''}\nR:R ${rr || '?'}\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
+      console.log(`HL TRADE: ${sig} ${asset} | Size: ${size.toFixed(szDec)} | Entry: $${fmt(actualEntry)} | SL: $${fmt(stopPrice)}${target ? ' | TP: $' + fmt(target) : ''}`);
+      await sendTelegram(tradeMsg);
+
+      return entryRes;
+    } catch (e) {
+      console.error('HL trade error:', e);
+      await sendTelegram(`❌ <b>TRADE FAILED: ${sig} ${asset}</b>\n${e.message}`);
+      return null;
+    }
+  },
+
+  // ── Trailing stop logic ──
+  async trailStops() {
+    if (!this.wallet || !this.enabled) return;
+    for (const [coinId, trade] of Object.entries(this.activeTrades)) {
+      if (!trade || !trade.entry || !trade.sl) continue;
+      const px = coinState[coinId]?.price;
+      if (!px || px <= 0) continue;
+      const isLong = trade.side === 'LONG';
+      const risk = Math.abs(trade.entry - (trade.initialSl || trade.sl));
+      if (risk <= 0) continue;
+
+      // Track best price
+      if (isLong && px > trade.bestPrice) trade.bestPrice = px;
+      if (!isLong && (trade.bestPrice === 0 || px < trade.bestPrice)) trade.bestPrice = px;
+
+      const pnlFromEntry = isLong ? (px - trade.entry) : (trade.entry - px);
+      const rMultiple = pnlFromEntry / risk;
+
+      let newSl = null;
+
+      if (trade.trailState === 'initial' && rMultiple >= 1.0) {
+        newSl = trade.entry;
+        trade.trailState = 'breakeven';
+        console.log(`HL TRAIL ${trade.asset}: SL → BREAKEVEN $${fmt(newSl)} (1:1 R hit)`);
+        await sendTelegram(`🔄 <b>SL → BREAKEVEN: ${trade.asset}</b>\nEntry: $${fmt(trade.entry)}\n1:1 R reached`);
+      } else if (trade.trailState === 'breakeven' && rMultiple >= 1.5) {
+        trade.trailState = 'trailing';
+        newSl = isLong ? trade.bestPrice - risk * 1.5 : trade.bestPrice + risk * 1.5;
+        console.log(`HL TRAIL ${trade.asset}: trailing SL to $${fmt(newSl)} (1.5R trail started)`);
+      } else if (trade.trailState === 'trailing') {
+        const trailSl = isLong ? trade.bestPrice - risk * 1.5 : trade.bestPrice + risk * 1.5;
+        if ((isLong && trailSl > trade.sl) || (!isLong && trailSl < trade.sl)) {
+          newSl = trailSl;
+          console.log(`HL TRAIL ${trade.asset}: updated trailing SL to $${fmt(newSl)}`);
+        }
+      }
+
+      if (newSl !== null && newSl !== trade.sl) {
+        try {
+          await this.cancelTriggerOrders(trade.asset);
+          const slPx = isLong ? newSl * 0.98 : newSl * 1.02;
+          await this.placeOrder(trade.asset, !isLong, trade.size, slPx,
+            { trigger: { isMarket: true, triggerPx: newSl, tpsl: 'sl' } }, true);
+          // Re-place TP
+          if (trade.tp) {
+            const tpPx = isLong ? trade.tp * 1.02 : trade.tp * 0.98;
+            await this.placeOrder(trade.asset, !isLong, trade.size, tpPx,
+              { trigger: { isMarket: true, triggerPx: trade.tp, tpsl: 'tp' } }, true);
+          }
+          trade.sl = newSl;
+          this.saveActiveTrades();
+        } catch (e) { console.error('HL trailStops error:', e.message); }
+      }
+    }
+  },
+
+  // ── Close a position (used for reverse trades) ──
+  async closePosition(coinId) {
+    const trade = this.activeTrades[coinId];
+    if (!trade) return null;
+    const px = coinState[coinId]?.price;
+    if (!px) return null;
+    const isLong = trade.side === 'LONG';
+    const slip = px * 0.01;
+    const closePx = isLong ? px - slip : px + slip;
+
+    try {
+      const result = await this.placeOrder(trade.asset, !isLong, trade.size, closePx, { limit: { tif: 'Ioc' } }, true);
+      if (result.status !== 'err' && (result.filled || result.totalSz)) {
+        const exitPrice = result.avgPx ? +result.avgPx : px;
+        const pnl = isLong ? (exitPrice - trade.entry) * trade.size : (trade.entry - exitPrice) * trade.size;
+        const closed = loadClosedTrades();
+        closed.unshift({
+          coin: trade.asset, side: trade.side, size: trade.size,
+          entry: trade.entry, exit: exitPrice, pnl,
+          ts: new Date().toISOString(), reason: 'opposite_signal'
+        });
+        saveClosedTrades(closed);
+        delete this.activeTrades[coinId];
+        this.saveActiveTrades();
+
+        console.log(`HL CLOSED ${trade.side} ${trade.asset}: P&L $${pnl.toFixed(2)}`);
+        await sendTelegram(`🔄 <b>REVERSED: ${trade.side} ${trade.asset}</b>\nExit: $${fmt(exitPrice)}\nP&L: <b>$${pnl.toFixed(2)}</b>`);
+        return { exitPrice, pnl };
+      }
+      return null;
+    } catch (e) {
+      console.error('HL close error:', e.message);
+      return null;
+    }
+  }
+};
+
+// ── CLOSED TRADES persistence (file-based) ──
+function loadClosedTrades() {
+  try { return JSON.parse(fs.readFileSync(CLOSED_TRADES_FILE, 'utf8')); } catch { return []; }
+}
+function saveClosedTrades(trades) {
+  fs.writeFileSync(CLOSED_TRADES_FILE, JSON.stringify(trades.slice(0, 100)));
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ██  ALERT & TRADE EXECUTION LOGIC                                         ██
+// ══════════════════════════════════════════════════════════════════════════════
+
 async function maybeAlert(sig, tf, type, level, target, rr, stopPrice, coinId, price, allLevels){
   if(isDedupSuppressed(coinId, tf, type, level)) return;
   if((type==='FAIL_GAIN' || (type==='BREAKOUT' && sig==='SHORT')) && !WANT_SHORT) return;
@@ -620,7 +1216,76 @@ async function maybeAlert(sig, tf, type, level, target, rr, stopPrice, coinId, p
   console.log(`[${new Date().toISOString()}] ${ok?'SENT':'FAILED'} alert: ${coinLabel} [${tf}] ${type} ${sig} @ $${fmt(level)}`);
 }
 
-// ── PER-COIN SCAN ─────────────────────────────────────────────────────────────
+// ── AUTO-TRADE DECISION LOGIC (mirrors app's handleCandle auto-trade block) ──
+async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
+  if (!HL.enabled || !HL.wallet) return;
+  const d = dmsResult;
+  if (d.sig === 'NEUTRAL' || !d.stopPrice) return;
+
+  const s = coinState[coinId];
+  if (!s) return;
+
+  // Compute confidence (same formula as app)
+  let wL = 0, wS = 0, aW = 0;
+  TFS.forEach(t => {
+    const r = allResults[t.l];
+    if (!r) return;
+    if (r.type !== 'NONE') aW += t.w;
+    if (r.sig === 'LONG') wL += t.w;
+    if (r.sig === 'SHORT') wS += t.w;
+  });
+  const conf = aW > 0 ? Math.round(Math.max(wL, wS) / aW * 100) : 0;
+  const majorSig = wL > wS ? 'LONG' : wS > wL ? 'SHORT' : null;
+  const sym = COINS[coinId].label;
+
+  // HTF-aligned confidence adjustment
+  const htfDir = s.htfDir || 'UNCLEAR';
+  const withTrend = (d.sig === 'LONG' && htfDir === 'UP') || (d.sig === 'SHORT' && htfDir === 'DOWN');
+  const counterTrend = (d.sig === 'LONG' && htfDir === 'DOWN') || (d.sig === 'SHORT' && htfDir === 'UP');
+  const minConf = counterTrend ? Math.min(MIN_CONFIDENCE + 20, 90) : withTrend ? Math.max(MIN_CONFIDENCE - 15, 25) : MIN_CONFIDENCE;
+  const trendLabel = withTrend ? 'WITH-TREND' : counterTrend ? 'COUNTER-TREND' : 'NEUTRAL-TREND';
+
+  if (conf < minConf) {
+    console.log(`HL auto-trade SKIP ${sym} ${d.sig}: conf ${conf}% < ${minConf}% (${trendLabel})`);
+    return;
+  }
+  if (d.sig !== majorSig) {
+    console.log(`HL auto-trade SKIP ${sym}: signal ${d.sig} != majority ${majorSig}`);
+    return;
+  }
+
+  const existing = HL.activeTrades[coinId];
+  if (existing) {
+    if (existing.side === d.sig) {
+      // Same direction — add size on HTF signals (1W/1D/4H) if high confidence
+      if (tfIdx <= 2 && conf >= Math.min(MIN_CONFIDENCE + 10, 85)) {
+        console.log(`HL ADD to ${existing.side} ${sym} | ${TFS[tfIdx].l} signal conf ${conf}%`);
+        await HL.executeTrade(coinId, d, conf);
+        await HL.syncPositions();
+      } else {
+        console.log(`HL auto-trade SKIP ${sym}: already in ${existing.side} (same dir, tf=${TFS[tfIdx].l}, conf ${conf}%)`);
+      }
+    } else {
+      // Opposite direction — close and reverse
+      console.log(`HL REVERSE: close ${existing.side} ${sym}, open ${d.sig} (${TFS[tfIdx].l}, conf ${conf}%)`);
+      const closeResult = await HL.closePosition(coinId);
+      if (closeResult) {
+        await HL.executeTrade(coinId, d, conf);
+        await HL.syncPositions();
+      }
+    }
+  } else {
+    // No existing position — open new trade
+    console.log(`HL AUTO-TRADE FIRE ${sym} ${d.sig} | conf: ${conf}% (min: ${minConf}%, ${trendLabel}) | SL: ${d.stopPrice}`);
+    await HL.executeTrade(coinId, d, conf);
+    await HL.syncPositions();
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ██  PER-COIN SCAN                                                         ██
+// ══════════════════════════════════════════════════════════════════════════════
+
 async function scanCoin(coinId){
   const label = COINS[coinId].label;
   try{
@@ -632,9 +1297,14 @@ async function scanCoin(coinId){
     const [wC, dC, h4C, h1C, m15C] = allCandles;
     if(!dC) return;
 
+    // Store price in coinState for trailing stops
+    if (!coinState[coinId]) coinState[coinId] = {};
+    coinState[coinId].price = price;
+
     let htfDir = 'UNCLEAR';
     if(h4C && h1C) htfDir = nextMove(h4C, h1C).dir;
     else if(h4C)   htfDir = nextMove(h4C, h4C).dir;
+    coinState[coinId].htfDir = htfDir;
 
     const asiaLevels = m15C
       ? [...getAsiaLevels(m15C), ...getLondonLevels(m15C), ...getNYLevels(m15C)]
@@ -658,14 +1328,21 @@ async function scanCoin(coinId){
       m15C && dC ? { i:4, c:m15C, dC } : null,
     ].filter(Boolean);
 
+    // Store all results for confidence calculation
+    const allResults = {};
+
     for(const { i, c, dC: dc } of tfsToRun){
       const tf = TFS[i];
       const a  = atr(c);
       const htfCarrier = Object.assign(String(htfDir), { __asiaLevels: asiaLevels });
       const d = dms(c, a, dc, tf.l, htfCarrier);
+      allResults[tf.l] = d;
+
       if(d.type === 'NONE') continue;
       if(!isDedupSuppressed(coinId, tf.l, d.type, d.level)){
         await maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, d.stopPrice, coinId, price, allLevels);
+        // Auto-trade execution
+        await maybeAutoTrade(coinId, i, d, allResults);
       }
     }
     console.log(`  ${label}: $${fmt(price)} | HTF: ${htfDir} | Session: ${getCurrentSession()}`);
@@ -674,7 +1351,10 @@ async function scanCoin(coinId){
   }
 }
 
-// ── MAIN LOOP ─────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// ██  MAIN LOOP                                                             ██
+// ══════════════════════════════════════════════════════════════════════════════
+
 async function scanAll(){
   const coins = Object.keys(COINS);
   console.log(`[${new Date().toISOString()}] Scanning ${coins.map(c=>COINS[c].label).join(', ')}...`);
@@ -686,11 +1366,51 @@ async function scanAll(){
 }
 
 async function main(){
-  console.log(`DMS Signal Bot v4.3 started. Interval: ${INTERVAL_MS/1000}s`);
+  console.log(`DMS Signal Bot v4.4 started. Interval: ${INTERVAL_MS/1000}s`);
   console.log(`Coins: BTC, HYPE, SOL  |  Token: ...${TG_TOKEN.slice(-6)}  |  Chat: ${TG_CHATID}`);
-  await sendTelegram('🤖 <b>DMS Signal Bot v4.3 started</b>\nScanning BTC · HYPE · SOL every 2 minutes.');
+
+  // Initialize Hyperliquid trading module
+  if (HL_PRIVATE_KEY && AUTO_TRADE) {
+    const hlOk = await HL.init();
+    if (hlOk) {
+      console.log('Auto-trading ENABLED | Risk:', RISK_PCT + '%', '| Min conf:', MIN_CONFIDENCE + '%', '| Max trades/day:', MAX_TRADES_DAY);
+      await sendTelegram('🤖 <b>DMS Signal Bot v4.4 started</b>\n✅ Auto-trading ENABLED\nScanning BTC · HYPE · SOL every 2 min\nRisk: ' + RISK_PCT + '% | Min conf: ' + MIN_CONFIDENCE + '%');
+    } else {
+      console.warn('Auto-trading init FAILED — running in alert-only mode');
+      await sendTelegram('🤖 <b>DMS Signal Bot v4.4 started</b>\n⚠️ Auto-trading FAILED to init\nRunning in alert-only mode');
+    }
+  } else {
+    console.log('Auto-trading DISABLED (set AUTO_TRADE=true and HL_PRIVATE_KEY to enable)');
+    await sendTelegram('🤖 <b>DMS Signal Bot v4.4 started</b>\nScanning BTC · HYPE · SOL every 2 minutes.\n🔔 Alert-only mode');
+  }
+
   await scanAll();
   setInterval(scanAll, INTERVAL_MS);
+
+  // Trailing stop check loop (every 30s)
+  if (HL.enabled) {
+    setInterval(async () => {
+      try {
+        // Refresh prices for trailing stop checks
+        for (const coinId of Object.keys(HL.activeTrades)) {
+          try {
+            const { price } = await getPrice(coinId);
+            if (!coinState[coinId]) coinState[coinId] = {};
+            coinState[coinId].price = price;
+          } catch (e) { /* price fetch failed, skip */ }
+        }
+        await HL.trailStops();
+      } catch (e) { console.warn('Trail check error:', e.message); }
+    }, TRAIL_INTERVAL);
+
+    // Sync positions & equity every 5 min
+    setInterval(async () => {
+      try {
+        await HL.syncPositions();
+        await HL.syncEquity();
+      } catch (e) { console.warn('Periodic sync error:', e.message); }
+    }, 300000);
+  }
 }
 
 main().catch(e=>{ console.error('Fatal:', e); process.exit(1); });
