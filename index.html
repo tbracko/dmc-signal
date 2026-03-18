@@ -2946,6 +2946,11 @@ function connectWS(coinId){
       HL._lastPosSync = now;
       HL.syncPositions().catch(e => console.warn('syncPositions error:', e));
     }
+    // ── Fill history check: every 5min to catch missed closes ──
+    if(HL.wallet && (!HL._lastFillCheck || now - HL._lastFillCheck > 5 * 60 * 1000)){
+      HL._lastFillCheck = now;
+      HL.checkFillHistory().catch(e => console.warn('checkFillHistory error:', e));
+    }
   }
 
   try{
@@ -3056,6 +3061,8 @@ const HL = {
       console.log('HL loaded persisted trades:', Object.keys(this.activeTrades).length, '→', JSON.stringify(this.activeTrades));
       // Sync with real positions so auto-trader knows what's already open
       await this.syncPositions();
+      // Check fill history to catch any TP/SL closes we missed while offline
+      await this.checkFillHistory();
       // Auto-sync account equity for position sizing
       await this.syncEquity();
       console.log('HL ready:', this.address, '| Master:', this.masterAddress || 'not set', '| Auto:', this.enabled, '| Equity: $' + this.cachedEquity.toFixed(2), '| Assets:', Object.keys(this.assetMap).join(', '));
@@ -3252,6 +3259,119 @@ const HL = {
       console.log('HL synced positions:', Object.keys(this.activeTrades).length, 'active →', JSON.stringify(this.activeTrades));
     } catch (e) {
       console.warn('HL syncPositions failed:', e);
+    }
+  },
+
+  // ── Check HL fill history to catch TP/SL closes we may have missed ──
+  async checkFillHistory() {
+    if (!this.wallet) return;
+    try {
+      const queryAddr = (this.masterAddress || this.address).toLowerCase();
+      // Fetch fills from the last 24 hours
+      const startMs = Date.now() - 24 * 60 * 60 * 1000;
+      const res = await fetch(this.API + '/info', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'userFillsByTime', user: queryAddr, startTime: startMs })
+      });
+      const fills = await res.json();
+      if (!Array.isArray(fills) || fills.length === 0) return;
+
+      // Group fills by coin, find closing fills (reduceOnly or that bring position to 0)
+      // We look for fills we haven't already recorded in closedTrades
+      const closed = loadClosedTrades();
+      const recorded = new Set(closed.map(c => c.ts)); // existing timestamps
+      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SOL: 'solana' };
+
+      // Group consecutive fills by coin+dir to find close events
+      // HL marks closing fills with closedPnl !== "0" or closedPnl field
+      const closeFills = fills.filter(f => {
+        const pnl = parseFloat(f.closedPnl || '0');
+        return pnl !== 0; // non-zero closedPnl means this fill closed (part of) a position
+      });
+
+      if (closeFills.length === 0) return;
+
+      // Group by coin + cluster fills within 2 seconds (one close can be multiple fills)
+      const clusters = [];
+      for (const f of closeFills) {
+        const ts = f.time;
+        const last = clusters.length ? clusters[clusters.length - 1] : null;
+        if (last && last.coin === f.coin && Math.abs(ts - last.endTs) < 2000) {
+          last.fills.push(f);
+          last.endTs = ts;
+        } else {
+          clusters.push({ coin: f.coin, fills: [f], startTs: ts, endTs: ts });
+        }
+      }
+
+      let newCount = 0;
+      for (const cl of clusters) {
+        const coin = cl.coin;
+        const coinId = symToId[coin];
+        // Build a dedup key from coin + approximate timestamp (rounded to 10s)
+        const dedupKey = `${coin}_${Math.round(cl.startTs / 10000)}`;
+        // Check if we already have a close for this coin within ±60s
+        const alreadyRecorded = closed.some(c =>
+          c.coin === coin && Math.abs(new Date(c.ts).getTime() - cl.startTs) < 60000
+        );
+        if (alreadyRecorded) continue;
+
+        // Compute aggregate: total size, avg price, total P&L
+        let totalSize = 0, totalPnl = 0, weightedPx = 0;
+        let side = null;
+        for (const f of cl.fills) {
+          const sz = parseFloat(f.sz || '0');
+          const px = parseFloat(f.px || '0');
+          totalSize += sz;
+          weightedPx += sz * px;
+          totalPnl += parseFloat(f.closedPnl || '0');
+          // The fill direction is opposite to the closed position direction
+          if (!side) side = f.side === 'B' ? 'SHORT' : 'LONG'; // if buying to close, was SHORT
+        }
+        const avgExitPx = totalSize > 0 ? weightedPx / totalSize : 0;
+
+        // Try to find entry price from fill data or activeTrades
+        let entryPx = 0;
+        const at = this.activeTrades[coinId];
+        if (at && at.entry) entryPx = at.entry;
+        // Estimate from P&L if we don't have entry
+        if (!entryPx && totalPnl !== 0 && totalSize > 0) {
+          // pnl = (exit - entry) * size for long, (entry - exit) * size for short
+          if (side === 'LONG') entryPx = avgExitPx - totalPnl / totalSize;
+          else entryPx = avgExitPx + totalPnl / totalSize;
+        }
+
+        // Determine reason
+        let reason = 'auto_closed';
+        const oldTrade = at || {};
+        if (oldTrade.tp && ((side === 'LONG' && avgExitPx >= oldTrade.tp * 0.99) || (side === 'SHORT' && avgExitPx <= oldTrade.tp * 1.01))) {
+          reason = 'tp_hit';
+        } else if (oldTrade.sl && ((side === 'LONG' && avgExitPx <= oldTrade.sl * 1.01) || (side === 'SHORT' && avgExitPx >= oldTrade.sl * 0.99))) {
+          reason = 'sl_hit';
+        } else if (totalPnl > 0) {
+          reason = 'tp_hit'; // positive P&L likely means TP
+        } else if (totalPnl < 0) {
+          reason = 'sl_hit'; // negative P&L likely means SL
+        }
+
+        closed.unshift({
+          coin, side, size: totalSize,
+          entry: entryPx, exit: avgExitPx, pnl: totalPnl,
+          ts: new Date(cl.startTs).toISOString(), reason
+        });
+        newCount++;
+        const emoji = reason === 'tp_hit' ? '✅' : reason === 'sl_hit' ? '🛑' : '📊';
+        const label = reason === 'tp_hit' ? 'TP HIT' : reason === 'sl_hit' ? 'SL HIT' : 'CLOSED';
+        console.log(`HL FILL HISTORY ${label}: ${side} ${coin} | Exit: $${fmt(avgExitPx)} | P&L: $${totalPnl.toFixed(2)}`);
+      }
+
+      if (newCount > 0) {
+        saveClosedTrades(closed);
+        console.log(`HL fill history: found ${newCount} new closed trades`);
+        showToast(`Found ${newCount} closed trade(s) from fill history`, '', false);
+      }
+    } catch (e) {
+      console.warn('HL checkFillHistory error:', e);
     }
   },
 
