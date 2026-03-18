@@ -1,13 +1,7 @@
 #!/usr/bin/env node
-// DMS Signal Bot — runs every 2 minutes, sends Telegram alerts for new signals
+// DMS Signal Bot v4.3 — runs every 2 minutes, sends Telegram alerts for new signals
+// Mirrors the DMS algorithm from index.html exactly — same levels, same scoring, same signals
 // Node 18+ required (uses built-in fetch)
-//
-// Setup:
-//   cp .env.example .env        # fill in your TG_TOKEN and TG_CHATID
-//   node bot.js                 # run once
-//   # or keep alive with pm2:
-//   pm2 start bot.js --name dms-bot
-
 'use strict';
 const fs   = require('fs');
 const path = require('path');
@@ -27,7 +21,6 @@ const TG_CHATID = process.env.TG_CHATID;
 const WANT_LONG     = process.env.ALERT_LONG    !== 'false';
 const WANT_SHORT    = process.env.ALERT_SHORT   !== 'false';
 const WANT_ATLEVEL  = process.env.ALERT_ATLEVEL === 'true';
-const WANT_HTF_ONLY = process.env.ALERT_HTF_ONLY === 'true';
 const MIN_RR        = parseFloat(process.env.MIN_RR || '1.5');
 const INTERVAL_MS   = parseInt(process.env.INTERVAL_MS || '120000', 10);
 const DEDUP_FILE    = path.join(__dirname, '.dedup.json');
@@ -37,27 +30,36 @@ if(!TG_TOKEN || !TG_CHATID){
   process.exit(1);
 }
 
-// ── COINS ────────────────────────────────────────────────────────────────────
+// ── COINS (matches app v4.3: BTC, HYPE, SOL) ────────────────────────────────
 const COINS = {
-  bitcoin:  { label:'BTC', bnSym:'BTCUSDT' },
-  ethereum: { label:'ETH', bnSym:'ETHUSDT' },
-  solana:   { label:'SOL', bnSym:'SOLUSDT' },
+  bitcoin:     { id:'bitcoin',     label:'BTC',  apiSym:'BTCUSDT',  exchange:'binance' },
+  hyperliquid: { id:'hyperliquid', label:'HYPE', apiSym:'HYPEUSDT', exchange:'bybit'   },
+  solana:      { id:'solana',      label:'SOL',  apiSym:'SOLUSDT',  exchange:'binance' },
 };
+
 const TFS = [
-  { l:'1W', iv:'1w', limit:104 },
-  { l:'1D', iv:'1d', limit:180 },
-  { l:'4H', iv:'4h', limit:200 },
-  { l:'1H', iv:'1h', limit:120 },
-  { l:'15m',iv:'15m',limit:192 },
+  { l:'1W', w:5 },
+  { l:'1D', w:4 },
+  { l:'4H', w:3 },
+  { l:'1H', w:2 },
+  { l:'15m',w:1 },
 ];
+
+const INTERVAL_MAP = {
+  binance: { '1W':'1w', '1D':'1d', '4H':'4h', '1H':'1h', '15m':'15m' },
+  bybit:   { '1W':'W',  '1D':'D',  '4H':'240', '1H':'60', '15m':'15' }
+};
+
+const LIMITS = { '1W':104, '1D':180, '4H':500, '1H':500, '15m':192 };
+
 const BINANCE = 'https://api.binance.com/api/v3';
+const BYBIT   = 'https://api.bybit.com/v5/market';
 
 // ── DEDUP ─────────────────────────────────────────────────────────────────────
 function loadDedup(){
   try{ return JSON.parse(fs.readFileSync(DEDUP_FILE,'utf8')); }catch{ return {}; }
 }
 function saveDedup(d){ fs.writeFileSync(DEDUP_FILE, JSON.stringify(d)); }
-
 function isDedupSuppressed(coinId, tf, type, level){
   const d   = loadDedup();
   const key = `${coinId}:${tf}:${type}:${Math.round(level)}`;
@@ -88,7 +90,7 @@ async function sendTelegram(msg){
   }catch(e){ console.warn('Telegram fetch error:', e.message); return false; }
 }
 
-// ── BINANCE API ───────────────────────────────────────────────────────────────
+// ── EXCHANGE APIs ─────────────────────────────────────────────────────────────
 async function bnKlines(sym, interval, limit){
   const url = `${BINANCE}/klines?symbol=${sym}&interval=${interval}&limit=${limit}`;
   const r   = await fetch(url);
@@ -101,11 +103,45 @@ async function bnKlines(sym, interval, limit){
   }));
 }
 
+async function bybitKlines(sym, interval, limit){
+  const url = `${BYBIT}/kline?category=spot&symbol=${sym}&interval=${interval}&limit=${limit}`;
+  const r   = await fetch(url);
+  if(!r.ok) throw new Error(`Bybit ${interval}: ${r.status}`);
+  const json = await r.json();
+  if(json.retCode !== 0) throw new Error(`Bybit ${interval}: ${json.retMsg}`);
+  const raw = json.result?.list;
+  if(!Array.isArray(raw) || raw.length < 4) throw new Error(`Bybit ${interval}: empty`);
+  return raw.reverse().map(k=>({
+    t:+k[0], o:+k[1], h:+k[2], l:+k[3], c:+k[4],
+    bh:Math.max(+k[1],+k[4]), bl:Math.min(+k[1],+k[4])
+  }));
+}
+
+async function getCandles(tfLabel, coinId){
+  const coin = COINS[coinId];
+  const iv   = INTERVAL_MAP[coin.exchange][tfLabel];
+  const limit = coin.exchange === 'bybit' ? Math.min(LIMITS[tfLabel], 200) : LIMITS[tfLabel];
+  if(coin.exchange === 'bybit') return bybitKlines(coin.apiSym, iv, limit);
+  return bnKlines(coin.apiSym, iv, limit);
+}
+
 async function getPrice(coinId){
-  const r = await fetch(`${BINANCE}/ticker/24hr?symbol=${COINS[coinId].bnSym}`);
+  const coin = COINS[coinId];
+  if(coin.exchange === 'bybit'){
+    const r = await fetch(`${BYBIT}/tickers?category=spot&symbol=${coin.apiSym}`);
+    if(!r.ok) throw new Error('Bybit price: '+r.status);
+    const json = await r.json();
+    const t = json.result?.list?.[0];
+    if(!t) throw new Error('Bybit price: no data');
+    const price = +t.lastPrice;
+    const prevPrice = +t.prevPrice24h || price;
+    const change = prevPrice > 0 ? ((price - prevPrice) / prevPrice * 100) : 0;
+    return { price, change };
+  }
+  const r = await fetch(`${BINANCE}/ticker/24hr?symbol=${coin.apiSym}`);
   if(!r.ok) throw new Error('Price: '+r.status);
   const d = await r.json();
-  return { price:+d.lastPrice, change:+d.priceChangePercent };
+  return { price: +d.lastPrice, change: +d.priceChangePercent };
 }
 
 // ── UTILITIES ─────────────────────────────────────────────────────────────────
@@ -114,7 +150,6 @@ function atr(c, p=14){
   const tr = c.slice(1).map((x,i)=>Math.max(x.h-x.l, Math.abs(x.h-c[i].c), Math.abs(x.l-c[i].c)));
   return tr.slice(-p).reduce((s,v)=>s+v, 0) / p;
 }
-
 function isSwingHigh(c, i, N=3){
   const bh = c[i].bh;
   for(let j=i-N; j<=i+N; j++){
@@ -131,7 +166,6 @@ function isSwingLow(c, i, N=3){
   }
   return true;
 }
-
 function detectFlippedLevel(c, formationIdx, originalType, levelPrice){
   const subsequent = c.slice(formationIdx + 1);
   const tol = levelPrice * 0.003;
@@ -144,13 +178,12 @@ function detectFlippedLevel(c, formationIdx, originalType, levelPrice){
   }
   return originalType;
 }
-
 function scoreLevel(c, i, type){
   let score = 0;
   const x = c[i];
   const range = x.h - x.l;
   const nextCandles = c.slice(i+1, i+4);
-  if(type==='resistance'){
+  if(type === 'resistance'){
     const closedLower = nextCandles.filter(k => k.c < x.bh).length;
     score += closedLower * 10;
     if(nextCandles.some(k => k.c < x.bh * 0.995)) score += 10;
@@ -160,46 +193,44 @@ function scoreLevel(c, i, type){
     if(nextCandles.some(k => k.c > x.bl * 1.005)) score += 10;
   }
   const wickUp = x.h - x.bh, wickDown = x.bl - x.l;
-  const rejection = type==='resistance' ? wickUp : wickDown;
-  score += Math.min(rejection/range, 1) * 20;
-  const prevCandles = c.slice(Math.max(0,i-20), i);
+  const rejection = type === 'resistance' ? wickUp : wickDown;
+  score += Math.min(rejection / range, 1) * 20;
+  const prevCandles = c.slice(Math.max(0, i-20), i);
   const zone = range * 0.15;
-  const touches = prevCandles.filter(k=>
-    type==='resistance'
+  const touches = prevCandles.filter(k =>
+    type === 'resistance'
       ? (k.h >= x.bh - zone && k.h <= x.bh + zone)
       : (k.l <= x.bl + zone && k.l >= x.bl - zone)
   ).length;
   score += Math.min(touches, 3) * 15;
-  const approach = c.slice(Math.max(0,i-3),i);
-  const directional = type==='resistance'
-    ? approach.every((k,j)=>j===0||k.bh>approach[j-1].bh)
-    : approach.every((k,j)=>j===0||k.bl<approach[j-1].bl);
+  const approach = c.slice(Math.max(0, i-3), i);
+  const directional = type === 'resistance'
+    ? approach.every((k,j) => j === 0 || k.bh > approach[j-1].bh)
+    : approach.every((k,j) => j === 0 || k.bl < approach[j-1].bl);
   if(directional) score += 10;
   return Math.round(score);
 }
-
+// v4.3: lower threshold, keep all levels including weak when nearby
 function classifyStrength(score){
   if(score >= 40) return 'strong';
   if(score >= 12) return 'med';
   return 'weak';
 }
-
 function countLevelTests(c, startIdx, bh, bl, type){
-  const levelPrice = type==='resistance' ? bh : bl;
+  const levelPrice = type === 'resistance' ? bh : bl;
   const zone = levelPrice * 0.010;
   const raw = c.slice(startIdx).filter(k =>
-    type==='resistance'
+    type === 'resistance'
       ? k.bh >= levelPrice - zone
       : k.bl <= levelPrice + zone
   ).length;
   return Math.min(raw, 10);
 }
-
 function findVPeaks(c, tf){
   const n = c.length, L = [];
   const lookback = 2;
   const wickRatio = 0.25;
-  for(let i=lookback; i<n-lookback; i++){
+  for(let i = lookback; i < n - lookback; i++){
     const x = c[i];
     const range = x.h - x.l;
     if(range < x.c * 0.0001) continue;
@@ -212,15 +243,14 @@ function findVPeaks(c, tf){
       if(testCount >= 2) score = Math.round(score * 0.5);
       else if(testCount === 1) score = Math.round(score * 0.75);
       const strength = classifyStrength(score);
-      if(strength !== 'weak'){
-        const flippedTypeR = detectFlippedLevel(c, i, 'resistance', x.bh);
-        L.push({
-          price:x.bh, bh:x.bh, bl:x.bh*0.999,
-          type:'resistance', flippedType:flippedTypeR,
-          wickSize:wickUp, score, strength, tested, testCount,
-          idx:i, tf, source:`V-High${wickUp>range*wickRatio?' (wick reject)':''}`
-        });
-      }
+      // v4.3: include ALL levels, not just non-weak
+      const flippedTypeR = detectFlippedLevel(c, i, 'resistance', x.bh);
+      L.push({
+        price:x.bh, bh:x.bh, bl:x.bh*0.999,
+        type:'resistance', flippedType:flippedTypeR,
+        wickSize:wickUp, score, strength, tested, testCount,
+        idx:i, tf, source:`V-High${wickUp>range*wickRatio?' (wick reject)':''}`
+      });
     }
     if(isSwingLow(c, i, lookback)){
       let score = scoreLevel(c, i, 'support');
@@ -229,20 +259,17 @@ function findVPeaks(c, tf){
       if(testCount >= 2) score = Math.round(score * 0.5);
       else if(testCount === 1) score = Math.round(score * 0.75);
       const strength = classifyStrength(score);
-      if(strength !== 'weak'){
-        const flippedTypeS = detectFlippedLevel(c, i, 'support', x.bl);
-        L.push({
-          price:x.bl, bh:x.bl*1.001, bl:x.bl,
-          type:'support', flippedType:flippedTypeS,
-          wickSize:wickDown, score, strength, tested, testCount,
-          idx:i, tf, source:`V-Low${wickDown>range*wickRatio?' (wick reject)':''}`
-        });
-      }
+      const flippedTypeS = detectFlippedLevel(c, i, 'support', x.bl);
+      L.push({
+        price:x.bl, bh:x.bl*1.001, bl:x.bl,
+        type:'support', flippedType:flippedTypeS,
+        wickSize:wickDown, score, strength, tested, testCount,
+        idx:i, tf, source:`V-Low${wickDown>range*wickRatio?' (wick reject)':''}`
+      });
     }
   }
   return L;
 }
-
 function findPDHL(dCandles){
   if(!dCandles || dCandles.length < 3) return [];
   const prev = dCandles[dCandles.length-2];
@@ -275,17 +302,15 @@ function getSessionBoundaries(){
     londonOffset, nyOffset
   };
 }
-
 function getCurrentSession(){
   const now = new Date();
   const h = now.getUTCHours() + now.getUTCMinutes()/60;
   const b = getSessionBoundaries();
-  if(h>=b.asiaOpen && h<b.asiaClose)  return 'ASIA';
+  if(h>=b.asiaOpen && h<b.asiaClose) return 'ASIA';
   if(h>=b.londonOpen && h<b.londonClose) return 'LONDON';
-  if(h>=b.nyOpen && h<b.nyClose)      return 'NY';
+  if(h>=b.nyOpen && h<b.nyClose) return 'NY';
   return 'AFTER_HOURS';
 }
-
 function getAsiaRange(candles15m){
   if(!candles15m || candles15m.length < 4) return null;
   const now = new Date();
@@ -300,7 +325,6 @@ function getAsiaRange(candles15m){
   }
   return { high:Math.max(...asiaCandles.map(k=>k.bh)), low:Math.min(...asiaCandles.map(k=>k.bl)), complete:getCurrentSession()!=='ASIA', source:'today' };
 }
-
 function getAsiaLevels(candles15m){
   const asia = getAsiaRange(candles15m);
   if(!asia || !asia.complete) return [];
@@ -309,7 +333,6 @@ function getAsiaLevels(candles15m){
     { price:asia.low,  bh:asia.low*1.001, bl:asia.low,  type:'support',    strength:'strong', tested:false, score:75, tf:'SESSION', source:'Asia Low'  },
   ];
 }
-
 function getNYRange(candles15m){
   if(!candles15m || candles15m.length < 4) return null;
   const b = getSessionBoundaries();
@@ -327,7 +350,6 @@ function getNYRange(candles15m){
   const cur = getCurrentSession();
   return { high:Math.max(...ny.map(k=>k.bh)), low:Math.min(...ny.map(k=>k.bl)), complete:cur==='AFTER_HOURS'||cur==='ASIA', source:'today' };
 }
-
 function getNYLevels(candles15m){
   const ny = getNYRange(candles15m);
   if(!ny || !ny.complete) return [];
@@ -336,7 +358,6 @@ function getNYLevels(candles15m){
     { price:ny.low,  bh:ny.low*1.001, bl:ny.low,  type:'support',    strength:'strong', tested:false, score:60, tf:'SESSION', source:'NY Low'  },
   ];
 }
-
 function getLondonRange(candles15m){
   if(!candles15m || candles15m.length < 4) return null;
   const b = getSessionBoundaries();
@@ -354,7 +375,6 @@ function getLondonRange(candles15m){
   const cur = getCurrentSession();
   return { high:Math.max(...lon.map(k=>k.bh)), low:Math.min(...lon.map(k=>k.bl)), complete:cur==='NY'||cur==='AFTER_HOURS', source:'today' };
 }
-
 function getLondonLevels(candles15m){
   const l = getLondonRange(candles15m);
   if(!l || !l.complete) return [];
@@ -368,7 +388,7 @@ function getLondonLevels(candles15m){
 function findDMCLevels(c, dCandles, tf, asiaLevels){
   const vp   = findVPeaks(c, tf);
   const pdhl = dCandles ? findPDHL(dCandles) : [];
-  const asia = (tf==='15m' && asiaLevels) ? asiaLevels : [];
+  const asia = (tf === '15m' && asiaLevels) ? asiaLevels : [];
   const all  = [...vp, ...pdhl, ...asia];
   const merged = [];
   for(const l of all.sort((a,b)=>b.score-a.score)){
@@ -378,26 +398,24 @@ function findDMCLevels(c, dCandles, tf, asiaLevels){
   }
   return merged;
 }
-
 function findNextLevel(levels, currentPrice, direction){
   const qualityLevels = levels.filter(l => l.score >= 12);
   const pool   = qualityLevels.length >= 2 ? qualityLevels : levels;
   const sorted = [...pool].sort((a,b)=>a.price-b.price);
-  if(direction==='long'){
+  if(direction === 'long'){
     const candidates = sorted.filter(l=>l.price > currentPrice * 1.003);
     if(candidates.length) return { price:candidates[0].price, source:candidates[0].source };
   } else {
     const candidates = sorted.filter(l=>l.price < currentPrice * 0.995);
     if(candidates.length) return { price:candidates[candidates.length-1].price, source:candidates[candidates.length-1].source };
   }
-  return { price: direction==='long' ? currentPrice*1.025 : currentPrice*0.975, source:'ATR est.' };
+  return { price: direction === 'long' ? currentPrice*1.025 : currentPrice*0.975, source:'ATR est.' };
 }
-
 function findStopLevel(levels, trapPrice, direction){
   const qualityLevels = levels.filter(l => l.score >= 12);
   const pool   = qualityLevels.length >= 2 ? qualityLevels : levels;
   const sorted = [...pool].sort((a,b)=>a.price-b.price);
-  if(direction==='short'){
+  if(direction === 'short'){
     const candidates = sorted.filter(l=>l.price > trapPrice * 1.003);
     return candidates.length ? candidates[0].price : trapPrice * 1.015;
   } else {
@@ -405,7 +423,6 @@ function findStopLevel(levels, trapPrice, direction){
     return candidates.length ? candidates[candidates.length-1].price : trapPrice * 0.985;
   }
 }
-
 function calcRR(entry, target, trapLevel, stopLevel){
   const stopRef = stopLevel || trapLevel;
   const risk    = Math.abs(entry - stopRef) * 1.05;
@@ -414,18 +431,16 @@ function calcRR(entry, target, trapLevel, stopLevel){
   return (reward / risk).toFixed(1);
 }
 
-// ── DMS SIGNAL ENGINE ─────────────────────────────────────────────────────────
+// ── DMS SIGNAL ENGINE (exact mirror of app v4.3) ─────────────────────────────
 function dms(c, a, dCandles, tf, htfBias){
   const n = c.length;
   const minCandles = (tf==='1W'||tf==='1D') ? 10 : 20;
   if(n < minCandles) return { sig:'NEUTRAL', type:'NONE', reason:'Insufficient data' };
-
   const usePDHL  = (tf !== '1W');
   const asiaLvls = (tf === '15m') ? (htfBias.__asiaLevels || []) : [];
   const levels   = findDMCLevels(c, usePDHL ? dCandles : null, tf, asiaLvls);
   const cur      = c[n-1];
   const tol      = a * 0.10;
-
   const nearby = levels
     .filter(l=>Math.abs(l.price-cur.c) < a*30)
     .sort((a,b)=>Math.abs(a.price-cur.c)-Math.abs(b.price-cur.c));
@@ -456,8 +471,8 @@ function dms(c, a, dCandles, tf, htfBias){
         const stop = findStopLevel(levels, blindCandidate.price, isRes?'short':'long');
         const rr   = calcRR(cur.c, tgt.price, blindCandidate.price, stop);
         if(rr && parseFloat(rr) >= 1.0){
-          const dist      = ((blindCandidate.price - cur.c)/cur.c*100).toFixed(2);
-          const htfNote   = htfBias!=='UNCLEAR' ? ` · HTF ${htfBias} aligns` : '';
+          const dist = ((blindCandidate.price - cur.c)/cur.c*100).toFixed(2);
+          const htfNote = htfBias!=='UNCLEAR' ? ` · HTF ${htfBias} aligns` : '';
           const typeLabel = isFlipped ? `PASS-THROUGH` : `UNTESTED ${tf}`;
           return {
             sig:blindSig, type:'BLIND_ENTRY',
@@ -468,7 +483,6 @@ function dms(c, a, dCandles, tf, htfBias){
         }
       }
     }
-
     const atLevelWindow = isHTF ? a * 0.4 : a * 1.0;
     const atLevel = nearby.find(l=>Math.abs(l.price-cur.c) < atLevelWindow && l.score >= 20);
     if(atLevel){
@@ -510,7 +524,6 @@ function dms(c, a, dCandles, tf, htfBias){
       return { sig:'SHORT', type:'FAIL_GAIN', level:lv.price, target:tgt.price, rr, stopPrice:stop, strength:lv.strength, score:lv.score, reason:`${lv.source} $${fmt(lv.price)} · ${dist}% above · ${lb===1?'just now':lb+' bars ago'}${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)}` };
     }
   }
-
   for(const lv of nearby.filter(l=>l.type==='support')){
     for(let lb=1; lb<=maxLB; lb++){
       if(n-1-lb < 0) break;
@@ -537,7 +550,6 @@ function dms(c, a, dCandles, tf, htfBias){
       return { sig:'LONG', type:'FAIL_LOSE', level:lv.price, target:tgt.price, rr, stopPrice:stop, strength:lv.strength, score:lv.score, reason:`${lv.source} $${fmt(lv.price)} · ${dist}% below · ${lb===1?'just now':lb+' bars ago'}${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)}` };
     }
   }
-
   const atLevel = nearby.find(l=>Math.abs(l.price-cur.c) < a*1.5 && l.score>=20);
   if(atLevel){
     const dist = ((atLevel.price - cur.c)/cur.c*100).toFixed(2);
@@ -550,7 +562,7 @@ function dms(c, a, dCandles, tf, htfBias){
 // ── HTF BIAS ──────────────────────────────────────────────────────────────────
 function nextMove(h4C, h1C){
   const n4=h4C.length, n1=h1C.length;
-  if(n4<8||n1<8) return { dir:'UNCLEAR', reason:'Insufficient data' };
+  if(n4<8||n1<8) return { dir:'UNCLEAR' };
   const h4 = h4C.slice(-6);
   let bull4=0, bear4=0;
   for(let i=1;i<h4.length;i++){
@@ -581,19 +593,15 @@ function nextMove(h4C, h1C){
 // ── ALERT FORMATTING & SENDING ────────────────────────────────────────────────
 async function maybeAlert(sig, tf, type, level, target, rr, stopPrice, coinId, price, allLevels){
   if(isDedupSuppressed(coinId, tf, type, level)) return;
-  if(WANT_HTF_ONLY && tf!=='1D' && tf!=='1H') return;
   if((type==='FAIL_GAIN' || (type==='BREAKOUT' && sig==='SHORT')) && !WANT_SHORT) return;
   if((type==='FAIL_LOSE' || type==='BLIND_ENTRY') && !WANT_LONG) return;
   if(type==='AT_LEVEL'){
     if(!WANT_ATLEVEL) return;
     if(sig !== 'NEUTRAL') return;
   }
-
   const icon      = sig==='LONG' ? '🟢' : sig==='SHORT' ? '🔴' : '🟡';
   const coinLabel = COINS[coinId].label;
   const dir       = type==='FAIL_GAIN' ? 'FAIL TO GAIN' : type==='FAIL_LOSE' ? 'FAIL TO LOSE' : type==='BLIND_ENTRY' ? 'BLIND ENTRY' : 'AT LEVEL';
-  const rrTxt     = rr ? ` · R:R ${rr}` : '';
-
   let msg;
   if(type==='AT_LEVEL'){
     msg = `${icon} <b>DMS AT LEVEL</b> · ${coinLabel} [${tf}]\n👁 Approaching $${fmt(level)} — watch 15m candle\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
@@ -605,9 +613,8 @@ async function maybeAlert(sig, tf, type, level, target, rr, stopPrice, coinId, p
       level, sig==='SHORT'?'short':'long'
     );
     const slLine  = slLevel ? `\nStop Loss: <b>$${fmt(slLevel)}</b>` : '';
-    msg = `${icon} <b>DMS ${dir}</b> · ${coinLabel} [${tf}]${rrTxt}\n\nEntry now: <b>$${fmt(price)}</b>\nLevel: <b>$${fmt(level)}</b>${tpLine}${slLine}${rrLine}\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
+    msg = `${icon} <b>DMS ${dir}</b> · ${coinLabel} [${tf}]\n\nEntry now: <b>$${fmt(price)}</b>\nLevel: <b>$${fmt(level)}</b>${tpLine}${slLine}${rrLine}\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
   }
-
   markDedupFired(coinId, tf, type, level);
   const ok = await sendTelegram(msg);
   console.log(`[${new Date().toISOString()}] ${ok?'SENT':'FAILED'} alert: ${coinLabel} [${tf}] ${type} ${sig} @ $${fmt(level)}`);
@@ -615,12 +622,11 @@ async function maybeAlert(sig, tf, type, level, target, rr, stopPrice, coinId, p
 
 // ── PER-COIN SCAN ─────────────────────────────────────────────────────────────
 async function scanCoin(coinId){
-  const sym   = COINS[coinId].bnSym;
   const label = COINS[coinId].label;
   try{
     const [priceData, ...allCandles] = await Promise.all([
       getPrice(coinId),
-      ...TFS.map(tf => bnKlines(sym, tf.iv, tf.limit).catch(e=>{ console.warn(label, tf.l, e.message); return null; }))
+      ...TFS.map(tf => getCandles(tf.l, coinId).catch(e=>{ console.warn(label, tf.l, e.message); return null; }))
     ]);
     const price = priceData.price;
     const [wC, dC, h4C, h1C, m15C] = allCandles;
@@ -657,11 +663,12 @@ async function scanCoin(coinId){
       const a  = atr(c);
       const htfCarrier = Object.assign(String(htfDir), { __asiaLevels: asiaLevels });
       const d = dms(c, a, dc, tf.l, htfCarrier);
-      if(d.type==='NONE') continue;
+      if(d.type === 'NONE') continue;
       if(!isDedupSuppressed(coinId, tf.l, d.type, d.level)){
         await maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, d.stopPrice, coinId, price, allLevels);
       }
     }
+    console.log(`  ${label}: $${fmt(price)} | HTF: ${htfDir} | Session: ${getCurrentSession()}`);
   }catch(e){
     console.error(`[${new Date().toISOString()}] Error scanning ${label}:`, e.message);
   }
@@ -672,16 +679,16 @@ async function scanAll(){
   const coins = Object.keys(COINS);
   console.log(`[${new Date().toISOString()}] Scanning ${coins.map(c=>COINS[c].label).join(', ')}...`);
   for(let i=0; i<coins.length; i++){
-    if(i>0) await new Promise(r=>setTimeout(r,2000));
+    if(i > 0) await new Promise(r=>setTimeout(r, 2000));
     await scanCoin(coins[i]);
   }
   console.log(`[${new Date().toISOString()}] Scan complete. Next in ${INTERVAL_MS/1000}s.`);
 }
 
 async function main(){
-  console.log(`DMS Signal Bot started. Interval: ${INTERVAL_MS/1000}s`);
-  console.log(`Coins: BTC, ETH, SOL  |  Token: ...${TG_TOKEN.slice(-6)}  |  Chat: ${TG_CHATID}`);
-  await sendTelegram('🤖 <b>DMS Signal Bot started</b>\nScanning BTC · ETH · SOL every 2 minutes.');
+  console.log(`DMS Signal Bot v4.3 started. Interval: ${INTERVAL_MS/1000}s`);
+  console.log(`Coins: BTC, HYPE, SOL  |  Token: ...${TG_TOKEN.slice(-6)}  |  Chat: ${TG_CHATID}`);
+  await sendTelegram('🤖 <b>DMS Signal Bot v4.3 started</b>\nScanning BTC · HYPE · SOL every 2 minutes.');
   await scanAll();
   setInterval(scanAll, INTERVAL_MS);
 }
