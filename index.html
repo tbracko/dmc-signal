@@ -264,7 +264,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <body>
 
 <div class="topbar">
-  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v4.1</span></span>
+  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v4.2</span></span>
   <select id="coin-sel" onchange="switchCoin(this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:4px 8px;cursor:pointer;letter-spacing:.04em">
     <option value="bitcoin" data-sym="BTCUSDT" data-label="BTC/USD" selected>BTC/USD</option>
     <option value="hyperliquid" data-sym="HYPEUSDT" data-label="HYPE/USD">HYPE/USD</option>
@@ -2941,6 +2941,11 @@ function connectWS(coinId){
     if(HL.wallet && (!HL._lastEquitySync || now - HL._lastEquitySync > 5 * 60 * 1000)){
       HL.syncEquity().catch(e => console.warn('syncEquity error:', e));
     }
+    // ── Position sync: check every 60s to detect TP/SL fills ──
+    if(HL.wallet && (!HL._lastPosSync || now - HL._lastPosSync > 60000)){
+      HL._lastPosSync = now;
+      HL.syncPositions().catch(e => console.warn('syncPositions error:', e));
+    }
   }
 
   try{
@@ -3122,13 +3127,15 @@ const HL = {
       const data = await res.json();
       const positions = data.assetPositions || [];
       const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SOL: 'solana' };
-      const oldTrades = this.activeTrades;
+      const oldTrades = { ...this.activeTrades };
+      const nowOpen = new Set();
       this.activeTrades = {};
       for (const p of positions) {
         const pos = p.position;
         if (!pos || parseFloat(pos.szi) === 0) continue;
         const coinId = symToId[pos.coin];
         if (!coinId) continue;
+        nowOpen.add(coinId);
         const szi = parseFloat(pos.szi);
         const entry = parseFloat(pos.entryPx || '0');
         // Preserve trailing stop state from previous sync if position still exists
@@ -3151,6 +3158,40 @@ const HL = {
           };
         }
       }
+
+      // ── Detect TP/SL fills: positions that were in oldTrades but are now gone ──
+      for (const [coinId, old] of Object.entries(oldTrades)) {
+        if (nowOpen.has(coinId)) continue; // still open, skip
+        if (!old.entry || !old.asset) continue; // no real trade data
+        const s = coinState[coinId];
+        const exitPx = s ? s.price : old.entry;
+        const isLong = old.side === 'LONG';
+        // Determine if it was TP or SL based on price vs entry
+        const pnl = isLong ? (exitPx - old.entry) * old.size : (old.entry - exitPx) * old.size;
+        let reason = 'auto_closed';
+        if (old.tp && ((isLong && exitPx >= old.tp * 0.99) || (!isLong && exitPx <= old.tp * 1.01))) {
+          reason = 'tp_hit';
+        } else if (old.sl && ((isLong && exitPx <= old.sl * 1.01) || (!isLong && exitPx >= old.sl * 0.99))) {
+          reason = 'sl_hit';
+        }
+        // Record closed trade
+        const closed = loadClosedTrades();
+        closed.unshift({
+          coin: old.asset, side: old.side, size: old.size,
+          entry: old.entry, exit: exitPx, pnl: pnl,
+          ts: new Date().toISOString(), reason: reason
+        });
+        saveClosedTrades(closed);
+        const emoji = reason === 'tp_hit' ? '✅' : reason === 'sl_hit' ? '🛑' : '📊';
+        const label = reason === 'tp_hit' ? 'TP HIT' : reason === 'sl_hit' ? 'SL HIT' : 'CLOSED';
+        console.log(`HL ${label}: ${old.side} ${old.asset} | Entry: $${fmt(old.entry)} → Exit: ~$${fmt(exitPx)} | P&L: $${pnl.toFixed(2)}`);
+        showToast(`${emoji} ${label}: ${old.side} ${old.asset}`, `P&L: ${pnl>=0?'+':''}$${pnl.toFixed(2)}`, pnl < 0);
+        // Send Telegram notification
+        if(typeof sendTelegram === 'function'){
+          sendTelegram(`${emoji} ${label}: ${old.side} ${old.asset}\nEntry: $${fmt(old.entry)} → Exit: ~$${fmt(exitPx)}\nP&L: ${pnl>=0?'+':''}$${pnl.toFixed(2)}`);
+        }
+      }
+
       console.log('HL synced positions:', Object.keys(this.activeTrades).length, 'active →', JSON.stringify(this.activeTrades));
     } catch (e) {
       console.warn('HL syncPositions failed:', e);
@@ -3626,6 +3667,14 @@ async function renderTrades(){
       const liq = pos.liquidationPx ? parseFloat(pos.liquidationPx) : null;
       const leverage = pos.leverage ? pos.leverage.value : '—';
 
+      // Look up SL/TP from activeTrades
+      const symToId = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana' };
+      const cid = symToId[coin];
+      const at = cid ? HL.activeTrades[cid] : null;
+      const sl = at ? at.sl : null;
+      const tp = at ? at.tp : null;
+      const trailInfo = at && at.trailState !== 'initial' ? ` (${at.trailState})` : '';
+
       return `<div class="pos-card ${side.toLowerCase()}">
         <div class="pos-head">
           <span class="pos-coin">${coin}</span>
@@ -3636,6 +3685,8 @@ async function renderTrades(){
           <div class="pos-cell"><div class="pos-cell-lbl">Size</div><div class="pos-cell-val">${size}</div></div>
           <div class="pos-cell"><div class="pos-cell-lbl">Entry</div><div class="pos-cell-val">$${fmt(entry)}</div></div>
           <div class="pos-cell"><div class="pos-cell-lbl">Mark</div><div class="pos-cell-val">$${fmt(mark)}</div></div>
+          ${sl ? `<div class="pos-cell"><div class="pos-cell-lbl">Stop Loss${trailInfo}</div><div class="pos-cell-val" style="color:#ff6b6b">$${fmt(sl)}</div></div>` : ''}
+          ${tp ? `<div class="pos-cell"><div class="pos-cell-lbl">Take Profit</div><div class="pos-cell-val" style="color:#00e676">$${fmt(tp)}</div></div>` : ''}
           ${liq ? `<div class="pos-cell"><div class="pos-cell-lbl">Liq. Price</div><div class="pos-cell-val" style="color:#ff6b6b">$${fmt(liq)}</div></div>` : ''}
           <div class="pos-cell"><div class="pos-cell-lbl">Unreal. P&L</div><div class="pos-cell-val" style="color:${upnl>=0?'#00e676':'#ff3d5a'}">${upnl>=0?'+':''}$${upnl.toFixed(2)}</div></div>
         </div>
@@ -3652,8 +3703,12 @@ async function renderTrades(){
   } else {
     closedList.innerHTML = closed.map(t => {
       const pnlCls = t.pnl >= 0 ? 'green' : 'red';
+      const reasonTag = t.reason === 'tp_hit' ? '<span style="color:#00e676;font-size:8px;margin-left:4px">TP</span>'
+        : t.reason === 'sl_hit' ? '<span style="color:#ff3d5a;font-size:8px;margin-left:4px">SL</span>'
+        : t.reason === 'opposite_signal' ? '<span style="color:#ffc107;font-size:8px;margin-left:4px">REV</span>'
+        : '';
       return `<div class="closed-item">
-        <span class="closed-coin">${t.coin}</span>
+        <span class="closed-coin">${t.coin}${reasonTag}</span>
         <span class="closed-side ${t.side}">${t.side}</span>
         <span class="closed-time">${t.size} @ $${fmt(t.entry)} → $${fmt(t.exit)}</span>
         <span class="closed-pnl ${pnlCls}">${t.pnl>=0?'+':''}$${t.pnl.toFixed(2)}</span>
