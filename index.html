@@ -3747,7 +3747,6 @@ async function renderTrades(){
           ${sl ? `<div class="pos-cell"><div class="pos-cell-lbl">Stop Loss${trailInfo}</div><div class="pos-cell-val" style="color:#ff6b6b">$${fmt(sl)}</div></div>` : ''}
           ${tp ? `<div class="pos-cell"><div class="pos-cell-lbl">Take Profit</div><div class="pos-cell-val" style="color:#00e676">$${fmt(tp)}</div></div>` : ''}
           ${liq ? `<div class="pos-cell"><div class="pos-cell-lbl">Liq. Price</div><div class="pos-cell-val" style="color:#ff6b6b">$${fmt(liq)}</div></div>` : ''}
-          <div class="pos-cell"><div class="pos-cell-lbl">Unreal. P&L</div><div class="pos-cell-val" style="color:${upnl>=0?'#00e676':'#ff3d5a'}">${upnl>=0?'+':''}$${upnl.toFixed(2)}</div></div>
         </div>
         <button class="pos-close-btn" onclick="closeTrade('${coin}',${szi},${entry})">CLOSE ${coin} ${side}</button>
       </div>`;
