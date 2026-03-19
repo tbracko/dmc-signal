@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// DMS Signal Bot v4.4 — AUTO-TRADE edition
+// DMS Signal Bot v4.5 — AUTO-TRADE edition
 // Mirrors the DMS algorithm from index.html exactly — same levels, same scoring, same signals
 // Now also executes trades on Hyperliquid with TP/SL/trailing stops
 // Node 18+ required (uses built-in fetch)
@@ -1189,8 +1189,9 @@ function saveClosedTrades(trades) {
 
 async function maybeAlert(sig, tf, type, level, target, rr, stopPrice, coinId, price, allLevels){
   if(isDedupSuppressed(coinId, tf, type, level)) return;
-  if((type==='FAIL_GAIN' || (type==='BREAKOUT' && sig==='SHORT')) && !WANT_SHORT) return;
-  if((type==='FAIL_LOSE' || type==='BLIND_ENTRY') && !WANT_LONG) return;
+  // Filter by signal direction (fixed: BLIND_ENTRY can be SHORT too)
+  if(sig === 'SHORT' && !WANT_SHORT) return;
+  if(sig === 'LONG' && !WANT_LONG) return;
   if(type==='AT_LEVEL'){
     if(!WANT_ATLEVEL) return;
     if(sig !== 'NEUTRAL') return;
@@ -1331,6 +1332,7 @@ async function scanCoin(coinId){
     // Store all results for confidence calculation
     const allResults = {};
 
+    const signalSummary = [];
     for(const { i, c, dC: dc } of tfsToRun){
       const tf = TFS[i];
       const a  = atr(c);
@@ -1338,14 +1340,19 @@ async function scanCoin(coinId){
       const d = dms(c, a, dc, tf.l, htfCarrier);
       allResults[tf.l] = d;
 
-      if(d.type === 'NONE') continue;
-      if(!isDedupSuppressed(coinId, tf.l, d.type, d.level)){
-        await maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, d.stopPrice, coinId, price, allLevels);
-        // Auto-trade execution
-        await maybeAutoTrade(coinId, i, d, allResults);
+      // Log ALL non-NONE signals for diagnostics
+      if(d.type !== 'NONE'){
+        const deduped = isDedupSuppressed(coinId, tf.l, d.type, d.level);
+        signalSummary.push(`${tf.l}:${d.sig}(${d.type}${deduped?' DEDUP':''})`);
+        if(!deduped){
+          await maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, d.stopPrice, coinId, price, allLevels);
+          // Auto-trade execution
+          await maybeAutoTrade(coinId, i, d, allResults);
+        }
       }
     }
-    console.log(`  ${label}: $${fmt(price)} | HTF: ${htfDir} | Session: ${getCurrentSession()}`);
+    const sigStr = signalSummary.length > 0 ? signalSummary.join(' | ') : 'no signals';
+    console.log(`  ${label}: $${fmt(price)} | HTF: ${htfDir} | Session: ${getCurrentSession()} | ${sigStr}`);
   }catch(e){
     console.error(`[${new Date().toISOString()}] Error scanning ${label}:`, e.message);
   }
@@ -1448,7 +1455,7 @@ async function scanAll(){
 }
 
 async function main(){
-  console.log(`DMS Signal Bot v4.4 started. Interval: ${INTERVAL_MS/1000}s`);
+  console.log(`DMS Signal Bot v4.5 started. Interval: ${INTERVAL_MS/1000}s`);
   console.log(`Coins: BTC, HYPE, SOL  |  Token: ...${TG_TOKEN.slice(-6)}  |  Chat: ${TG_CHATID}`);
 
   // Initialize Hyperliquid trading module
@@ -1456,14 +1463,14 @@ async function main(){
     const hlOk = await HL.init();
     if (hlOk) {
       console.log('Auto-trading ENABLED | Risk:', RISK_PCT + '%', '| Min conf:', MIN_CONFIDENCE + '%', '| Max trades/day:', MAX_TRADES_DAY);
-      await sendTelegram('🤖 <b>DMS Signal Bot v4.4 started</b>\n✅ Auto-trading ENABLED\nScanning BTC · HYPE · SOL every 2 min\nRisk: ' + RISK_PCT + '% | Min conf: ' + MIN_CONFIDENCE + '%');
+      await sendTelegram('🤖 <b>DMS Signal Bot v4.5 started</b>\n✅ Auto-trading ENABLED\nScanning BTC · HYPE · SOL every 2 min\nRisk: ' + RISK_PCT + '% | Min conf: ' + MIN_CONFIDENCE + '%');
     } else {
       console.warn('Auto-trading init FAILED — running in alert-only mode');
-      await sendTelegram('🤖 <b>DMS Signal Bot v4.4 started</b>\n⚠️ Auto-trading FAILED to init\nRunning in alert-only mode');
+      await sendTelegram('🤖 <b>DMS Signal Bot v4.5 started</b>\n⚠️ Auto-trading FAILED to init\nRunning in alert-only mode');
     }
   } else {
     console.log('Auto-trading DISABLED (set AUTO_TRADE=true and HL_PRIVATE_KEY to enable)');
-    await sendTelegram('🤖 <b>DMS Signal Bot v4.4 started</b>\nScanning BTC · HYPE · SOL every 2 minutes.\n🔔 Alert-only mode');
+    await sendTelegram('🤖 <b>DMS Signal Bot v4.5 started</b>\nScanning BTC · HYPE · SOL every 2 minutes.\n🔔 Alert-only mode');
   }
 
   await scanAll();
