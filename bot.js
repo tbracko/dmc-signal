@@ -1355,6 +1355,88 @@ async function scanCoin(coinId){
 // ██  MAIN LOOP                                                             ██
 // ══════════════════════════════════════════════════════════════════════════════
 
+// ── DAILY SUMMARY ────────────────────────────────────────────────────────────
+const SUMMARY_HOUR = parseInt(process.env.SUMMARY_HOUR || '6', 10); // UTC hour to send daily summary
+let lastSummaryDate = '';
+
+async function sendDailySummary() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (lastSummaryDate === today) return; // already sent today
+  lastSummaryDate = today;
+
+  try {
+    // Refresh equity
+    if (HL.wallet) await HL.syncEquity();
+
+    // Get open positions
+    const openPositions = Object.entries(HL.activeTrades);
+    let openLines = '';
+    if (openPositions.length > 0) {
+      for (const [coinId, t] of openPositions) {
+        const px = coinState[coinId]?.price || 0;
+        const isLong = t.side === 'LONG';
+        const upnl = px > 0 ? (isLong ? (px - t.entry) * t.size : (t.entry - px) * t.size) : 0;
+        const upnlStr = upnl >= 0 ? `+$${upnl.toFixed(2)}` : `-$${Math.abs(upnl).toFixed(2)}`;
+        const trail = t.trailState !== 'initial' ? ` [${t.trailState}]` : '';
+        openLines += `\n  ${t.side === 'LONG' ? '🟢' : '🔴'} ${t.asset} ${t.side} @ $${fmt(t.entry)} → ${upnlStr}${trail}`;
+      }
+    } else {
+      openLines = '\n  No open positions';
+    }
+
+    // Get yesterday's closed trades
+    const closed = loadClosedTrades();
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const yesterdayTrades = closed.filter(t => t.ts && t.ts.startsWith(yesterday));
+    let closedLines = '';
+    let dayPnl = 0;
+    let wins = 0, losses = 0;
+    if (yesterdayTrades.length > 0) {
+      for (const t of yesterdayTrades) {
+        const pnlStr = t.pnl >= 0 ? `+$${t.pnl.toFixed(2)}` : `-$${Math.abs(t.pnl).toFixed(2)}`;
+        const emoji = t.reason === 'tp_hit' ? '✅' : t.reason === 'sl_hit' ? '🛑' : '🔄';
+        closedLines += `\n  ${emoji} ${t.coin} ${t.side} → ${pnlStr}`;
+        dayPnl += t.pnl;
+        if (t.pnl >= 0) wins++; else losses++;
+      }
+    } else {
+      closedLines = '\n  No trades closed yesterday';
+    }
+
+    // Overall stats
+    const allWins = closed.filter(t => t.pnl >= 0).length;
+    const allLosses = closed.filter(t => t.pnl < 0).length;
+    const allTotal = allWins + allLosses;
+    const winRate = allTotal > 0 ? Math.round(allWins / allTotal * 100) : 0;
+    const totalPnl = closed.reduce((s, t) => s + (t.pnl || 0), 0);
+
+    const equity = HL.cachedEquity > 0 ? `$${HL.cachedEquity.toFixed(2)}` : 'N/A';
+    const dayPnlStr = dayPnl >= 0 ? `+$${dayPnl.toFixed(2)}` : `-$${Math.abs(dayPnl).toFixed(2)}`;
+    const totalPnlStr = totalPnl >= 0 ? `+$${totalPnl.toFixed(2)}` : `-$${Math.abs(totalPnl).toFixed(2)}`;
+
+    const msg = `📊 <b>DMS Daily Summary</b> · ${today}\n` +
+      `\n💰 <b>Equity:</b> ${equity}` +
+      `\n\n📈 <b>Open Positions:</b>${openLines}` +
+      `\n\n📋 <b>Yesterday's Trades:</b>${closedLines}` +
+      (yesterdayTrades.length > 0 ? `\n  Day P&L: <b>${dayPnlStr}</b> (${wins}W/${losses}L)` : '') +
+      `\n\n📊 <b>All-Time:</b> ${winRate}% win rate (${allWins}W/${allLosses}L)` +
+      `\nTotal P&L: <b>${totalPnlStr}</b>` +
+      `\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
+
+    await sendTelegram(msg);
+    console.log(`[${new Date().toISOString()}] Daily summary sent`);
+  } catch (e) {
+    console.warn('Daily summary error:', e.message);
+  }
+}
+
+async function checkDailySummary() {
+  const now = new Date();
+  if (now.getUTCHours() === SUMMARY_HOUR) {
+    await sendDailySummary();
+  }
+}
+
 async function scanAll(){
   const coins = Object.keys(COINS);
   console.log(`[${new Date().toISOString()}] Scanning ${coins.map(c=>COINS[c].label).join(', ')}...`);
@@ -1411,6 +1493,9 @@ async function main(){
       } catch (e) { console.warn('Periodic sync error:', e.message); }
     }, 300000);
   }
+
+  // Daily summary check every 5 min (sends once per day at SUMMARY_HOUR UTC)
+  setInterval(checkDailySummary, 300000);
 }
 
 main().catch(e=>{ console.error('Fatal:', e); process.exit(1); });
