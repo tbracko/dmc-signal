@@ -479,8 +479,8 @@ function dms(c, a, dCandles, tf, htfBias){
       const isRes  = effectiveType === 'resistance';
       const blindSig = isRes ? 'SHORT' : 'LONG';
       const isFlipped = ft==='flipped_support' || ft==='flipped_resistance';
-      const isStrongLevel = blindCandidate.score >= 55;
-      const htfBlocks = !isStrongLevel && ((isRes && htfBias==='UP') || (!isRes && htfBias==='DOWN'));
+      // v4.5: HTF ALWAYS takes precedence — no strong-level bypass
+      const htfBlocks = (isRes && htfBias==='UP') || (!isRes && htfBias==='DOWN');
       if(!htfBlocks){
         const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
         const stop = findStopLevel(levels, blindCandidate.price, isRes?'short':'long');
