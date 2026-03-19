@@ -1687,11 +1687,9 @@ function dms(c, a, dCandles, tf, htfBias){
       const isRes = effectiveType === 'resistance';
       const blindSig = isRes ? 'SHORT' : 'LONG';
       const isFlipped = ft === 'flipped_support' || ft === 'flipped_resistance';
-      // Blind entries at strong HTF levels fire even counter-trend
-      // Chris Hunter: untested weekly/daily body levels always get a reaction
-      // Only block if level is weak/med AND counter-trend
-      const isStrongLevel = blindCandidate.score >= 55;
-      const htfBlocks = !isStrongLevel && ((isRes && htfBias==='UP') || (!isRes && htfBias==='DOWN'));
+      // v4.5: HTF ALWAYS takes precedence — Chris Hunter rule: "higher time frames
+      // take more precedent than the lower time frames" — no exceptions, even for strong levels
+      const htfBlocks = (isRes && htfBias==='UP') || (!isRes && htfBias==='DOWN');
       if(!htfBlocks){
         const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
         const stop = findStopLevel(levels, blindCandidate.price, isRes?'short':'long');
