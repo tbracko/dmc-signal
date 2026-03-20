@@ -1258,14 +1258,8 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
   const existing = HL.activeTrades[coinId];
   if (existing) {
     if (existing.side === d.sig) {
-      // Same direction — add size on HTF signals (1W/1D/4H) if high confidence
-      if (tfIdx <= 2 && conf >= Math.min(MIN_CONFIDENCE + 10, 85)) {
-        console.log(`HL ADD to ${existing.side} ${sym} | ${TFS[tfIdx].l} signal conf ${conf}%`);
-        await HL.executeTrade(coinId, d, conf);
-        await HL.syncPositions();
-      } else {
-        console.log(`HL auto-trade SKIP ${sym}: already in ${existing.side} (same dir, tf=${TFS[tfIdx].l}, conf ${conf}%)`);
-      }
+      // Same direction — SKIP (max 1 position per coin to limit exposure)
+      console.log(`HL auto-trade SKIP ${sym}: already in ${existing.side} (no stacking)`);
     } else {
       // Opposite direction — close and reverse
       console.log(`HL REVERSE: close ${existing.side} ${sym}, open ${d.sig} (${TFS[tfIdx].l}, conf ${conf}%)`);
@@ -1276,8 +1270,14 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
       }
     }
   } else {
-    // No existing position — open new trade
-    console.log(`HL AUTO-TRADE FIRE ${sym} ${d.sig} | conf: ${conf}% (min: ${minConf}%, ${trendLabel}) | SL: ${d.stopPrice}`);
+    // No existing position — check max concurrent positions (default 3)
+    const MAX_POSITIONS = parseInt(process.env.MAX_POSITIONS || '3');
+    const openCount = Object.keys(HL.activeTrades).length;
+    if (openCount >= MAX_POSITIONS) {
+      console.log(`HL auto-trade SKIP ${sym}: max ${MAX_POSITIONS} positions reached (${openCount} open)`);
+      return;
+    }
+    console.log(`HL AUTO-TRADE FIRE ${sym} ${d.sig} | conf: ${conf}% (min: ${minConf}%, ${trendLabel}) | SL: ${d.stopPrice} | positions: ${openCount+1}/${MAX_POSITIONS}`);
     await HL.executeTrade(coinId, d, conf);
     await HL.syncPositions();
   }
