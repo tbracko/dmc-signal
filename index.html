@@ -554,7 +554,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
     <button class="mf-open-btn" id="mf-open" onclick="manualOpenTrade()">OPEN TRADE</button>
   </div>
 
-  <div class="sh">Closed Trades</div>
+  <div class="sh">Last 10 Trades</div>
   <div id="closed-list"><div class="empty">No closed trades yet</div></div>
 </div>
 
@@ -3871,9 +3871,9 @@ async function renderTrades(){
     }).join('');
   }
 
-  // Closed trades
+  // Closed trades (last 10)
   const closedList = document.getElementById('closed-list');
-  const closed = loadClosedTrades();
+  const closed = loadClosedTrades().slice(0, 10);
   if(closed.length === 0){
     closedList.innerHTML = '<div class="empty">No closed trades yet</div>';
   } else {
@@ -3883,11 +3883,18 @@ async function renderTrades(){
         : t.reason === 'sl_hit' ? '<span style="color:#ff3d5a;font-size:8px;margin-left:4px">SL</span>'
         : t.reason === 'opposite_signal' ? '<span style="color:#ffc107;font-size:8px;margin-left:4px">REV</span>'
         : '';
-      return `<div class="closed-item">
-        <span class="closed-coin">${t.coin}${reasonTag}</span>
-        <span class="closed-side ${t.side}">${t.side}</span>
-        <span class="closed-time">${t.size} @ $${fmt(t.entry)} → $${fmt(t.exit)}</span>
-        <span class="closed-pnl ${pnlCls}">${t.pnl>=0?'+':''}$${t.pnl.toFixed(2)}</span>
+      // Format close date/time
+      const closeDate = t.ts ? new Date(t.ts) : null;
+      const closeDateStr = closeDate ? closeDate.toLocaleDateString('en-GB', {day:'2-digit',month:'short'}).toUpperCase() : '';
+      const closeTimeStr = closeDate ? closeDate.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit',hour12:false}) : '';
+      return `<div class="closed-item" style="flex-wrap:wrap">
+        <div style="display:flex;align-items:center;width:100%;justify-content:space-between">
+          <span class="closed-coin">${t.coin}${reasonTag}</span>
+          <span class="closed-side ${t.side}">${t.side}</span>
+          <span class="closed-time">${t.size} @ $${fmt(t.entry)} → $${fmt(t.exit)}</span>
+          <span class="closed-pnl ${pnlCls}">${t.pnl>=0?'+':''}$${t.pnl.toFixed(2)}</span>
+        </div>
+        ${closeDateStr ? `<div style="width:100%;font-size:9px;color:#666;margin-top:2px">${closeDateStr} ${closeTimeStr}</div>` : ''}
       </div>`;
     }).join('');
   }
