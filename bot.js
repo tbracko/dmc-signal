@@ -1329,7 +1329,7 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
     }
   } else {
     // No existing position — check max concurrent positions (default 3)
-    const MAX_POSITIONS = parseInt(process.env.MAX_POSITIONS || '3');
+    const MAX_POSITIONS = parseInt(process.env.MAX_POSITIONS || '4');
     const openCount = Object.keys(HL.activeTrades).length;
     if (openCount >= MAX_POSITIONS) {
       console.log(`HL auto-trade SKIP ${sym}: max ${MAX_POSITIONS} positions reached (${openCount} open)`);
