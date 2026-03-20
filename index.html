@@ -528,6 +528,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
           <option value="BTC">BTC</option>
           <option value="HYPE">HYPE</option>
           <option value="SOL">SOL</option>
+          <option value="GOLD">GOLD</option>
         </select>
       </div>
       <div class="mf-field">
@@ -3362,7 +3363,7 @@ const HL = {
       ]);
       const data = await posRes.json();
       const positions = data.assetPositions || [];
-      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SOL: 'solana', GOLD: 'gold' };
+      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SOL: 'solana', GOLD: 'gold', 'xyz:GOLD': 'gold' };
 
       // Build SL/TP map from trigger orders: { "BTC": { sl: price, tp: price } }
       const trigMap = {};
@@ -3479,7 +3480,7 @@ const HL = {
       // We look for fills we haven't already recorded in closedTrades
       const closed = loadClosedTrades();
       const recorded = new Set(closed.map(c => c.ts)); // existing timestamps
-      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SOL: 'solana', GOLD: 'gold' };
+      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SOL: 'solana', GOLD: 'gold', 'xyz:GOLD': 'gold' };
 
       // Group consecutive fills by coin+dir to find close events
       // HL marks closing fills with closedPnl !== "0" or closedPnl field
@@ -3664,8 +3665,17 @@ const HL = {
     return orderType;
   },
 
+  // ── Translate short coin symbols to HL asset names (for HIP-3 assets) ──
+  resolveAsset(asset) {
+    if (this.assetMap[asset] !== undefined) return asset;
+    // Map short names to prefixed HIP-3 names
+    const hlMap = { GOLD: 'xyz:GOLD' };
+    return hlMap[asset] || asset;
+  },
+
   // ── Place a single order ──
   async placeOrder(asset, isBuy, size, price, orderType, reduceOnly = false) {
+    asset = this.resolveAsset(asset);
     const assetIdx = this.assetMap[asset];
     if (assetIdx === undefined) throw new Error('Unknown asset: ' + asset);
     const szDec = this.szDecimals[asset] || 3;
@@ -3710,7 +3720,7 @@ const HL = {
 
   // ── Execute full trade: entry + SL + TP ──
   async executeTrade(coinId, signal, confidence) {
-    const SYM = { bitcoin: 'BTC', hyperliquid: 'HYPE', solana: 'SOL' };
+    const SYM = { bitcoin: 'BTC', hyperliquid: 'HYPE', solana: 'SOL', gold: 'GOLD' };
     const asset = SYM[coinId];
     if (!asset || !this.enabled || !this.wallet) return null;
 
@@ -3760,7 +3770,8 @@ const HL = {
     if (slDistance < currentPrice * 0.001) { console.warn('HL: SL too tight'); return null; }
 
     const size = riskAmount / slDistance;
-    const szDec = this.szDecimals[asset] || 3;
+    const resolvedAsset = this.resolveAsset(asset);
+    const szDec = this.szDecimals[resolvedAsset] || 3;
     const minSize = Math.pow(10, -szDec);
     if (size < minSize) { console.warn('HL: size too small:', size); return null; }
 
@@ -3825,6 +3836,7 @@ const HL = {
 
   // ── Cancel an order by oid ──
   async cancelOrder(asset, oid) {
+    asset = this.resolveAsset(asset);
     const assetIdx = this.assetMap[asset];
     if (assetIdx === undefined) return;
     const action = { type: 'cancel', cancels: [{ a: assetIdx, o: oid }] };
@@ -4046,7 +4058,7 @@ async function renderTrades(){
       const leverage = pos.leverage ? pos.leverage.value : '—';
 
       // Look up SL/TP from activeTrades
-      const symToId = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana', GOLD:'gold' };
+      const symToId = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana', GOLD:'gold', 'xyz:GOLD':'gold' };
       const cid = symToId[coin];
       const at = cid ? HL.activeTrades[cid] : null;
       const sl = at ? at.sl : null;
@@ -4110,7 +4122,7 @@ async function closeTrade(coin, szi, entryPx){
   const size = Math.abs(szi);
 
   // Look up current price from coinState
-  const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana', GOLD:'gold' };
+  const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana', GOLD:'gold', 'xyz:GOLD':'gold' };
   const cid = coinIdMap[coin];
   const px = cid ? coinState[cid].price : 0;
   const slip = px * 0.01; // 1% slippage for IOC close to ensure fill
@@ -4154,7 +4166,7 @@ async function closeTrade(coin, szi, entryPx){
     showToast('Position closed: ' + coin, '', false);
 
     // Also clear from HL.activeTrades
-    const coinIdMap2 = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana', GOLD:'gold' };
+    const coinIdMap2 = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana', GOLD:'gold', 'xyz:GOLD':'gold' };
     if(coinIdMap2[coin]) { delete HL.activeTrades[coinIdMap2[coin]]; HL.saveActiveTrades(); }
 
     // Refresh trades page after a short delay for settlement
@@ -4181,14 +4193,15 @@ function prefillTrade(coin, sig, sl, tp){
     // Auto-calculate suggested size from risk settings
     const accountSize = parseFloat(localStorage.getItem('account_size') || '100');
     const riskPct = parseFloat(localStorage.getItem('risk_pct') || '1');
-    const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana', GOLD:'gold' };
+    const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana', GOLD:'gold', 'xyz:GOLD':'gold' };
+    const hlAsset = { BTC:'BTC', HYPE:'HYPE', SOL:'SOL', GOLD:'xyz:GOLD' };
     const cid = coinIdMap[coin];
     const px = cid ? coinState[cid].price : 0;
     if(px && sl){
       const riskAmount = accountSize * riskPct / 100;
       const slDist = Math.abs(px - sl);
       if(slDist > px * 0.001){
-        const szDec = HL.szDecimals[coin] || 3;
+        const szDec = HL.szDecimals[hlAsset[coin] || coin] || 3;
         const suggestedSize = (riskAmount / slDist).toFixed(szDec);
         document.getElementById('mf-size').value = suggestedSize;
       }
@@ -4217,7 +4230,7 @@ async function manualOpenTrade(){
   btn.disabled = true;
 
   const isBuy = side === 'LONG';
-  const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana', GOLD:'gold' };
+  const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana', GOLD:'gold', 'xyz:GOLD':'gold' };
   const cid = coinIdMap[coin];
   const px = cid ? coinState[cid].price : 0;
   if(!px){ btn.textContent = 'OPEN TRADE'; btn.disabled = false; showToast('No price data for ' + coin); return; }
