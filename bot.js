@@ -41,11 +41,12 @@ if(!TG_TOKEN || !TG_CHATID){
   process.exit(1);
 }
 
-// ── COINS (matches app v4.3: BTC, HYPE, SOL) ────────────────────────────────
+// ── COINS (BTC, HYPE, SOL + GOLD via Hyperliquid) ────────────────────────────
 const COINS = {
   bitcoin:     { id:'bitcoin',     label:'BTC',  apiSym:'BTCUSDT',  asset:'BTC',  exchange:'binance' },
   hyperliquid: { id:'hyperliquid', label:'HYPE', apiSym:'HYPEUSDT', asset:'HYPE', exchange:'bybit'   },
   solana:      { id:'solana',      label:'SOL',  apiSym:'SOLUSDT',  asset:'SOL',  exchange:'binance' },
+  gold:        { id:'gold',        label:'GOLD', apiSym:'GOLD',     asset:'GOLD', exchange:'hyperliquid' },
 };
 
 const TFS = [
@@ -66,6 +67,9 @@ const LIMITS = { '1W':104, '1D':180, '4H':500, '1H':500, '15m':192 };
 const BINANCE = 'https://api.binance.com/api/v3';
 const BYBIT   = 'https://api.bybit.com/v5/market';
 const HL_API  = 'https://api.hyperliquid.xyz';
+
+// Hyperliquid candle intervals (for HL-native assets like gold)
+const HL_INTERVALS = { '1W':'1w', '1D':'1d', '4H':'4h', '1H':'1h', '15m':'15m' };
 
 // ── STATE ────────────────────────────────────────────────────────────────────
 const coinState = {};  // coinId -> { price, htfDir, results: { tf: dmsResult } }
@@ -134,8 +138,32 @@ async function bybitKlines(sym, interval, limit){
   }));
 }
 
+// Hyperliquid candles via candleSnapshot POST endpoint
+async function hlKlines(coin, interval, limit){
+  const now = Date.now();
+  // Calculate startTime based on interval and limit
+  const msMap = { '1w':604800000, '1d':86400000, '4h':14400000, '1h':3600000, '15m':900000 };
+  const ms = msMap[interval] || 86400000;
+  const startTime = now - (ms * limit * 1.1); // 10% extra buffer
+  const r = await fetch(HL_API + '/info', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type: 'candleSnapshot', coin, interval, startTime: Math.floor(startTime), endTime: Math.floor(now) })
+  });
+  if(!r.ok) throw new Error(`HL candles ${coin} ${interval}: ${r.status}`);
+  const raw = await r.json();
+  if(!Array.isArray(raw) || raw.length < 4) throw new Error(`HL candles ${coin} ${interval}: empty (${raw.length || 0})`);
+  return raw.map(k => ({
+    t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c,
+    bh: Math.max(+k.o, +k.c), bl: Math.min(+k.o, +k.c)
+  }));
+}
+
 async function getCandles(tfLabel, coinId){
   const coin = COINS[coinId];
+  if(coin.exchange === 'hyperliquid'){
+    const iv = HL_INTERVALS[tfLabel];
+    return hlKlines(coin.apiSym, iv, LIMITS[tfLabel]);
+  }
   const iv   = INTERVAL_MAP[coin.exchange][tfLabel];
   const limit = coin.exchange === 'bybit' ? Math.min(LIMITS[tfLabel], 200) : LIMITS[tfLabel];
   if(coin.exchange === 'bybit') return bybitKlines(coin.apiSym, iv, limit);
@@ -144,6 +172,33 @@ async function getCandles(tfLabel, coinId){
 
 async function getPrice(coinId){
   const coin = COINS[coinId];
+  if(coin.exchange === 'hyperliquid'){
+    // Use HL candle snapshot — grab last 2 daily candles for price + 24h change
+    const now = Date.now();
+    const r = await fetch(HL_API + '/info', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'candleSnapshot', coin: coin.apiSym, interval: '1h', startTime: now - 7200000, endTime: now })
+    });
+    if(!r.ok) throw new Error('HL price: ' + r.status);
+    const candles = await r.json();
+    if(!Array.isArray(candles) || candles.length === 0) throw new Error('HL price: no candles');
+    const latest = candles[candles.length - 1];
+    const price = +latest.c;
+    // For 24h change, fetch daily
+    const r2 = await fetch(HL_API + '/info', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'candleSnapshot', coin: coin.apiSym, interval: '1d', startTime: now - 172800000, endTime: now })
+    });
+    let change = 0;
+    if(r2.ok){
+      const daily = await r2.json();
+      if(Array.isArray(daily) && daily.length >= 2){
+        const prevClose = +daily[daily.length - 2].c;
+        if(prevClose > 0) change = ((price - prevClose) / prevClose * 100);
+      }
+    }
+    return { price, change };
+  }
   if(coin.exchange === 'bybit'){
     const r = await fetch(`${BYBIT}/tickers?category=spot&symbol=${coin.apiSym}`);
     if(!r.ok) throw new Error('Bybit price: '+r.status);
@@ -835,7 +890,7 @@ const HL = {
       ]);
       const data = await posRes.json();
       const positions = data.assetPositions || [];
-      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SOL: 'solana' };
+      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SOL: 'solana', GOLD: 'gold' };
 
       // Build SL/TP map from trigger orders
       const trigMap = {};
@@ -1455,22 +1510,54 @@ async function scanAll(){
 }
 
 async function main(){
-  console.log(`DMS Signal Bot v4.5 started. Interval: ${INTERVAL_MS/1000}s`);
-  console.log(`Coins: BTC, HYPE, SOL  |  Token: ...${TG_TOKEN.slice(-6)}  |  Chat: ${TG_CHATID}`);
+  console.log(`DMS Signal Bot v4.6 started. Interval: ${INTERVAL_MS/1000}s`);
+  console.log(`Coins: BTC, HYPE, SOL, GOLD  |  Token: ...${TG_TOKEN.slice(-6)}  |  Chat: ${TG_CHATID}`);
 
   // Initialize Hyperliquid trading module
   if (HL_PRIVATE_KEY && AUTO_TRADE) {
     const hlOk = await HL.init();
     if (hlOk) {
       console.log('Auto-trading ENABLED | Risk:', RISK_PCT + '%', '| Min conf:', MIN_CONFIDENCE + '%', '| Max trades/day:', MAX_TRADES_DAY);
-      await sendTelegram('🤖 <b>DMS Signal Bot v4.5 started</b>\n✅ Auto-trading ENABLED\nScanning BTC · HYPE · SOL every 2 min\nRisk: ' + RISK_PCT + '% | Min conf: ' + MIN_CONFIDENCE + '%');
+      await sendTelegram('🤖 <b>DMS Signal Bot v4.6 started</b>\n✅ Auto-trading ENABLED\nScanning BTC · HYPE · SOL · GOLD every 2 min\nRisk: ' + RISK_PCT + '% | Min conf: ' + MIN_CONFIDENCE + '%');
     } else {
       console.warn('Auto-trading init FAILED — running in alert-only mode');
       await sendTelegram('🤖 <b>DMS Signal Bot v4.5 started</b>\n⚠️ Auto-trading FAILED to init\nRunning in alert-only mode');
     }
   } else {
     console.log('Auto-trading DISABLED (set AUTO_TRADE=true and HL_PRIVATE_KEY to enable)');
-    await sendTelegram('🤖 <b>DMS Signal Bot v4.5 started</b>\nScanning BTC · HYPE · SOL every 2 minutes.\n🔔 Alert-only mode');
+    await sendTelegram('🤖 <b>DMS Signal Bot v4.6 started</b>\nScanning BTC · HYPE · SOL · GOLD every 2 minutes.\n🔔 Alert-only mode');
+  }
+
+  // Verify gold ticker — try GOLD first, then check meta for HIP-3 prefix
+  try {
+    const now = Date.now();
+    const testR = await fetch(HL_API + '/info', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'candleSnapshot', coin: 'GOLD', interval: '1d', startTime: now - 172800000, endTime: now })
+    });
+    const testData = await testR.json();
+    if (Array.isArray(testData) && testData.length > 0) {
+      console.log('GOLD ticker verified — HL candles OK (' + testData.length + ' daily candles)');
+    } else {
+      // Try to find gold in meta (might have a dex prefix like "xyz:GOLD")
+      console.warn('GOLD ticker returned empty, checking meta for HIP-3 prefix...');
+      const metaR = await fetch(HL_API + '/info', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'meta' })
+      });
+      const meta = await metaR.json();
+      const goldAsset = meta.universe.find(a => a.name.toUpperCase().includes('GOLD'));
+      if (goldAsset) {
+        console.log('Found gold as:', goldAsset.name, '— updating COINS config');
+        COINS.gold.apiSym = goldAsset.name;
+        COINS.gold.asset = goldAsset.name;
+      } else {
+        console.warn('Gold perp not found on Hyperliquid — disabling gold scanning');
+        delete COINS.gold;
+      }
+    }
+  } catch (e) {
+    console.warn('Gold ticker check failed:', e.message, '— gold scanning may not work');
   }
 
   await scanAll();
