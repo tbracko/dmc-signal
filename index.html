@@ -593,9 +593,8 @@ const COINS = {
   bitcoin:     { id:'bitcoin',     label:'BTC/USD',  sym:'BINANCE:BTCUSDT', shortLabel:'BTC',  apiSym:'BTCUSDT',  exchange:'binance' },
   hyperliquid: { id:'hyperliquid', label:'HYPE/USD', sym:'BYBIT:HYPEUSDT',  shortLabel:'HYPE', apiSym:'HYPEUSDT', exchange:'bybit' },
   solana:      { id:'solana',      label:'SOL/USD',  sym:'BINANCE:SOLUSDT', shortLabel:'SOL',  apiSym:'SOLUSDT',  exchange:'binance' },
-  gold:        { id:'gold',        label:'GOLD/USD', sym:'OANDA:XAUUSD',    shortLabel:'GOLD', apiSym:'GOLD',     exchange:'hyperliquid' },
+  gold:        { id:'gold',        label:'GOLD/USD', sym:'OANDA:XAUUSD',    shortLabel:'GOLD', apiSym:'XAUUSDT',  exchange:'bybit_linear', noTrade:true },
 };
-const HL_INTERVALS = { '1W':'1w', '1D':'1d', '4H':'4h', '1H':'1h', '15m':'15m' };
 let activeCoin = 'bitcoin'; // currently viewed coin
 
 // Per-coin state — keyed by coin id
@@ -870,23 +869,18 @@ async function bybitKlines(sym, interval, limit){
   }));
 }
 
-// Hyperliquid candles via candleSnapshot POST endpoint (for HL-native assets like gold)
-const HL_INFO = 'https://api.hyperliquid.xyz/info';
-async function hlKlines(coin, interval, limit){
-  const now = Date.now();
-  const msMap = { '1w':604800000, '1d':86400000, '4h':14400000, '1h':3600000, '15m':900000 };
-  const ms = msMap[interval] || 86400000;
-  const startTime = now - (ms * limit * 1.1);
-  const r = await fetch(HL_INFO, {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ type:'candleSnapshot', coin, interval, startTime:Math.floor(startTime), endTime:Math.floor(now) })
-  });
-  if(!r.ok) throw new Error(`HL candles ${coin} ${interval}: ${r.status}`);
-  const raw = await r.json();
-  if(!Array.isArray(raw) || raw.length < 4) throw new Error(`HL candles ${coin} ${interval}: empty (${raw.length||0})`);
-  return raw.map(k=>({
-    t:k.t, o:+k.o, h:+k.h, l:+k.l, c:+k.c,
-    bh:Math.max(+k.o,+k.c), bl:Math.min(+k.o,+k.c)
+// Bybit LINEAR klines (for derivatives like XAUUSDT gold perp)
+async function bybitLinearKlines(sym, interval, limit){
+  const url=`${BYBIT}/kline?category=linear&symbol=${sym}&interval=${interval}&limit=${limit}`;
+  const r=await fetch(url);
+  if(!r.ok) throw new Error(`Bybit-linear ${interval}: ${r.status}`);
+  const json=await r.json();
+  if(json.retCode!==0) throw new Error(`Bybit-linear ${interval}: ${json.retMsg}`);
+  const raw=json.result?.list;
+  if(!Array.isArray(raw)||raw.length<4) throw new Error(`Bybit-linear ${interval}: empty`);
+  return raw.reverse().map(k=>({
+    t:+k[0], o:+k[1], h:+k[2], l:+k[3], c:+k[4],
+    bh:Math.max(+k[1],+k[4]), bl:Math.min(+k[1],+k[4])
   }));
 }
 
@@ -899,18 +893,15 @@ const INTERVAL_MAP = {
 async function getPrice(coinId){
   coinId=coinId||activeCoin;
   const coin=COINS[coinId];
-  if(coin.exchange==='hyperliquid'){
-    const now=Date.now();
-    const r=await fetch(HL_INFO,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({type:'candleSnapshot',coin:coin.apiSym,interval:'1h',startTime:now-7200000,endTime:now})});
-    if(!r.ok) throw new Error('HL price: '+r.status);
-    const candles=await r.json();
-    if(!Array.isArray(candles)||candles.length===0) throw new Error('HL price: no candles');
-    const price=+candles[candles.length-1].c;
-    const r2=await fetch(HL_INFO,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({type:'candleSnapshot',coin:coin.apiSym,interval:'1d',startTime:now-172800000,endTime:now})});
-    let change=0;
-    if(r2.ok){const daily=await r2.json();if(Array.isArray(daily)&&daily.length>=2){const prev=+daily[daily.length-2].c;if(prev>0)change=((price-prev)/prev*100);}}
+  if(coin.exchange==='bybit_linear'){
+    const r=await fetch(`${BYBIT}/tickers?category=linear&symbol=${coin.apiSym}`);
+    if(!r.ok) throw new Error('Bybit-linear price: '+r.status);
+    const json=await r.json();
+    const t=json.result?.list?.[0];
+    if(!t) throw new Error('Bybit-linear price: no data');
+    const price=+t.lastPrice;
+    const prevPrice=+t.prevPrice24h||price;
+    const change=prevPrice>0?((price-prevPrice)/prevPrice*100):0;
     return{price,change};
   }
   if(coin.exchange==='bybit'){
@@ -934,15 +925,11 @@ async function getPrice(coinId){
 async function getCandles(tf, coinId){
   coinId=coinId||activeCoin;
   const coin=COINS[coinId];
-  if(coin.exchange==='hyperliquid'){
-    const iv=HL_INTERVALS[tf.l];
-    const limits = { '1W':104, '1D':180, '4H':500, '1H':500, '15m':192 };
-    return hlKlines(coin.apiSym, iv, limits[tf.l]);
-  }
-  const iv=INTERVAL_MAP[coin.exchange][tf.l];
-  // Limit: more for higher TFs, fewer for HYPE (newer coin, less history)
+  const exchange = coin.exchange==='bybit_linear' ? 'bybit' : coin.exchange;
+  const iv=INTERVAL_MAP[exchange][tf.l];
   const limits = { '1W':104, '1D':180, '4H':500, '1H':500, '15m':192 };
-  const limit = coin.exchange==='bybit' ? Math.min(limits[tf.l], 200) : limits[tf.l];
+  const limit = (exchange==='bybit') ? Math.min(limits[tf.l], 200) : limits[tf.l];
+  if(coin.exchange==='bybit_linear') return bybitLinearKlines(coin.apiSym, iv, limit);
   if(coin.exchange==='bybit') return bybitKlines(coin.apiSym, iv, limit);
   return bnKlines(coin.apiSym, iv, limit);
 }
@@ -2900,8 +2887,8 @@ function processTF(i, candles, dCandles, coinId){
       markDedupFired(coinId, tf.l, d.type, d.level);
       maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, coinId, s);
       addLog(d.sig, tf.l, d.reason, d.type, d.level, d.target, d.rr, d.stopPrice, coinId);
-      // ── AUTO-TRADE: trigger Hyperliquid execution if enabled ──
-      if(HL.enabled && HL.wallet && d.sig !== 'NEUTRAL' && d.stopPrice){
+      // ── AUTO-TRADE: trigger Hyperliquid execution if enabled (skip signal-only coins) ──
+      if(HL.enabled && HL.wallet && d.sig !== 'NEUTRAL' && d.stopPrice && !COINS[coinId].noTrade){
         // Compute overall coin confidence (same formula as renderHero)
         let wL=0, wS=0, aW=0;
         TFS.forEach(t=>{ const r=s.results[t.l]; if(!r)return; if(r.type!=='NONE')aW+=t.w; if(r.sig==='LONG')wL+=t.w; if(r.sig==='SHORT')wS+=t.w; });
