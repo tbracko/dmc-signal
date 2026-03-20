@@ -2665,6 +2665,168 @@ function renderStats(){
         <div class="stat-lbl" style="margin-bottom:2px">By Coin</div>
         <table class="stat-table"><tbody>${coinRows}</tbody></table>
       </div>` : ''}
+      <div class="stat-card full" id="equity-curve-card">
+        <div class="stat-lbl" style="margin-bottom:6px">Equity Curve (Closed Trades)</div>
+        <canvas id="equity-canvas" width="600" height="200" style="width:100%;height:160px;border-radius:6px"></canvas>
+        <div id="equity-stats" style="margin-top:6px"></div>
+      </div>
+    </div>`;
+
+  // Draw equity curve after DOM update
+  setTimeout(drawEquityCurve, 50);
+}
+
+function drawEquityCurve(){
+  const canvas = document.getElementById('equity-canvas');
+  const statsEl = document.getElementById('equity-stats');
+  if(!canvas || !statsEl) return;
+
+  const closed = loadClosedTrades();
+  if(closed.length < 2){
+    statsEl.innerHTML = '<div style="color:#5d7a99;font-size:9px;font-family:\'IBM Plex Mono\',monospace">Need at least 2 closed trades for equity curve</div>';
+    return;
+  }
+
+  // Build equity series (oldest → newest, cumulative P&L)
+  const trades = [...closed].reverse(); // oldest first
+  const equityPts = [{ pnl: 0, ts: null }]; // start at 0
+  let cumPnl = 0;
+  trades.forEach(t => {
+    cumPnl += t.pnl;
+    equityPts.push({ pnl: cumPnl, ts: t.ts });
+  });
+
+  // Calculate max drawdown
+  let peak = -Infinity, maxDD = 0, maxDDpeak = 0;
+  let ddStart = 0, ddEnd = 0, ddPeakIdx = 0;
+  equityPts.forEach((pt, i) => {
+    if(pt.pnl > peak){ peak = pt.pnl; ddPeakIdx = i; }
+    const dd = peak - pt.pnl;
+    if(dd > maxDD){ maxDD = dd; maxDDpeak = peak; ddStart = ddPeakIdx; ddEnd = i; }
+  });
+
+  // Current drawdown from peak
+  const currentPeak = Math.max(...equityPts.map(p => p.pnl));
+  const currentDD = currentPeak - equityPts[equityPts.length - 1].pnl;
+
+  // Draw on canvas
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = canvas.offsetWidth * dpr;
+  canvas.height = canvas.offsetHeight * dpr;
+  ctx.scale(dpr, dpr);
+  const W = canvas.offsetWidth;
+  const H = canvas.offsetHeight;
+  const pad = { t: 10, b: 20, l: 40, r: 10 };
+
+  const vals = equityPts.map(p => p.pnl);
+  const minV = Math.min(0, ...vals);
+  const maxV = Math.max(0, ...vals);
+  const range = maxV - minV || 1;
+
+  function x(i){ return pad.l + (i / (equityPts.length - 1)) * (W - pad.l - pad.r); }
+  function y(v){ return pad.t + (1 - (v - minV) / range) * (H - pad.t - pad.b); }
+
+  // Background
+  ctx.fillStyle = '#0a1628';
+  ctx.fillRect(0, 0, W, H);
+
+  // Zero line
+  ctx.strokeStyle = '#1a2d45';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(pad.l, y(0));
+  ctx.lineTo(W - pad.r, y(0));
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Max drawdown shaded area
+  if(maxDD > 0 && ddEnd > ddStart){
+    ctx.fillStyle = 'rgba(255,61,90,0.1)';
+    ctx.beginPath();
+    ctx.moveTo(x(ddStart), y(equityPts[ddStart].pnl));
+    for(let i = ddStart; i <= ddEnd; i++) ctx.lineTo(x(i), y(equityPts[i].pnl));
+    ctx.lineTo(x(ddEnd), y(equityPts[ddStart].pnl));
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Fill under curve
+  const finalPnl = equityPts[equityPts.length - 1].pnl;
+  const gradient = ctx.createLinearGradient(0, y(maxV), 0, y(minV));
+  if(finalPnl >= 0){
+    gradient.addColorStop(0, 'rgba(0,230,118,0.25)');
+    gradient.addColorStop(1, 'rgba(0,230,118,0.02)');
+  } else {
+    gradient.addColorStop(0, 'rgba(255,61,90,0.02)');
+    gradient.addColorStop(1, 'rgba(255,61,90,0.25)');
+  }
+  ctx.beginPath();
+  ctx.moveTo(x(0), y(0));
+  equityPts.forEach((pt, i) => ctx.lineTo(x(i), y(pt.pnl)));
+  ctx.lineTo(x(equityPts.length - 1), y(0));
+  ctx.closePath();
+  ctx.fillStyle = gradient;
+  ctx.fill();
+
+  // Equity line
+  ctx.beginPath();
+  ctx.strokeStyle = finalPnl >= 0 ? '#00e676' : '#ff3d5a';
+  ctx.lineWidth = 2;
+  equityPts.forEach((pt, i) => {
+    if(i === 0) ctx.moveTo(x(i), y(pt.pnl));
+    else ctx.lineTo(x(i), y(pt.pnl));
+  });
+  ctx.stroke();
+
+  // Dots on each trade
+  equityPts.forEach((pt, i) => {
+    if(i === 0) return;
+    const win = trades[i - 1].pnl >= 0;
+    ctx.beginPath();
+    ctx.arc(x(i), y(pt.pnl), 3, 0, Math.PI * 2);
+    ctx.fillStyle = win ? '#00e676' : '#ff3d5a';
+    ctx.fill();
+  });
+
+  // Y axis labels
+  ctx.fillStyle = '#5d7a99';
+  ctx.font = '9px IBM Plex Mono, monospace';
+  ctx.textAlign = 'right';
+  ctx.fillText('$' + maxV.toFixed(0), pad.l - 4, y(maxV) + 3);
+  ctx.fillText('$' + minV.toFixed(0), pad.l - 4, y(minV) + 3);
+  if(minV < 0 && maxV > 0) ctx.fillText('$0', pad.l - 4, y(0) + 3);
+
+  // Trade count label
+  ctx.fillStyle = '#3d5068';
+  ctx.textAlign = 'center';
+  ctx.font = '8px IBM Plex Mono, monospace';
+  ctx.fillText(`${trades.length} trades`, W / 2, H - 2);
+
+  // Stats below chart
+  const totalPnl = cumPnl;
+  const avgTrade = totalPnl / trades.length;
+  const winners = trades.filter(t => t.pnl >= 0).length;
+  const losers = trades.length - winners;
+  const avgWin = winners > 0 ? trades.filter(t => t.pnl >= 0).reduce((s, t) => s + t.pnl, 0) / winners : 0;
+  const avgLoss = losers > 0 ? trades.filter(t => t.pnl < 0).reduce((s, t) => s + t.pnl, 0) / losers : 0;
+  const profitFactor = Math.abs(avgLoss) > 0 ? (avgWin * winners) / Math.abs(avgLoss * losers) : Infinity;
+
+  statsEl.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-family:'IBM Plex Mono',monospace;font-size:9px">
+      <div style="color:#5d7a99">Total P&L</div>
+      <div style="color:${totalPnl>=0?'#00e676':'#ff3d5a'};text-align:right">${totalPnl>=0?'+':''}$${totalPnl.toFixed(2)}</div>
+      <div style="color:#5d7a99">Avg Trade</div>
+      <div style="color:${avgTrade>=0?'#00e676':'#ff3d5a'};text-align:right">${avgTrade>=0?'+':''}$${avgTrade.toFixed(2)}</div>
+      <div style="color:#5d7a99">Avg Win / Loss</div>
+      <div style="text-align:right"><span style="color:#00e676">+$${avgWin.toFixed(2)}</span> / <span style="color:#ff3d5a">$${avgLoss.toFixed(2)}</span></div>
+      <div style="color:#5d7a99">Profit Factor</div>
+      <div style="color:${profitFactor>=1?'#00e676':'#ff3d5a'};text-align:right">${profitFactor === Infinity ? '∞' : profitFactor.toFixed(2)}</div>
+      <div style="color:#5d7a99">Max Drawdown</div>
+      <div style="color:#ff3d5a;text-align:right">-$${maxDD.toFixed(2)}</div>
+      <div style="color:#5d7a99">Current DD</div>
+      <div style="color:${currentDD>0?'#ff3d5a':'#00e676'};text-align:right">${currentDD>0?'-$'+currentDD.toFixed(2):'$0.00'}</div>
     </div>`;
 }
 
@@ -3682,11 +3844,11 @@ const HL = {
       } else if (trade.trailState === 'breakeven' && rMultiple >= 1.5) {
         // Start trailing: SL = bestPrice - 1.0*risk (tighter trail locks in more profit)
         trade.trailState = 'trailing';
-        newSl = isLong ? trade.bestPrice - risk * 1.0 : trade.bestPrice + risk * 1.0;
-        console.log(`HL TRAIL ${trade.asset}: trailing SL to $${fmt(newSl)} (1.0R trail)`);
+        newSl = isLong ? trade.bestPrice - risk * 1.5 : trade.bestPrice + risk * 1.5;
+        console.log(`HL TRAIL ${trade.asset}: trailing SL to $${fmt(newSl)} (1.5R trail)`);
       } else if (trade.trailState === 'trailing') {
         // Continue trailing: only move SL forward, never back
-        const trailSl = isLong ? trade.bestPrice - risk * 1.0 : trade.bestPrice + risk * 1.0;
+        const trailSl = isLong ? trade.bestPrice - risk * 1.5 : trade.bestPrice + risk * 1.5;
         if ((isLong && trailSl > trade.sl) || (!isLong && trailSl < trade.sl)) {
           newSl = trailSl;
           console.log(`HL TRAIL ${trade.asset}: updated trailing SL to $${fmt(newSl)}`);
