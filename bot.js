@@ -894,7 +894,7 @@ const HL = {
       ]);
       const data = await posRes.json();
       const positions = data.assetPositions || [];
-      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SOL: 'solana', GOLD: 'gold' };
+      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SOL: 'solana', GOLD: 'gold', 'xyz:GOLD': 'gold' };
 
       // Build SL/TP map from trigger orders
       const trigMap = {};
