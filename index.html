@@ -2883,16 +2883,8 @@ function processTF(i, candles, dCandles, coinId){
         } else if(HL.activeTrades[coinId]){
           const existing = HL.activeTrades[coinId];
           if(existing.side === d.sig){
-            // ── POSITION-AWARE: Same direction — add size on HTF signals (1W/1D/4H) if confidence is high ──
-            if(i <= 2 && conf >= Math.min(baseMinConf + 10, 85)){
-              console.log(`HL POSITION-AWARE: ADD to ${existing.side} ${sym} | ${tf.l} signal conf ${conf}%`);
-              showToast(`ADD TO ${existing.side} ${sym}`, `${tf.l} signal (${conf}%)`, d.sig === 'SHORT');
-              HL.executeTrade(coinId, { ...d, tf: tf.l }, conf).then(r => {
-                if(r) { showToast(`ADDED: ${d.sig} ${sym}`, '', d.sig === 'SHORT'); HL.syncPositions(); }
-              }).catch(e=>{ console.error('HL add-to-position error:', e); });
-            } else {
-              console.log(`HL auto-trade SKIP ${sym}: already in ${existing.side} (same dir, ${tf.l} tf=${i}, conf ${conf}%)`);
-            }
+            // Same direction — SKIP (max 1 position per coin to limit exposure)
+            console.log(`HL auto-trade SKIP ${sym}: already in ${existing.side} (no stacking)`);
           } else {
             // ── POSITION-AWARE: Opposite direction — auto-close existing position ──
             console.log(`HL POSITION-AWARE: CLOSE ${existing.side} ${sym} — opposite ${d.sig} signal fired (${tf.l}, conf ${conf}%)`);
@@ -2921,12 +2913,19 @@ function processTF(i, candles, dCandles, coinId){
             }).catch(e => { console.error('HL auto-close error:', e); showToast('Auto-close error: ' + e.message, '', true); });
           }
         } else {
-          console.log(`HL auto-trade FIRE ${sym} ${d.sig} | conf: ${conf}% (min: ${minConf}%, ${trendLabel}) | SL: ${d.stopPrice}`);
-          showToast(`AUTO: ${d.sig} ${sym} (${conf}% ${trendLabel})`, `SL: $${fmt(d.stopPrice)}`, d.sig === 'SHORT');
-          HL.executeTrade(coinId, { ...d, tf: tf.l }, conf).then(r => {
-            if(r) { showToast(`FILLED: ${d.sig} ${sym}`, '', d.sig === 'SHORT'); HL.syncPositions(); }
-            else showToast(`AUTO-TRADE: ${sym} order not filled`, '', true);
-          }).catch(e=>{ console.error('HL auto-trade error:', e); showToast('AUTO-TRADE ERROR: ' + e.message, '', true); });
+          // Check max concurrent positions (limit exposure)
+          const MAX_POSITIONS = 3;
+          const openCount = Object.keys(HL.activeTrades).length;
+          if(openCount >= MAX_POSITIONS){
+            console.log(`HL auto-trade SKIP ${sym}: max ${MAX_POSITIONS} positions reached (${openCount} open)`);
+          } else {
+            console.log(`HL auto-trade FIRE ${sym} ${d.sig} | conf: ${conf}% (min: ${minConf}%, ${trendLabel}) | SL: ${d.stopPrice} | positions: ${openCount+1}/${MAX_POSITIONS}`);
+            showToast(`AUTO: ${d.sig} ${sym} (${conf}% ${trendLabel})`, `SL: $${fmt(d.stopPrice)}`, d.sig === 'SHORT');
+            HL.executeTrade(coinId, { ...d, tf: tf.l }, conf).then(r => {
+              if(r) { showToast(`FILLED: ${d.sig} ${sym}`, '', d.sig === 'SHORT'); HL.syncPositions(); }
+              else showToast(`AUTO-TRADE: ${sym} order not filled`, '', true);
+            }).catch(e=>{ console.error('HL auto-trade error:', e); showToast('AUTO-TRADE ERROR: ' + e.message, '', true); });
+          }
         }
       }
     }
