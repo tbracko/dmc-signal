@@ -1109,10 +1109,10 @@ const HL = {
         await sendTelegram(`🔄 <b>SL → BREAKEVEN: ${trade.asset}</b>\nEntry: $${fmt(trade.entry)}\n1:1 R reached`);
       } else if (trade.trailState === 'breakeven' && rMultiple >= 1.5) {
         trade.trailState = 'trailing';
-        newSl = isLong ? trade.bestPrice - risk * 1.0 : trade.bestPrice + risk * 1.0;
-        console.log(`HL TRAIL ${trade.asset}: trailing SL to $${fmt(newSl)} (1.0R trail started)`);
+        newSl = isLong ? trade.bestPrice - risk * 1.5 : trade.bestPrice + risk * 1.5;
+        console.log(`HL TRAIL ${trade.asset}: trailing SL to $${fmt(newSl)} (1.5R trail started)`);
       } else if (trade.trailState === 'trailing') {
-        const trailSl = isLong ? trade.bestPrice - risk * 1.0 : trade.bestPrice + risk * 1.0;
+        const trailSl = isLong ? trade.bestPrice - risk * 1.5 : trade.bestPrice + risk * 1.5;
         if ((isLong && trailSl > trade.sl) || (!isLong && trailSl < trade.sl)) {
           newSl = trailSl;
           console.log(`HL TRAIL ${trade.asset}: updated trailing SL to $${fmt(newSl)}`);
