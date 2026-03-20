@@ -3680,13 +3680,13 @@ const HL = {
         console.log(`HL TRAIL ${trade.asset}: moved SL to BREAKEVEN $${fmt(newSl)} (1:1 R hit)`);
         showToast(`SL → BREAKEVEN: ${trade.asset}`, `Entry: $${fmt(trade.entry)}`, false);
       } else if (trade.trailState === 'breakeven' && rMultiple >= 1.5) {
-        // Start trailing: SL = bestPrice - 1.5*risk (long) or + 1.5*risk (short)
+        // Start trailing: SL = bestPrice - 1.0*risk (tighter trail locks in more profit)
         trade.trailState = 'trailing';
-        newSl = isLong ? trade.bestPrice - risk * 1.5 : trade.bestPrice + risk * 1.5;
-        console.log(`HL TRAIL ${trade.asset}: trailing SL to $${fmt(newSl)} (1.5R trail)`);
+        newSl = isLong ? trade.bestPrice - risk * 1.0 : trade.bestPrice + risk * 1.0;
+        console.log(`HL TRAIL ${trade.asset}: trailing SL to $${fmt(newSl)} (1.0R trail)`);
       } else if (trade.trailState === 'trailing') {
         // Continue trailing: only move SL forward, never back
-        const trailSl = isLong ? trade.bestPrice - risk * 1.5 : trade.bestPrice + risk * 1.5;
+        const trailSl = isLong ? trade.bestPrice - risk * 1.0 : trade.bestPrice + risk * 1.0;
         if ((isLong && trailSl > trade.sl) || (!isLong && trailSl < trade.sl)) {
           newSl = trailSl;
           console.log(`HL TRAIL ${trade.asset}: updated trailing SL to $${fmt(newSl)}`);
