@@ -3336,33 +3336,52 @@ const HL = {
     } catch(e){}
   },
 
-  // ── Fetch trigger orders (SL/TP) from HL for all positions ──
+  // ── HIP-3 dexes we trade on (for querying positions, orders, fills) ──
+  HIP3_DEXES: ['xyz'],
+
+  // ── Fetch trigger orders (SL/TP) — queries main + HIP-3 dexes ──
   async fetchTriggerOrders() {
     try {
       const queryAddr = (this.masterAddress || this.address).toLowerCase();
-      const res = await fetch(this.API + '/info', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'frontendOpenOrders', user: queryAddr })
-      });
-      return await res.json();
+      const requests = [
+        fetch(this.API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'frontendOpenOrders', user: queryAddr }) }),
+        ...this.HIP3_DEXES.map(dex =>
+          fetch(this.API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'frontendOpenOrders', user: queryAddr, dex }) }))
+      ];
+      const responses = await Promise.all(requests);
+      const allOrders = [];
+      for (const r of responses) {
+        const data = await r.json();
+        if (Array.isArray(data)) allOrders.push(...data);
+      }
+      return allOrders;
     } catch(e) { console.warn('fetchTriggerOrders error:', e); return []; }
   },
 
-  // ── Sync activeTrades with real Hyperliquid positions ──
-  // Prevents duplicate entries and keeps auto-trader aware of existing positions
+  // ── Sync activeTrades with real Hyperliquid positions (main + HIP-3 dexes) ──
   async syncPositions() {
     try {
       const queryAddr = (this.masterAddress || this.address).toLowerCase();
-      // Fetch positions + trigger orders in parallel
-      const [posRes, trigOrders] = await Promise.all([
+      // Fetch main + HIP-3 positions + trigger orders in parallel
+      const [posRes, ...hip3PosRes] = await Promise.all([
         fetch(this.API + '/info', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr })
         }),
-        this.fetchTriggerOrders()
+        ...this.HIP3_DEXES.map(dex =>
+          fetch(this.API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr, dex }) }))
       ]);
+      const trigOrders = await this.fetchTriggerOrders();
       const data = await posRes.json();
-      const positions = data.assetPositions || [];
+      const positions = [...(data.assetPositions || [])];
+      // Merge HIP-3 dex positions
+      for (const r of hip3PosRes) {
+        const d = await r.json();
+        if (d.assetPositions) positions.push(...d.assetPositions);
+      }
       const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SOL: 'solana', GOLD: 'gold', 'xyz:GOLD': 'gold' };
 
       // Build SL/TP map from trigger orders: { "BTC": { sl: price, tp: price } }
@@ -3467,14 +3486,22 @@ const HL = {
     if (!this.wallet) return;
     try {
       const queryAddr = (this.masterAddress || this.address).toLowerCase();
-      // Fetch fills from the last 24 hours
+      // Fetch fills from the last 24 hours (main + HIP-3 dexes)
       const startMs = Date.now() - 24 * 60 * 60 * 1000;
-      const res = await fetch(this.API + '/info', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'userFillsByTime', user: queryAddr, startTime: startMs })
-      });
-      const fills = await res.json();
-      if (!Array.isArray(fills) || fills.length === 0) return;
+      const requests = [
+        fetch(this.API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'userFillsByTime', user: queryAddr, startTime: startMs }) }),
+        ...this.HIP3_DEXES.map(dex =>
+          fetch(this.API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'userFillsByTime', user: queryAddr, startTime: startMs, dex }) }))
+      ];
+      const responses = await Promise.all(requests);
+      const fills = [];
+      for (const r of responses) {
+        const data = await r.json();
+        if (Array.isArray(data)) fills.push(...data);
+      }
+      if (fills.length === 0) return;
 
       // Group fills by coin, find closing fills (reduceOnly or that bring position to 0)
       // We look for fills we haven't already recorded in closedTrades
@@ -3824,14 +3851,23 @@ const HL = {
     }
   },
 
-  // ── Fetch open orders for an asset ──
+  // ── Fetch open orders (main + HIP-3 dexes) ──
   async fetchOpenOrders() {
     const queryAddr = (this.masterAddress || this.address).toLowerCase();
-    const res = await fetch(this.API + '/info', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'openOrders', user: queryAddr })
-    });
-    return await res.json();
+    const requests = [
+      fetch(this.API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'openOrders', user: queryAddr }) }),
+      ...this.HIP3_DEXES.map(dex =>
+        fetch(this.API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'openOrders', user: queryAddr, dex }) }))
+    ];
+    const responses = await Promise.all(requests);
+    const allOrders = [];
+    for (const r of responses) {
+      const data = await r.json();
+      if (Array.isArray(data)) allOrders.push(...data);
+    }
+    return allOrders;
   },
 
   // ── Cancel an order by oid ──
@@ -3960,12 +3996,21 @@ async function hlFetchPositions(){
   if(!HL.wallet) return [];
   try{
     const queryAddr = (HL.masterAddress || HL.address).toLowerCase();
-    const res = await fetch(HL.API + '/info', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ type:'clearinghouseState', user: queryAddr })
-    });
-    const data = await res.json();
-    return data.assetPositions || [];
+    // Fetch main + HIP-3 dex positions
+    const requests = [
+      fetch(HL.API + '/info', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ type:'clearinghouseState', user: queryAddr }) }),
+      ...HL.HIP3_DEXES.map(dex =>
+        fetch(HL.API + '/info', { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ type:'clearinghouseState', user: queryAddr, dex }) }))
+    ];
+    const responses = await Promise.all(requests);
+    const allPositions = [];
+    for (const r of responses) {
+      const data = await r.json();
+      if (data.assetPositions) allPositions.push(...data.assetPositions);
+    }
+    return allPositions;
   }catch(e){ console.warn('HL positions fetch failed:', e); return []; }
 }
 
