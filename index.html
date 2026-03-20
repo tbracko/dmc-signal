@@ -264,12 +264,11 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <body>
 
 <div class="topbar">
-  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v4.6</span></span>
+  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v4.5</span></span>
   <select id="coin-sel" onchange="switchCoin(this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:4px 8px;cursor:pointer;letter-spacing:.04em">
     <option value="bitcoin" data-sym="BTCUSDT" data-label="BTC/USD" selected>BTC/USD</option>
     <option value="hyperliquid" data-sym="HYPEUSDT" data-label="HYPE/USD">HYPE/USD</option>
     <option value="solana" data-sym="SOLUSDT" data-label="SOL/USD">SOL/USD</option>
-    <option value="gold" data-sym="XAUUSD" data-label="GOLD/USD">GOLD/USD</option>
   </select>
   <div class="topbar-r">
     <span id="tb-price">—</span>
@@ -593,7 +592,6 @@ const COINS = {
   bitcoin:     { id:'bitcoin',     label:'BTC/USD',  sym:'BINANCE:BTCUSDT', shortLabel:'BTC',  apiSym:'BTCUSDT',  exchange:'binance' },
   hyperliquid: { id:'hyperliquid', label:'HYPE/USD', sym:'BYBIT:HYPEUSDT',  shortLabel:'HYPE', apiSym:'HYPEUSDT', exchange:'bybit' },
   solana:      { id:'solana',      label:'SOL/USD',  sym:'BINANCE:SOLUSDT', shortLabel:'SOL',  apiSym:'SOLUSDT',  exchange:'binance' },
-  gold:        { id:'gold',        label:'GOLD/USD', sym:'OANDA:XAUUSD',    shortLabel:'GOLD', apiSym:'XAUUSDT',  exchange:'bybit_linear', noTrade:true },
 };
 let activeCoin = 'bitcoin'; // currently viewed coin
 
@@ -602,7 +600,6 @@ const coinState = {
   bitcoin:  { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
   hyperliquid: { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
   solana:   { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
-  gold:     { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
 };
 
 // Convenience accessors for active coin (used by render functions)
@@ -869,21 +866,6 @@ async function bybitKlines(sym, interval, limit){
   }));
 }
 
-// Bybit LINEAR klines (for derivatives like XAUUSDT gold perp)
-async function bybitLinearKlines(sym, interval, limit){
-  const url=`${BYBIT}/kline?category=linear&symbol=${sym}&interval=${interval}&limit=${limit}`;
-  const r=await fetch(url);
-  if(!r.ok) throw new Error(`Bybit-linear ${interval}: ${r.status}`);
-  const json=await r.json();
-  if(json.retCode!==0) throw new Error(`Bybit-linear ${interval}: ${json.retMsg}`);
-  const raw=json.result?.list;
-  if(!Array.isArray(raw)||raw.length<4) throw new Error(`Bybit-linear ${interval}: empty`);
-  return raw.reverse().map(k=>({
-    t:+k[0], o:+k[1], h:+k[2], l:+k[3], c:+k[4],
-    bh:Math.max(+k[1],+k[4]), bl:Math.min(+k[1],+k[4])
-  }));
-}
-
 // Interval mapping per exchange
 const INTERVAL_MAP = {
   binance: { '1W':'1w', '1D':'1d', '4H':'4h', '1H':'1h', '15m':'15m' },
@@ -893,17 +875,6 @@ const INTERVAL_MAP = {
 async function getPrice(coinId){
   coinId=coinId||activeCoin;
   const coin=COINS[coinId];
-  if(coin.exchange==='bybit_linear'){
-    const r=await fetch(`${BYBIT}/tickers?category=linear&symbol=${coin.apiSym}`);
-    if(!r.ok) throw new Error('Bybit-linear price: '+r.status);
-    const json=await r.json();
-    const t=json.result?.list?.[0];
-    if(!t) throw new Error('Bybit-linear price: no data');
-    const price=+t.lastPrice;
-    const prevPrice=+t.prevPrice24h||price;
-    const change=prevPrice>0?((price-prevPrice)/prevPrice*100):0;
-    return{price,change};
-  }
   if(coin.exchange==='bybit'){
     const r=await fetch(`${BYBIT}/tickers?category=spot&symbol=${coin.apiSym}`);
     if(!r.ok) throw new Error('Bybit price: '+r.status);
@@ -925,11 +896,10 @@ async function getPrice(coinId){
 async function getCandles(tf, coinId){
   coinId=coinId||activeCoin;
   const coin=COINS[coinId];
-  const exchange = coin.exchange==='bybit_linear' ? 'bybit' : coin.exchange;
-  const iv=INTERVAL_MAP[exchange][tf.l];
+  const iv=INTERVAL_MAP[coin.exchange][tf.l];
+  // Limit: more for higher TFs, fewer for HYPE (newer coin, less history)
   const limits = { '1W':104, '1D':180, '4H':500, '1H':500, '15m':192 };
-  const limit = (exchange==='bybit') ? Math.min(limits[tf.l], 200) : limits[tf.l];
-  if(coin.exchange==='bybit_linear') return bybitLinearKlines(coin.apiSym, iv, limit);
+  const limit = coin.exchange==='bybit' ? Math.min(limits[tf.l], 200) : limits[tf.l];
   if(coin.exchange==='bybit') return bybitKlines(coin.apiSym, iv, limit);
   return bnKlines(coin.apiSym, iv, limit);
 }
@@ -2887,15 +2857,15 @@ function processTF(i, candles, dCandles, coinId){
       markDedupFired(coinId, tf.l, d.type, d.level);
       maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, coinId, s);
       addLog(d.sig, tf.l, d.reason, d.type, d.level, d.target, d.rr, d.stopPrice, coinId);
-      // ── AUTO-TRADE: trigger Hyperliquid execution if enabled (skip signal-only coins) ──
-      if(HL.enabled && HL.wallet && d.sig !== 'NEUTRAL' && d.stopPrice && !COINS[coinId].noTrade){
+      // ── AUTO-TRADE: trigger Hyperliquid execution if enabled ──
+      if(HL.enabled && HL.wallet && d.sig !== 'NEUTRAL' && d.stopPrice){
         // Compute overall coin confidence (same formula as renderHero)
         let wL=0, wS=0, aW=0;
         TFS.forEach(t=>{ const r=s.results[t.l]; if(!r)return; if(r.type!=='NONE')aW+=t.w; if(r.sig==='LONG')wL+=t.w; if(r.sig==='SHORT')wS+=t.w; });
         const conf = aW>0 ? Math.round(Math.max(wL,wS)/aW*100) : 0;
         const baseMinConf = parseInt(localStorage.getItem('hl_min_conf') || '50');
         const majorSig = wL > wS ? 'LONG' : wS > wL ? 'SHORT' : null;
-        const SYM = { bitcoin:'BTC', hyperliquid:'HYPE', solana:'SOL', gold:'GOLD' };
+        const SYM = { bitcoin:'BTC', hyperliquid:'HYPE', solana:'SOL' };
         const sym = SYM[coinId] || coinId;
 
         // HTF-aligned confidence adjustment:
@@ -3352,7 +3322,7 @@ const HL = {
       ]);
       const data = await posRes.json();
       const positions = data.assetPositions || [];
-      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SOL: 'solana', GOLD: 'gold' };
+      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SOL: 'solana' };
 
       // Build SL/TP map from trigger orders: { "BTC": { sl: price, tp: price } }
       const trigMap = {};
@@ -3469,7 +3439,7 @@ const HL = {
       // We look for fills we haven't already recorded in closedTrades
       const closed = loadClosedTrades();
       const recorded = new Set(closed.map(c => c.ts)); // existing timestamps
-      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SOL: 'solana', GOLD: 'gold' };
+      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SOL: 'solana' };
 
       // Group consecutive fills by coin+dir to find close events
       // HL marks closing fills with closedPnl !== "0" or closedPnl field
@@ -4036,7 +4006,7 @@ async function renderTrades(){
       const leverage = pos.leverage ? pos.leverage.value : '—';
 
       // Look up SL/TP from activeTrades
-      const symToId = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana', GOLD:'gold' };
+      const symToId = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana' };
       const cid = symToId[coin];
       const at = cid ? HL.activeTrades[cid] : null;
       const sl = at ? at.sl : null;
@@ -4100,7 +4070,7 @@ async function closeTrade(coin, szi, entryPx){
   const size = Math.abs(szi);
 
   // Look up current price from coinState
-  const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana', GOLD:'gold' };
+  const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana' };
   const cid = coinIdMap[coin];
   const px = cid ? coinState[cid].price : 0;
   const slip = px * 0.01; // 1% slippage for IOC close to ensure fill
@@ -4144,7 +4114,7 @@ async function closeTrade(coin, szi, entryPx){
     showToast('Position closed: ' + coin, '', false);
 
     // Also clear from HL.activeTrades
-    const coinIdMap2 = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana', GOLD:'gold' };
+    const coinIdMap2 = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana' };
     if(coinIdMap2[coin]) { delete HL.activeTrades[coinIdMap2[coin]]; HL.saveActiveTrades(); }
 
     // Refresh trades page after a short delay for settlement
@@ -4171,7 +4141,7 @@ function prefillTrade(coin, sig, sl, tp){
     // Auto-calculate suggested size from risk settings
     const accountSize = parseFloat(localStorage.getItem('account_size') || '100');
     const riskPct = parseFloat(localStorage.getItem('risk_pct') || '1');
-    const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana', GOLD:'gold' };
+    const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana' };
     const cid = coinIdMap[coin];
     const px = cid ? coinState[cid].price : 0;
     if(px && sl){
@@ -4207,7 +4177,7 @@ async function manualOpenTrade(){
   btn.disabled = true;
 
   const isBuy = side === 'LONG';
-  const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana', GOLD:'gold' };
+  const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana' };
   const cid = coinIdMap[coin];
   const px = cid ? coinState[cid].price : 0;
   if(!px){ btn.textContent = 'OPEN TRADE'; btn.disabled = false; showToast('No price data for ' + coin); return; }
