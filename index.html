@@ -757,7 +757,7 @@ function maybeAlert(sig, tf, type, level, target, rr, coinId, state){
   }
 
   const icon  = sig==='LONG'?'🟢':sig==='SHORT'?'🔴':'🟡';
-  const dir   = type==='FAIL_GAIN'?'FAIL TO GAIN':type==='FAIL_LOSE'?'FAIL TO LOSE':type==='BLIND_ENTRY'?'BLIND ENTRY':type==='BREAKOUT'?'BREAKOUT':'AT LEVEL';
+  const dir   = type==='FAIL_GAIN'?'FAIL TO GAIN':type==='FAIL_LOSE'?'FAIL TO LOSE':type==='BLIND_ENTRY'?'CONFIRMED ENTRY':type==='BREAKOUT'?'BREAKOUT':'AT LEVEL';
   const rrTxt = rr ? ` · R:R ${rr}` : '';
   const coinLabel = COINS[coinId] ? COINS[coinId].shortLabel : coinId.toUpperCase();
   const px = state.price || 0;
@@ -2356,7 +2356,7 @@ function renderCards(){
     const isCollapsed = tf.l !== '15m' ? ' collapsed' : '';
     if(!r)return`<div class="tfc none${isCollapsed}" onclick="this.classList.toggle('collapsed')"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type NONE">···</span><span class="tfc-toggle">▼</span><span class="tfc-sig WAIT" style="margin-left:auto">—</span></div><div class="tfc-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div></div>`;
     const cls=r.sig==='LONG'?'long':r.sig==='SHORT'?'short':'neutral';
-    const tl=r.type==='FAIL_GAIN'?'FAIL TO GAIN':r.type==='FAIL_LOSE'?'FAIL TO LOSE':r.type==='BLIND_ENTRY'?'BLIND ENTRY':r.type==='BREAKOUT'?'BREAKOUT':r.type==='AT_LEVEL'?'AT LEVEL':'NO SETUP';
+    const tl=r.type==='FAIL_GAIN'?'FAIL TO GAIN':r.type==='FAIL_LOSE'?'FAIL TO LOSE':r.type==='BLIND_ENTRY'?'CONFIRMED ENTRY':r.type==='BREAKOUT'?'BREAKOUT':r.type==='AT_LEVEL'?'AT LEVEL':'NO SETUP';
     const rrBadge=r.rr?`<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:2px 6px;border-radius:4px;background:rgba(255,193,7,.1);color:#ffc107;border:1px solid rgba(255,193,7,.2);margin-left:auto">R:R ${r.rr}</span>`:'';
     const lvlScore=r.score?`<span style="font-family:'IBM Plex Mono',monospace;font-size:8px;color:#3d5068;margin-left:6px">score ${r.score}</span>`:'';
     return`<div class="tfc ${cls}${isCollapsed}" onclick="this.classList.toggle('collapsed')"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type ${r.type}">${tl}</span><span class="tfc-toggle">▼</span>${rrBadge}</div><div class="tfc-head" style="margin-top:5px;margin-bottom:0">${r.sig!=='NEUTRAL'?`<span class="tfc-sig ${r.sig}">${r.sig}</span>`:''}<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:${r.strength==='strong'?'#00e676':r.strength==='med'?'#ffc107':'#3d5068'};margin-left:4px">${r.strength||''}</span>${lvlScore}</div><div class="tfc-reason" style="margin-top:6px">${r.reason}</div>${r.detail?`<div class="tfc-reason" style="color:#3d5068;margin-top:3px;font-size:8px">${r.detail}</div>`:''
