@@ -1369,7 +1369,7 @@ async function maybeAlert(sig, tf, type, level, target, rr, stopPrice, coinId, p
   }
   const icon      = sig==='LONG' ? '🟢' : sig==='SHORT' ? '🔴' : '🟡';
   const coinLabel = COINS[coinId].label;
-  const dir       = type==='FAIL_GAIN' ? 'FAIL TO GAIN' : type==='FAIL_LOSE' ? 'FAIL TO LOSE' : type==='BLIND_ENTRY' ? 'BLIND ENTRY' : 'AT LEVEL';
+  const dir       = type==='FAIL_GAIN' ? 'FAIL TO GAIN' : type==='FAIL_LOSE' ? 'FAIL TO LOSE' : type==='BLIND_ENTRY' ? 'CONFIRMED ENTRY' : 'AT LEVEL';
   let msg;
   if(type==='AT_LEVEL'){
     msg = `${icon} <b>DMS AT LEVEL</b> · ${coinLabel} [${tf}]\n👁 Approaching $${fmt(level)} — watch 15m candle\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
