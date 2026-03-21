@@ -497,7 +497,46 @@ function calcRR(entry, target, trapLevel, stopLevel){
   return (reward / risk).toFixed(1);
 }
 
-// ── DMS SIGNAL ENGINE (exact mirror of app v4.3) ─────────────────────────────
+// ── REJECTION CANDLE DETECTION ────────────────────────────────────────────────
+// Checks if recent candles show a rejection pattern (pin bar / wick) at a level
+// Returns { confirmed: true/false, barsAgo, wickRatio }
+function hasRejection(candles, levelPrice, direction, atrVal) {
+  const n = candles.length;
+  // Check current candle + 2 previous candles
+  for (let i = 0; i < Math.min(3, n); i++) {
+    const k = candles[n - 1 - i];
+    const body = k.bh - k.bl;           // body range (open-close)
+    const totalRange = k.h - k.l;
+    if (totalRange < atrVal * 0.05) continue;  // skip doji/tiny candles
+
+    if (direction === 'LONG') {
+      // Bullish rejection at support: long lower wick, close above level
+      const lowerWick = k.bl - k.l;
+      const wickRatio = totalRange > 0 ? lowerWick / totalRange : 0;
+      if (k.l <= levelPrice + atrVal * 0.3     // low reached near/below level
+        && lowerWick >= body * 0.5              // lower wick ≥ 50% of body
+        && wickRatio >= 0.25                    // wick is 25%+ of total range
+        && k.c >= levelPrice - atrVal * 0.15)   // close at or above level
+      {
+        return { confirmed: true, barsAgo: i, wickRatio };
+      }
+    } else {
+      // Bearish rejection at resistance: long upper wick, close below level
+      const upperWick = k.h - k.bh;
+      const wickRatio = totalRange > 0 ? upperWick / totalRange : 0;
+      if (k.h >= levelPrice - atrVal * 0.3     // high reached near/above level
+        && upperWick >= body * 0.5
+        && wickRatio >= 0.25
+        && k.c <= levelPrice + atrVal * 0.15)
+      {
+        return { confirmed: true, barsAgo: i, wickRatio };
+      }
+    }
+  }
+  return { confirmed: false };
+}
+
+// ── DMS SIGNAL ENGINE (v4.7 — rejection candle confirmation) ─────────────────
 function dms(c, a, dCandles, tf, htfBias){
   const n = c.length;
   const minCandles = (tf==='1W'||tf==='1D') ? 10 : 20;
@@ -540,19 +579,48 @@ function dms(c, a, dCandles, tf, htfBias){
           const dist = ((blindCandidate.price - cur.c)/cur.c*100).toFixed(2);
           const htfNote = htfBias!=='UNCLEAR' ? ` · HTF ${htfBias} aligns` : '';
           const typeLabel = isFlipped ? `PASS-THROUGH` : `UNTESTED ${tf}`;
-          return {
-            sig:blindSig, type:'BLIND_ENTRY',
-            level:blindCandidate.price, target:tgt.price, rr, stopPrice:stop,
-            strength:blindCandidate.strength, score:blindCandidate.score,
-            reason:`BLIND: ${blindCandidate.source} $${fmt(blindCandidate.price)} · ${dist>0?'+':''}${dist}% · ${typeLabel}${htfNote} · R:R ${rr} → $${fmt(tgt.price)}`
-          };
+          // v4.7: Require rejection candle confirmation before entering
+          const rejection = hasRejection(c, blindCandidate.price, blindSig, a);
+          if(rejection.confirmed){
+            return {
+              sig:blindSig, type:'BLIND_ENTRY',
+              level:blindCandidate.price, target:tgt.price, rr, stopPrice:stop,
+              strength:blindCandidate.strength, score:blindCandidate.score,
+              reason:`CONFIRMED: ${blindCandidate.source} $${fmt(blindCandidate.price)} · ${dist>0?'+':''}${dist}% · ${typeLabel} · rejection ${rejection.barsAgo===0?'this candle':rejection.barsAgo+' bars ago'}${htfNote} · R:R ${rr} → $${fmt(tgt.price)}`
+            };
+          }
+          // No rejection → downgrade to AT_LEVEL alert (no auto-trade)
+          const dir = isRes ? 'RESISTANCE — waiting for rejection candle' : 'SUPPORT — waiting for rejection candle';
+          return { sig:'NEUTRAL', type:'AT_LEVEL', level:blindCandidate.price, target:tgt.price, strength:blindCandidate.strength, score:blindCandidate.score, reason:`PENDING: ${blindCandidate.source} $${fmt(blindCandidate.price)} · ${dist>0?'+':''}${dist}% · ${typeLabel} · no rejection yet · ${dir}` };
         }
       }
     }
+    // 4H/1H: Check if price is at a level WITH rejection → produce confirmed entry
     const atLevelWindow = isHTF ? a * 0.4 : a * 1.0;
     const atLevel = nearby.find(l=>Math.abs(l.price-cur.c) < atLevelWindow && l.score >= 20);
     if(atLevel){
-      const dir  = atLevel.type==='resistance' ? 'RESISTANCE — watch 15m for wick + body close back below' : 'SUPPORT — watch 15m for wick + body close back above';
+      const isRes = atLevel.type === 'resistance';
+      const confSig = isRes ? 'SHORT' : 'LONG';
+      const htfBlocks = (isRes && htfBias==='UP') || (!isRes && htfBias==='DOWN');
+      // On 4H/1H: check for rejection candle to upgrade AT_LEVEL → confirmed trade
+      if((tf === '4H' || tf === '1H') && !htfBlocks){
+        const rejection = hasRejection(c, atLevel.price, confSig, a);
+        if(rejection.confirmed){
+          const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
+          const stop = findStopLevel(levels, atLevel.price, isRes?'short':'long');
+          const rr   = calcRR(cur.c, tgt.price, atLevel.price, stop);
+          if(rr && parseFloat(rr) >= 1.0){
+            const dist = ((atLevel.price - cur.c)/cur.c*100).toFixed(2);
+            return {
+              sig:confSig, type:'BLIND_ENTRY',
+              level:atLevel.price, target:tgt.price, rr, stopPrice:stop,
+              strength:atLevel.strength, score:atLevel.score,
+              reason:`CONFIRMED ${tf}: ${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · rejection ${rejection.barsAgo===0?'this candle':rejection.barsAgo+' bars ago'} · R:R ${rr} → $${fmt(tgt.price)}`
+            };
+          }
+        }
+      }
+      const dir  = atLevel.type==='resistance' ? 'RESISTANCE — watch for rejection candle' : 'SUPPORT — watch for rejection candle';
       const dist = ((atLevel.price - cur.c)/cur.c*100).toFixed(2);
       return { sig:'NEUTRAL', type:'AT_LEVEL', level:atLevel.price, target:null, strength:atLevel.strength, score:atLevel.score, reason:`${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · ${dir}` };
     }
@@ -972,12 +1040,17 @@ const HL = {
         if (nowOpen.has(coinId)) continue;
         if (!old.entry || !old.asset) continue;
         const s = coinState[coinId];
-        const exitPx = s ? s.price : old.entry;
+        // Use current price if available and valid, otherwise fall back to entry (never $0)
+        const exitPx = (s && s.price > 0) ? s.price : old.entry;
         const isLong = old.side === 'LONG';
         const pnl = isLong ? (exitPx - old.entry) * old.size : (old.entry - exitPx) * old.size;
+        // Detect TP/SL by proximity (within 2% of the level) rather than directional check
         let reason = 'auto_closed';
-        if (old.tp && ((isLong && exitPx >= old.tp * 0.99) || (!isLong && exitPx <= old.tp * 1.01))) reason = 'tp_hit';
-        else if (old.sl && ((isLong && exitPx <= old.sl * 1.01) || (!isLong && exitPx >= old.sl * 0.99))) reason = 'sl_hit';
+        const tpDist = old.tp ? Math.abs(exitPx - old.tp) / old.tp : Infinity;
+        const slDist = old.sl ? Math.abs(exitPx - old.sl) / old.sl : Infinity;
+        if (tpDist < 0.02 && tpDist <= slDist) reason = 'tp_hit';
+        else if (slDist < 0.02 && slDist < tpDist) reason = 'sl_hit';
+        else if (old.sl && ((isLong && exitPx <= old.sl) || (!isLong && exitPx >= old.sl))) reason = 'sl_hit';
 
         const closed = loadClosedTrades();
         closed.unshift({
@@ -1270,6 +1343,16 @@ function loadClosedTrades() {
 function saveClosedTrades(trades) {
   fs.writeFileSync(CLOSED_TRADES_FILE, JSON.stringify(trades.slice(0, 100)));
 }
+
+// One-time cleanup: remove trades with invalid exit prices ($0 or near-zero)
+(function cleanupBadTrades(){
+  const trades = loadClosedTrades();
+  const cleaned = trades.filter(t => t.exit > 1);
+  if (cleaned.length < trades.length) {
+    console.log('Cleaned up', trades.length - cleaned.length, 'trades with invalid exit prices');
+    saveClosedTrades(cleaned);
+  }
+})();
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ██  ALERT & TRADE EXECUTION LOGIC                                         ██
