@@ -264,7 +264,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <body>
 
 <div class="topbar">
-  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v4.6</span></span>
+  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v4.8</span></span>
   <select id="coin-sel" onchange="switchCoin(this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:4px 8px;cursor:pointer;letter-spacing:.04em">
     <option value="bitcoin" data-sym="BTCUSDT" data-label="BTC/USD" selected>BTC/USD</option>
     <option value="hyperliquid" data-sym="HYPEUSDT" data-label="HYPE/USD">HYPE/USD</option>
@@ -1729,10 +1729,42 @@ function hasMomentumAgainst(candles, direction, atrVal) {
   return { blocked: false };
 }
 
-// ── DMS ENGINE (v4.8 — confirmed follow-through + momentum + HTF block) ─
+// ── LOWER-TF ALIGNMENT CHECK (v4.8) ─────────────────────
+// Before a 1W/1D signal fires, check if 4H/1H candles are moving WITH the signal.
+function hasLTFAlignment(direction, lowerCandles) {
+  if (!lowerCandles) return { aligned: true };
+  const checks = [];
+  for (const [label, candles] of Object.entries(lowerCandles)) {
+    if (!candles || candles.length < 4) continue;
+    const n = candles.length;
+    const a = atr(candles);
+    let withDir = 0, againstDir = 0;
+    for (let i = 0; i < 3; i++) {
+      const k = candles[n - 1 - i];
+      const bodyDir = k.c - k.o;
+      if (direction === 'LONG' && bodyDir > a * 0.02) withDir++;
+      else if (direction === 'LONG' && bodyDir < -a * 0.02) againstDir++;
+      else if (direction === 'SHORT' && bodyDir < -a * 0.02) withDir++;
+      else if (direction === 'SHORT' && bodyDir > a * 0.02) againstDir++;
+    }
+    const cur = candles[n - 1];
+    const prev = candles[n - 2];
+    const curMovingAgainst = (direction === 'SHORT' && cur.c > prev.c)
+                          || (direction === 'LONG' && cur.c < prev.c);
+    checks.push({ label, withDir, againstDir, curMovingAgainst });
+  }
+  for (const ch of checks) {
+    if (ch.againstDir >= 2 && ch.curMovingAgainst) {
+      return { aligned: false, reason: `${ch.label} shows ${ch.againstDir}/3 candles against ${direction} + current candle opposing` };
+    }
+  }
+  return { aligned: true };
+}
+
+// ── DMS ENGINE (v4.8 — confirmed follow-through + momentum + HTF + LTF align) ─
 // 1W/1D/4H/1H: require rejection candle + follow-through to fire entries.
 // 15m: existing trap logic (FAIL_GAIN/FAIL_LOSE) is unchanged.
-function dms(c, a, dCandles, tf, htfBias){
+function dms(c, a, dCandles, tf, htfBias, lowerCandles){
   const n = c.length;
   const minCandles = (tf==='1W'||tf==='1D') ? 10 : 20;
   if(n < minCandles) return {sig:'NEUTRAL',type:'NONE',reason:'Insufficient data ('+n+' candles)'};
@@ -1817,6 +1849,21 @@ function dms(c, a, dCandles, tf, htfBias){
           // v4.8: Require rejection + follow-through + momentum check
           const rejection = hasRejection(c, blindCandidate.price, blindSig, a);
           if(rejection.confirmed){
+            // v4.8: LTF alignment — 1W/1D signals must not conflict with 4H/1H momentum
+            if((tf === '1W' || tf === '1D') && lowerCandles){
+              const ltfCheck = hasLTFAlignment(blindSig, lowerCandles);
+              if(!ltfCheck.aligned){
+                const dir = isRes ? 'RESISTANCE — lower TF opposing' : 'SUPPORT — lower TF opposing';
+                return {
+                  sig:'NEUTRAL', type:'AT_LEVEL',
+                  level:blindCandidate.price, target:tgt.price,
+                  strength:blindCandidate.strength, score:blindCandidate.score,
+                  reason:`WAIT: ${blindCandidate.source} $${fmt(blindCandidate.price)} · rejection confirmed BUT ${ltfCheck.reason} · ${dir}`,
+                  detail:`Rejection found but lower TFs moving against — waiting for alignment`,
+                  untested: true
+                };
+              }
+            }
             return {
               sig: blindSig, type: 'BLIND_ENTRY',
               level: blindCandidate.price, target: tgt.price, rr, stopPrice: stop,
@@ -2990,14 +3037,14 @@ function setStatus(s,t){
 // Daily fetched first (fast) → used for PDH/PDL context on all TFs.
 // Weekly fetched in parallel but renders independently.
 
-function processTF(i, candles, dCandles, coinId){
+function processTF(i, candles, dCandles, coinId, lowerCandles){
   coinId = coinId || activeCoin;
   const s = coinState[coinId];
   const tf = TFS[i];
   const a = atr(candles);
   // Attach asiaLevels to htfDir as a carrier object for 15m processing
   const htfCarrier = Object.assign(String(s.htfDir), { __asiaLevels: s.asiaLevels || [] });
-  const d = dms(candles, a, dCandles, tf.l, htfCarrier);
+  const d = dms(candles, a, dCandles, tf.l, htfCarrier, lowerCandles || null);
   s.results[tf.l] = d;
   // Alerts fire for all coins regardless of active view
   if(d.type!=='NONE' && d.type!=='AT_LEVEL'){
@@ -3152,9 +3199,15 @@ async function runCoin(coinId){
 
     // v4.8: Reset cross-TF conflict tracker for this scan cycle
     s._firedDir = null;
+    // v4.8: Build lower-TF candle data for LTF alignment checks on 1W/1D
+    const lowerTFCandles = {};
+    if(h4Entry?.c) lowerTFCandles['4H'] = h4Entry.c;
+    if(h1Entry?.c) lowerTFCandles['1H'] = h1Entry.c;
+    const hasLower = Object.keys(lowerTFCandles).length > 0 ? lowerTFCandles : null;
+
     // Process each TF — pass dCandles as context (may be null if 1D failed, graceful)
-    if(dCandles) processTF(1, dCandles, dCandles, coinId);
-    if(wCandles && dCandles) processTF(0, wCandles, dCandles, coinId);
+    if(dCandles) processTF(1, dCandles, dCandles, coinId, hasLower);
+    if(wCandles && dCandles) processTF(0, wCandles, dCandles, coinId, hasLower);
     if(h4Entry?.c && dCandles) processTF(2, h4Entry.c, dCandles, coinId);
     if(h1Entry?.c && dCandles) processTF(3, h1Entry.c, dCandles, coinId);
     if(m15Entry?.c && dCandles) processTF(4, m15Entry.c, dCandles, coinId);
