@@ -1569,6 +1569,10 @@ async function scanCoin(coinId){
     // Store all results for confidence calculation
     const allResults = {};
 
+    // v4.8: Cross-TF conflict prevention — track which direction fired first
+    // If 4H says LONG and 1D says SHORT, only the first (higher-weight TF) fires
+    let firedDirection = null; // 'LONG' or 'SHORT' once a tradeable signal fires
+
     const signalSummary = [];
     for(const { i, c, dC: dc } of tfsToRun){
       const tf = TFS[i];
@@ -1580,8 +1584,16 @@ async function scanCoin(coinId){
       // Log ALL non-NONE signals for diagnostics
       if(d.type !== 'NONE'){
         const deduped = isDedupSuppressed(coinId, tf.l, d.type, d.level);
+        // v4.8: Block opposite-direction signals within same scan cycle
+        const conflicted = firedDirection && d.sig !== 'NEUTRAL' && d.sig !== firedDirection;
+        if(conflicted){
+          signalSummary.push(`${tf.l}:${d.sig}(CONFLICT-BLOCKED, already ${firedDirection})`);
+          continue;
+        }
         signalSummary.push(`${tf.l}:${d.sig}(${d.type}${deduped?' DEDUP':''})`);
         if(!deduped){
+          // Track which direction we committed to (only for tradeable signals)
+          if(d.sig !== 'NEUTRAL' && d.type === 'BLIND_ENTRY') firedDirection = d.sig;
           await maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, d.stopPrice, coinId, price, allLevels);
           // Auto-trade execution
           await maybeAutoTrade(coinId, i, d, allResults);
