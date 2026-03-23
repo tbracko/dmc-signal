@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// DMS Signal Bot v4.5 — AUTO-TRADE edition
+// DMS Signal Bot v4.8 — AUTO-TRADE edition
 // Mirrors the DMS algorithm from index.html exactly — same levels, same scoring, same signals
 // Now also executes trades on Hyperliquid with TP/SL/trailing stops
 // Node 18+ required (uses built-in fetch)
@@ -593,8 +593,48 @@ function hasMomentumAgainst(candles, direction, atrVal) {
   return { blocked: false };
 }
 
-// ── DMS SIGNAL ENGINE (v4.8 — confirmed follow-through + momentum + HTF block) ─
-function dms(c, a, dCandles, tf, htfBias){
+// ── LOWER-TF ALIGNMENT CHECK (v4.8) ─────────────────────────────────────────
+// Before a 1W/1D signal fires, check if 4H/1H candles are moving WITH the signal.
+// If lower TFs show clear opposing momentum, the HTF signal is premature.
+// lowerCandles = { h4: [...], h1: [...] } — raw candle arrays
+function hasLTFAlignment(direction, lowerCandles) {
+  if (!lowerCandles) return { aligned: true };
+  const checks = [];
+
+  for (const [label, candles] of Object.entries(lowerCandles)) {
+    if (!candles || candles.length < 4) continue;
+    const n = candles.length;
+    const a = atr(candles);
+    // Check last 3 candles for direction
+    let withDir = 0, againstDir = 0;
+    for (let i = 0; i < 3; i++) {
+      const k = candles[n - 1 - i];
+      const bodyDir = k.c - k.o;
+      if (direction === 'LONG' && bodyDir > a * 0.02) withDir++;
+      else if (direction === 'LONG' && bodyDir < -a * 0.02) againstDir++;
+      else if (direction === 'SHORT' && bodyDir < -a * 0.02) withDir++;
+      else if (direction === 'SHORT' && bodyDir > a * 0.02) againstDir++;
+    }
+    // Also check: is the current candle's close moving away from the signal?
+    const cur = candles[n - 1];
+    const prev = candles[n - 2];
+    const curMovingAgainst = (direction === 'SHORT' && cur.c > prev.c)
+                          || (direction === 'LONG' && cur.c < prev.c);
+
+    checks.push({ label, withDir, againstDir, curMovingAgainst });
+  }
+
+  // Block if ANY lower TF has 2+ candles against AND current candle moving against
+  for (const ch of checks) {
+    if (ch.againstDir >= 2 && ch.curMovingAgainst) {
+      return { aligned: false, reason: `${ch.label} shows ${ch.againstDir}/3 candles against ${direction} + current candle opposing` };
+    }
+  }
+  return { aligned: true };
+}
+
+// ── DMS SIGNAL ENGINE (v4.8 — confirmed follow-through + momentum + HTF + LTF align) ─
+function dms(c, a, dCandles, tf, htfBias, lowerCandles){
   const n = c.length;
   const minCandles = (tf==='1W'||tf==='1D') ? 10 : 20;
   if(n < minCandles) return { sig:'NEUTRAL', type:'NONE', reason:'Insufficient data' };
@@ -639,6 +679,15 @@ function dms(c, a, dCandles, tf, htfBias){
           // v4.8: Require rejection + follow-through + momentum check
           const rejection = hasRejection(c, blindCandidate.price, blindSig, a);
           if(rejection.confirmed){
+            // v4.8: LTF alignment — 1W/1D signals must not conflict with 4H/1H momentum
+            if((tf === '1W' || tf === '1D') && lowerCandles){
+              const ltfCheck = hasLTFAlignment(blindSig, lowerCandles);
+              if(!ltfCheck.aligned){
+                const waitReason = ltfCheck.reason;
+                const dir = isRes ? 'RESISTANCE — lower TF opposing' : 'SUPPORT — lower TF opposing';
+                return { sig:'NEUTRAL', type:'AT_LEVEL', level:blindCandidate.price, target:tgt.price, strength:blindCandidate.strength, score:blindCandidate.score, reason:`WAIT: ${blindCandidate.source} $${fmt(blindCandidate.price)} · rejection confirmed BUT ${waitReason} · ${dir}` };
+              }
+            }
             return {
               sig:blindSig, type:'BLIND_ENTRY',
               level:blindCandidate.price, target:tgt.price, rr, stopPrice:stop,
@@ -1558,12 +1607,18 @@ async function scanCoin(coinId){
       return dd;
     })();
 
+    // v4.8: Build lower-TF candle data for LTF alignment checks on 1W/1D
+    const lowerTFCandles = {};
+    if (h4C) lowerTFCandles['4H'] = h4C;
+    if (h1C) lowerTFCandles['1H'] = h1C;
+    const hasLower = Object.keys(lowerTFCandles).length > 0 ? lowerTFCandles : null;
+
     const tfsToRun = [
-      wC  && dC  ? { i:0, c:wC,   dC } : null,
-      dC         ? { i:1, c:dC,   dC } : null,
-      h4C && dC  ? { i:2, c:h4C,  dC } : null,
-      h1C && dC  ? { i:3, c:h1C,  dC } : null,
-      m15C && dC ? { i:4, c:m15C, dC } : null,
+      wC  && dC  ? { i:0, c:wC,   dC, lower:hasLower } : null,
+      dC         ? { i:1, c:dC,   dC, lower:hasLower } : null,
+      h4C && dC  ? { i:2, c:h4C,  dC, lower:null } : null,
+      h1C && dC  ? { i:3, c:h1C,  dC, lower:null } : null,
+      m15C && dC ? { i:4, c:m15C, dC, lower:null } : null,
     ].filter(Boolean);
 
     // Store all results for confidence calculation
@@ -1574,11 +1629,11 @@ async function scanCoin(coinId){
     let firedDirection = null; // 'LONG' or 'SHORT' once a tradeable signal fires
 
     const signalSummary = [];
-    for(const { i, c, dC: dc } of tfsToRun){
+    for(const { i, c, dC: dc, lower } of tfsToRun){
       const tf = TFS[i];
       const a  = atr(c);
       const htfCarrier = Object.assign(String(htfDir), { __asiaLevels: asiaLevels });
-      const d = dms(c, a, dc, tf.l, htfCarrier);
+      const d = dms(c, a, dc, tf.l, htfCarrier, lower);
       allResults[tf.l] = d;
 
       // Log ALL non-NONE signals for diagnostics
@@ -1704,7 +1759,7 @@ async function scanAll(){
 }
 
 async function main(){
-  console.log(`DMS Signal Bot v4.6 started. Interval: ${INTERVAL_MS/1000}s`);
+  console.log(`DMS Signal Bot v4.8 started. Interval: ${INTERVAL_MS/1000}s`);
   console.log(`Coins: BTC, HYPE, SOL, GOLD  |  Token: ...${TG_TOKEN.slice(-6)}  |  Chat: ${TG_CHATID}`);
 
   // Initialize Hyperliquid trading module
@@ -1712,14 +1767,14 @@ async function main(){
     const hlOk = await HL.init();
     if (hlOk) {
       console.log('Auto-trading ENABLED | Risk:', RISK_PCT + '%', '| Min conf:', MIN_CONFIDENCE + '%', '| Max trades/day:', MAX_TRADES_DAY);
-      await sendTelegram('🤖 <b>DMS Signal Bot v4.6 started</b>\n✅ Auto-trading ENABLED\nScanning BTC · HYPE · SOL · GOLD every 2 min\nRisk: ' + RISK_PCT + '% | Min conf: ' + MIN_CONFIDENCE + '%');
+      await sendTelegram('🤖 <b>DMS Signal Bot v4.8 started</b>\n✅ Auto-trading ENABLED\nScanning BTC · HYPE · SOL · GOLD every 2 min\nRisk: ' + RISK_PCT + '% | Min conf: ' + MIN_CONFIDENCE + '%');
     } else {
       console.warn('Auto-trading init FAILED — running in alert-only mode');
-      await sendTelegram('🤖 <b>DMS Signal Bot v4.5 started</b>\n⚠️ Auto-trading FAILED to init\nRunning in alert-only mode');
+      await sendTelegram('🤖 <b>DMS Signal Bot v4.8 started</b>\n⚠️ Auto-trading FAILED to init\nRunning in alert-only mode');
     }
   } else {
     console.log('Auto-trading DISABLED (set AUTO_TRADE=true and HL_PRIVATE_KEY to enable)');
-    await sendTelegram('🤖 <b>DMS Signal Bot v4.6 started</b>\nScanning BTC · HYPE · SOL · GOLD every 2 minutes.\n🔔 Alert-only mode');
+    await sendTelegram('🤖 <b>DMS Signal Bot v4.8 started</b>\nScanning BTC · HYPE · SOL · GOLD every 2 minutes.\n🔔 Alert-only mode');
   }
 
   await scanAll();
