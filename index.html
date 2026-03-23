@@ -1651,11 +1651,22 @@ function findStopLevel(levels, trapPrice, direction){
 // 3. Level reclaim check: if any candle between trap and now reclaimed the level → dead
 // 4. PDH/PDL excluded from 1W (only relevant on daily and below)
 
-// ── REJECTION CANDLE DETECTION ────────────────────────────
-// Checks if recent candles show a rejection pattern (pin bar / wick) at a level
+// ── REJECTION CANDLE DETECTION (v4.8 — follow-through confirmation) ──
+// Phase 1: Rejection candle must NOT be the current candle — we need at least
+//          one follow-through candle that confirms the bounce direction.
+// Phase 2: Momentum filter — if last 3-5 candles show strong directional
+//          momentum AGAINST the signal, suppress it.
 function hasRejection(candles, levelPrice, direction, atrVal) {
   const n = candles.length;
-  for (let i = 0; i < Math.min(3, n); i++) {
+  if (n < 3) return { confirmed: false };
+
+  // Phase 2: Momentum filter
+  const momentumBlocked = hasMomentumAgainst(candles, direction, atrVal);
+  if (momentumBlocked.blocked) return { confirmed: false, reason: momentumBlocked.reason };
+
+  const cur = candles[n - 1]; // current candle = follow-through
+
+  for (let i = 1; i < Math.min(4, n); i++) {
     const k = candles[n - 1 - i];
     const body = k.bh - k.bl;
     const totalRange = k.h - k.l;
@@ -1669,7 +1680,10 @@ function hasRejection(candles, levelPrice, direction, atrVal) {
         && wickRatio >= 0.25
         && k.c >= levelPrice - atrVal * 0.15)
       {
-        return { confirmed: true, barsAgo: i, wickRatio };
+        const followOk = cur.c > k.bl && cur.c >= levelPrice - atrVal * 0.1;
+        if (followOk) {
+          return { confirmed: true, barsAgo: i, wickRatio, followThrough: true };
+        }
       }
     } else {
       const upperWick = k.h - k.bh;
@@ -1679,15 +1693,44 @@ function hasRejection(candles, levelPrice, direction, atrVal) {
         && wickRatio >= 0.25
         && k.c <= levelPrice + atrVal * 0.15)
       {
-        return { confirmed: true, barsAgo: i, wickRatio };
+        const followOk = cur.c < k.bh && cur.c <= levelPrice + atrVal * 0.1;
+        if (followOk) {
+          return { confirmed: true, barsAgo: i, wickRatio, followThrough: true };
+        }
       }
     }
   }
   return { confirmed: false };
 }
 
-// ── DMS ENGINE (v4.7 — rejection candle confirmation) ─────
-// 1W/1D/4H/1H: require rejection candle to fire entries.
+// ── MOMENTUM FILTER (v4.8) ──────────────────────────────
+function hasMomentumAgainst(candles, direction, atrVal) {
+  const n = candles.length;
+  if (n < 4) return { blocked: false };
+
+  const lookback = Math.min(5, n - 1);
+  let againstCount = 0;
+  let totalMove = 0;
+
+  for (let i = 1; i <= lookback; i++) {
+    const k = candles[n - 1 - i];
+    const bodyDir = k.c - k.o;
+    if (direction === 'LONG' && bodyDir < -atrVal * 0.05) againstCount++;
+    if (direction === 'SHORT' && bodyDir > atrVal * 0.05) againstCount++;
+    totalMove += bodyDir;
+  }
+
+  const netAgainst = (direction === 'LONG' && totalMove < -atrVal * 0.5)
+                  || (direction === 'SHORT' && totalMove > atrVal * 0.5);
+
+  if (againstCount >= 3 && netAgainst) {
+    return { blocked: true, reason: `${againstCount}/${lookback} candles against ${direction}, net move ${(totalMove/atrVal).toFixed(1)} ATR` };
+  }
+  return { blocked: false };
+}
+
+// ── DMS ENGINE (v4.8 — confirmed follow-through + momentum + HTF block) ─
+// 1W/1D/4H/1H: require rejection candle + follow-through to fire entries.
 // 15m: existing trap logic (FAIL_GAIN/FAIL_LOSE) is unchanged.
 function dms(c, a, dCandles, tf, htfBias){
   const n = c.length;
@@ -1771,26 +1814,27 @@ function dms(c, a, dCandles, tf, htfBias){
           const dist = ((blindCandidate.price - cur.c)/cur.c*100).toFixed(2);
           const htfNote = htfBias!=='UNCLEAR' ? ` · ✓ HTF ${htfBias} aligns` : '';
           const typeLabel = isFlipped ? `PASS-THROUGH (flipped to ${effectiveType})` : `UNTESTED ${tf} level`;
-          // v4.7: Require rejection candle confirmation before entering
+          // v4.8: Require rejection + follow-through + momentum check
           const rejection = hasRejection(c, blindCandidate.price, blindSig, a);
           if(rejection.confirmed){
             return {
               sig: blindSig, type: 'BLIND_ENTRY',
               level: blindCandidate.price, target: tgt.price, rr, stopPrice: stop,
               strength: blindCandidate.strength, score: blindCandidate.score,
-              reason: `CONFIRMED: ${blindCandidate.source} $${fmt(blindCandidate.price)} · ${dist>0?'+':''}${dist}% · ${typeLabel} · rejection ${rejection.barsAgo===0?'this candle':rejection.barsAgo+' bars ago'}${htfNote} · R:R ${rr} → $${fmt(tgt.price)}`,
-              detail: `${isFlipped?'Pass-through level':'Untested body level'} — rejection candle confirmed | SL: $${fmt(stop)}`,
+              reason: `CONFIRMED: ${blindCandidate.source} $${fmt(blindCandidate.price)} · ${dist>0?'+':''}${dist}% · ${typeLabel} · rejection ${rejection.barsAgo} bars ago · follow-through confirmed${htfNote} · R:R ${rr} → $${fmt(tgt.price)}`,
+              detail: `${isFlipped?'Pass-through level':'Untested body level'} — rejection + follow-through confirmed | SL: $${fmt(stop)}`,
               untested: true
             };
           }
-          // No rejection → downgrade to AT_LEVEL (alert only, no auto-trade)
-          const dir = isRes ? 'RESISTANCE — waiting for rejection candle' : 'SUPPORT — waiting for rejection candle';
+          // No confirmed rejection → downgrade to AT_LEVEL (alert only, no auto-trade)
+          const waitReason = rejection.reason || 'no confirmed rejection + follow-through';
+          const dir = isRes ? 'RESISTANCE — waiting for confirmation' : 'SUPPORT — waiting for confirmation';
           return {
             sig:'NEUTRAL', type:'AT_LEVEL',
             level:blindCandidate.price, target:tgt.price,
             strength:blindCandidate.strength, score:blindCandidate.score,
-            reason:`PENDING: ${blindCandidate.source} $${fmt(blindCandidate.price)} · ${dist>0?'+':''}${dist}% · ${typeLabel} · no rejection yet · ${dir}`,
-            detail:`Level valid but no rejection candle yet — watching | SL would be: $${fmt(stop)}`,
+            reason:`PENDING: ${blindCandidate.source} $${fmt(blindCandidate.price)} · ${dist>0?'+':''}${dist}% · ${typeLabel} · ${waitReason} · ${dir}`,
+            detail:`Level valid but no confirmed bounce yet — watching | SL would be: $${fmt(stop)}`,
             untested: true
           };
         }
@@ -1821,7 +1865,7 @@ function dms(c, a, dCandles, tf, htfBias){
             : (!isRes && htfBias==='UP')
               ? ' · ✓ HTF UP aligns'
               : '';
-      // 4H/1H: check for rejection candle → upgrade to confirmed trade
+      // 4H/1H: check for confirmed rejection + follow-through → upgrade to trade
       if((tf === '4H' || tf === '1H') && !htfBlocks){
         const rejection = hasRejection(c, atLevel.price, confSig, a);
         if(rejection.confirmed){
@@ -1833,16 +1877,16 @@ function dms(c, a, dCandles, tf, htfBias){
               sig:confSig, type:'BLIND_ENTRY',
               level:atLevel.price, target:tgt.price, rr, stopPrice:stop,
               strength:atLevel.strength, score:atLevel.score,
-              reason:`CONFIRMED ${tf}: ${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · rejection ${rejection.barsAgo===0?'this candle':rejection.barsAgo+' bars ago'}${testedNote}${htfNote} · R:R ${rr} → $${fmt(tgt.price)}`,
-              detail:`${tf} rejection candle confirmed at level | SL: $${fmt(stop)}`,
+              reason:`CONFIRMED ${tf}: ${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · rejection ${rejection.barsAgo} bars ago · follow-through confirmed${testedNote}${htfNote} · R:R ${rr} → $${fmt(tgt.price)}`,
+              detail:`${tf} rejection + follow-through confirmed at level | SL: $${fmt(stop)}`,
               untested:!atLevel.tested
             };
           }
         }
       }
       const dir = isRes
-        ? 'RESISTANCE — watch for rejection candle'
-        : 'SUPPORT — watch for rejection candle';
+        ? 'RESISTANCE — watch for rejection + follow-through'
+        : 'SUPPORT — watch for rejection + follow-through';
       return {
         sig:'NEUTRAL', type:'AT_LEVEL',
         level:atLevel.price, target:null,
@@ -2974,13 +3018,16 @@ function processTF(i, candles, dCandles, coinId){
         const SYM = { bitcoin:'BTC', hyperliquid:'HYPE', solana:'SOL', gold:'GOLD' };
         const sym = SYM[coinId] || coinId;
 
-        // HTF-aligned confidence adjustment:
-        // With trend → lower threshold (easier to enter), Counter-trend → higher threshold
+        // v4.8 Phase 3: Hard-block counter-trend auto-trades
         const htfDir = s.htfDir || 'UNCLEAR';
         const withTrend = (d.sig === 'LONG' && htfDir === 'UP') || (d.sig === 'SHORT' && htfDir === 'DOWN');
         const counterTrend = (d.sig === 'LONG' && htfDir === 'DOWN') || (d.sig === 'SHORT' && htfDir === 'UP');
-        const minConf = counterTrend ? Math.min(baseMinConf + 20, 90) : withTrend ? Math.max(baseMinConf - 15, 25) : baseMinConf;
-        const trendLabel = withTrend ? 'WITH-TREND' : counterTrend ? 'COUNTER-TREND' : 'NEUTRAL-TREND';
+
+        if(counterTrend){
+          console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: counter-trend (HTF ${htfDir}) — hard block v4.8`);
+        } else {
+        const minConf = withTrend ? Math.max(baseMinConf - 15, 25) : baseMinConf;
+        const trendLabel = withTrend ? 'WITH-TREND' : 'NEUTRAL-TREND';
 
         if(conf < minConf){
           console.log(`HL auto-trade SKIP ${sym} ${d.sig}: conf ${conf}% < ${minConf}% (${trendLabel}, base ${baseMinConf}%)`);
@@ -3034,6 +3081,7 @@ function processTF(i, candles, dCandles, coinId){
           }
         }
       }
+      } // close counterTrend else
     }
   }
   // Only re-render UI if this coin is the one currently being viewed
