@@ -3001,10 +3001,17 @@ function processTF(i, candles, dCandles, coinId){
   s.results[tf.l] = d;
   // Alerts fire for all coins regardless of active view
   if(d.type!=='NONE' && d.type!=='AT_LEVEL'){
+    // v4.8: Cross-TF conflict prevention — if a tradeable signal already fired
+    // in one direction this scan cycle, block opposite direction on other TFs
+    if(s._firedDir && d.sig !== 'NEUTRAL' && d.sig !== s._firedDir){
+      console.log(`CONFLICT-BLOCKED: ${tf.l} ${d.sig} suppressed — already fired ${s._firedDir} this cycle`);
+    } else {
     // PRIMARY DEDUP: localStorage-backed — survives page refreshes
     // Same coin+tf+type+level can't re-fire within 4h (8h for blind entries)
     if(!isDedupSuppressed(coinId, tf.l, d.type, d.level)){
       markDedupFired(coinId, tf.l, d.type, d.level);
+      // Track committed direction for this scan cycle
+      if(d.sig !== 'NEUTRAL' && d.type === 'BLIND_ENTRY') s._firedDir = d.sig;
       maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, coinId, s);
       addLog(d.sig, tf.l, d.reason, d.type, d.level, d.target, d.rr, d.stopPrice, coinId);
       // ── AUTO-TRADE: trigger Hyperliquid execution if enabled ──
@@ -3084,6 +3091,7 @@ function processTF(i, candles, dCandles, coinId){
       } // close counterTrend else
     }
   }
+  } // close cross-TF conflict else
   // Only re-render UI if this coin is the one currently being viewed
   if(coinId === activeCoin){
     syncActiveState();
@@ -3142,6 +3150,8 @@ async function runCoin(coinId){
       console.log(COINS[coinId].shortLabel, 'HTF refreshed');
     }
 
+    // v4.8: Reset cross-TF conflict tracker for this scan cycle
+    s._firedDir = null;
     // Process each TF — pass dCandles as context (may be null if 1D failed, graceful)
     if(dCandles) processTF(1, dCandles, dCandles, coinId);
     if(wCandles && dCandles) processTF(0, wCandles, dCandles, coinId);
