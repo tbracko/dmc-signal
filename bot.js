@@ -511,12 +511,6 @@ function hasRejection(candles, levelPrice, direction, atrVal) {
   const n = candles.length;
   if (n < 3) return { confirmed: false };
 
-  // Phase 2: Momentum filter — check if recent candles show strong opposing momentum
-  const momentumBlocked = hasMomentumAgainst(candles, direction, atrVal);
-  if (momentumBlocked.blocked) return { confirmed: false, reason: momentumBlocked.reason };
-
-  // Check candles 1-3 bars ago (NOT the current candle at index 0)
-  // The current candle (i=0) is the follow-through candle
   const cur = candles[n - 1]; // current candle = follow-through
 
   for (let i = 1; i < Math.min(4, n); i++) {
@@ -533,12 +527,18 @@ function hasRejection(candles, levelPrice, direction, atrVal) {
         && wickRatio >= 0.25
         && k.c >= levelPrice - atrVal * 0.15)
       {
-        // Follow-through check: current candle must confirm the bounce
-        // - Close higher than rejection candle's body low (moving away from level)
-        // - Close above the level (not still stuck below)
+        // Follow-through: current candle must close above rejection candle's body low
         const followOk = cur.c > k.bl && cur.c >= levelPrice - atrVal * 0.1;
         if (followOk) {
-          return { confirmed: true, barsAgo: i, wickRatio, followThrough: true };
+          // Check follow-through strength — a strong candle overrides momentum
+          const curBody = cur.c - cur.o; // positive = bullish
+          const strongFollow = curBody > atrVal * 0.15; // decent bullish body
+          // Momentum filter — only blocks if follow-through is weak
+          if (!strongFollow) {
+            const mom = hasMomentumAgainst(candles, direction, atrVal);
+            if (mom.blocked) return { confirmed: false, reason: mom.reason };
+          }
+          return { confirmed: true, barsAgo: i, wickRatio, followThrough: true, strongFollow };
         }
       }
     } else {
@@ -549,12 +549,15 @@ function hasRejection(candles, levelPrice, direction, atrVal) {
         && wickRatio >= 0.25
         && k.c <= levelPrice + atrVal * 0.15)
       {
-        // Follow-through check: current candle confirms rejection downward
-        // - Close lower than rejection candle's body high
-        // - Close below the level
         const followOk = cur.c < k.bh && cur.c <= levelPrice + atrVal * 0.1;
         if (followOk) {
-          return { confirmed: true, barsAgo: i, wickRatio, followThrough: true };
+          const curBody = cur.o - cur.c; // positive = bearish
+          const strongFollow = curBody > atrVal * 0.15;
+          if (!strongFollow) {
+            const mom = hasMomentumAgainst(candles, direction, atrVal);
+            if (mom.blocked) return { confirmed: false, reason: mom.reason };
+          }
+          return { confirmed: true, barsAgo: i, wickRatio, followThrough: true, strongFollow };
         }
       }
     }
@@ -593,9 +596,10 @@ function hasMomentumAgainst(candles, direction, atrVal) {
   return { blocked: false };
 }
 
-// ── LOWER-TF ALIGNMENT CHECK (v4.8) ─────────────────────────────────────────
-// Before a 1W/1D signal fires, check if 4H/1H candles are moving WITH the signal.
-// If lower TFs show clear opposing momentum, the HTF signal is premature.
+// ── LOWER-TF ALIGNMENT CHECK (v4.8.1) ───────────────────────────────────────
+// Before ANY signal fires, check if lower-TF candles are moving WITH the signal.
+// 1W/1D check 4H+1H, 4H checks 1H+15m, 1H checks 15m.
+// If lower TFs show clear opposing momentum, the signal is premature.
 // lowerCandles = { h4: [...], h1: [...] } — raw candle arrays
 function hasLTFAlignment(direction, lowerCandles) {
   if (!lowerCandles) return { aligned: true };
@@ -679,8 +683,9 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles){
           // v4.8: Require rejection + follow-through + momentum check
           const rejection = hasRejection(c, blindCandidate.price, blindSig, a);
           if(rejection.confirmed){
-            // v4.8: LTF alignment — 1W/1D signals must not conflict with 4H/1H momentum
-            if((tf === '1W' || tf === '1D') && lowerCandles){
+            // v4.8.1: LTF alignment — ALL signals must not conflict with lower-TF momentum
+            // 1W/1D check 4H+1H, 4H checks 1H+15m, 1H checks 15m
+            if(lowerCandles){
               const ltfCheck = hasLTFAlignment(blindSig, lowerCandles);
               if(!ltfCheck.aligned){
                 const waitReason = ltfCheck.reason;
@@ -1607,17 +1612,27 @@ async function scanCoin(coinId){
       return dd;
     })();
 
-    // v4.8: Build lower-TF candle data for LTF alignment checks on 1W/1D
-    const lowerTFCandles = {};
-    if (h4C) lowerTFCandles['4H'] = h4C;
-    if (h1C) lowerTFCandles['1H'] = h1C;
-    const hasLower = Object.keys(lowerTFCandles).length > 0 ? lowerTFCandles : null;
+    // v4.8.1: Build lower-TF candle data for LTF alignment checks on ALL timeframes
+    // Each TF checks the TFs below it: 1W/1D→4H+1H, 4H→1H+15m, 1H→15m
+    const lowerForHTF = {};
+    if (h4C) lowerForHTF['4H'] = h4C;
+    if (h1C) lowerForHTF['1H'] = h1C;
+    const hasLowerHTF = Object.keys(lowerForHTF).length > 0 ? lowerForHTF : null;
+
+    const lowerFor4H = {};
+    if (h1C) lowerFor4H['1H'] = h1C;
+    if (m15C) lowerFor4H['15m'] = m15C;
+    const hasLower4H = Object.keys(lowerFor4H).length > 0 ? lowerFor4H : null;
+
+    const lowerFor1H = {};
+    if (m15C) lowerFor1H['15m'] = m15C;
+    const hasLower1H = Object.keys(lowerFor1H).length > 0 ? lowerFor1H : null;
 
     const tfsToRun = [
-      wC  && dC  ? { i:0, c:wC,   dC, lower:hasLower } : null,
-      dC         ? { i:1, c:dC,   dC, lower:hasLower } : null,
-      h4C && dC  ? { i:2, c:h4C,  dC, lower:null } : null,
-      h1C && dC  ? { i:3, c:h1C,  dC, lower:null } : null,
+      wC  && dC  ? { i:0, c:wC,   dC, lower:hasLowerHTF } : null,
+      dC         ? { i:1, c:dC,   dC, lower:hasLowerHTF } : null,
+      h4C && dC  ? { i:2, c:h4C,  dC, lower:hasLower4H } : null,
+      h1C && dC  ? { i:3, c:h1C,  dC, lower:hasLower1H } : null,
       m15C && dC ? { i:4, c:m15C, dC, lower:null } : null,
     ].filter(Boolean);
 
