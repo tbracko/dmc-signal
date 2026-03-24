@@ -4234,7 +4234,8 @@ async function hlFetchAccountState(){
   if(!HL.wallet) return { equity:0, available:0, upnl:0, spotBal:0 };
   try{
     const queryAddr = (HL.masterAddress || HL.address).toLowerCase();
-    const [perpsRes, spotRes] = await Promise.all([
+    // Fetch main perps + HIP-3 dex states + spot in parallel
+    const requests = [
       fetch(HL.API + '/info', {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ type:'clearinghouseState', user: queryAddr })
@@ -4242,10 +4243,21 @@ async function hlFetchAccountState(){
       fetch(HL.API + '/info', {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ type:'spotClearinghouseState', user: queryAddr })
-      })
-    ]);
-    const perpsData = await perpsRes.json();
-    const spotData = await spotRes.json();
+      }),
+      // HIP-3 dexes (xyz:GOLD etc.) — need separate clearinghouseState calls
+      ...HL.HIP3_DEXES.map(dex =>
+        fetch(HL.API + '/info', { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ type:'clearinghouseState', user: queryAddr, dex }) }))
+    ];
+    const responses = await Promise.all(requests);
+    const perpsData = await responses[0].json();
+    const spotData = await responses[1].json();
+    // Parse HIP-3 dex responses
+    const hip3Positions = [];
+    for (let i = 2; i < responses.length; i++) {
+      const dexData = await responses[i].json();
+      if (dexData.assetPositions) hip3Positions.push(...dexData.assetPositions);
+    }
     const ms = perpsData.marginSummary || {};
     const cms = perpsData.crossMarginSummary || {};
     let spotBal = 0;
@@ -4261,10 +4273,14 @@ async function hlFetchAccountState(){
     // Unrealized P&L: check both margin summaries
     const msUpnl = parseFloat(ms.totalUnrealizedPnl || '0');
     const cmsUpnl = parseFloat(cms.totalUnrealizedPnl || '0');
-    // Also compute from positions as most reliable source
+    // Also compute from positions as most reliable source (including HIP-3)
     let posUpnl = 0;
     const positions = perpsData.assetPositions || [];
     for (const p of positions) {
+      if (p.position) posUpnl += parseFloat(p.position.unrealizedPnl || '0');
+    }
+    // Add HIP-3 position P&L (xyz:GOLD etc.)
+    for (const p of hip3Positions) {
       if (p.position) posUpnl += parseFloat(p.position.unrealizedPnl || '0');
     }
     // Use position-based UPNL if available, otherwise best from summaries
@@ -4274,7 +4290,7 @@ async function hlFetchAccountState(){
     const cmsMarginUsed = parseFloat(cms.totalMarginUsed || '0');
     const marginUsed = Math.max(msMarginUsed, cmsMarginUsed);
     const available = bestEquity - marginUsed;
-    console.log('HL account — equity:', bestEquity, 'upnl:', upnl, '(ms:', msUpnl, 'cms:', cmsUpnl, 'pos:', posUpnl, ') margin used:', marginUsed, 'avail:', available);
+    console.log('HL account — equity:', bestEquity, 'upnl:', upnl, '(ms:', msUpnl, 'cms:', cmsUpnl, 'pos:', posUpnl, 'hip3:', hip3Positions.length, ') margin used:', marginUsed, 'avail:', available);
     return {
       equity: bestEquity,
       available: available,
