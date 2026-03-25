@@ -1739,34 +1739,44 @@ function hasMomentumAgainst(candles, direction, atrVal) {
   return { blocked: false };
 }
 
-// ── LOWER-TF ALIGNMENT CHECK (v4.8.1) ───────────────────
+// ── LOWER-TF ALIGNMENT CHECK (v4.8.2) ───────────────────
 // Before ANY signal fires, check if lower-TF candles are moving WITH the signal.
 // 1W/1D check 4H+1H, 4H checks 1H+15m, 1H checks 15m.
+// Two independent blocking conditions (either one blocks):
+//   A) Candle count: 2+ of last 5 candles are against direction
+//   B) Net move: last 5 candles net move > 0.3 ATR against direction
 function hasLTFAlignment(direction, lowerCandles) {
   if (!lowerCandles) return { aligned: true };
   const checks = [];
   for (const [label, candles] of Object.entries(lowerCandles)) {
-    if (!candles || candles.length < 4) continue;
+    if (!candles || candles.length < 6) continue;
     const n = candles.length;
     const a = atr(candles);
-    let withDir = 0, againstDir = 0;
-    for (let i = 0; i < 3; i++) {
+    const lookback = 5;
+    let againstCount = 0, withCount = 0, netMove = 0;
+    for (let i = 0; i < lookback; i++) {
       const k = candles[n - 1 - i];
       const bodyDir = k.c - k.o;
-      if (direction === 'LONG' && bodyDir > a * 0.02) withDir++;
-      else if (direction === 'LONG' && bodyDir < -a * 0.02) againstDir++;
-      else if (direction === 'SHORT' && bodyDir < -a * 0.02) withDir++;
-      else if (direction === 'SHORT' && bodyDir > a * 0.02) againstDir++;
+      netMove += bodyDir;
+      if (direction === 'LONG' && bodyDir < -a * 0.02) againstCount++;
+      else if (direction === 'LONG' && bodyDir > a * 0.02) withCount++;
+      else if (direction === 'SHORT' && bodyDir > a * 0.02) againstCount++;
+      else if (direction === 'SHORT' && bodyDir < -a * 0.02) withCount++;
     }
-    const cur = candles[n - 1];
-    const prev = candles[n - 2];
-    const curMovingAgainst = (direction === 'SHORT' && cur.c > prev.c)
-                          || (direction === 'LONG' && cur.c < prev.c);
-    checks.push({ label, withDir, againstDir, curMovingAgainst });
+    // Net move direction: positive = bullish
+    const netAgainst = (direction === 'SHORT' && netMove > a * 0.3)
+                    || (direction === 'LONG' && netMove < -a * 0.3);
+    const netMoveATR = (netMove / a).toFixed(2);
+    checks.push({ label, againstCount, withCount, lookback, netAgainst, netMoveATR });
   }
   for (const ch of checks) {
-    if (ch.againstDir >= 2 && ch.curMovingAgainst) {
-      return { aligned: false, reason: `${ch.label} shows ${ch.againstDir}/3 candles against ${direction} + current candle opposing` };
+    // Block A: majority of candles moving against signal
+    if (ch.againstCount >= 3) {
+      return { aligned: false, reason: `${ch.label}: ${ch.againstCount}/${ch.lookback} candles against ${direction} (net ${ch.netMoveATR} ATR)` };
+    }
+    // Block B: strong net move against even if individual candles are mixed
+    if (ch.netAgainst && ch.againstCount >= 2) {
+      return { aligned: false, reason: `${ch.label}: net move ${ch.netMoveATR} ATR against ${direction} (${ch.againstCount}/${ch.lookback} candles)` };
     }
   }
   return { aligned: true };
@@ -1860,9 +1870,9 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles){
           // v4.8: Require rejection + follow-through + momentum check
           const rejection = hasRejection(c, blindCandidate.price, blindSig, a);
           if(rejection.confirmed){
-            // v4.8.1: LTF alignment — ALL signals must not conflict with lower-TF momentum
-            // 1W/1D check 4H+1H, 4H checks 1H+15m, 1H checks 15m
-            if(lowerCandles){
+            // v4.8.2: LTF alignment — 1W/1D signals must not conflict with lower-TF momentum
+            // Only applies to HTF signals (1W/1D) — 4H/1H left untouched to avoid over-filtering
+            if((tf === '1W' || tf === '1D') && lowerCandles){
               const ltfCheck = hasLTFAlignment(blindSig, lowerCandles);
               if(!ltfCheck.aligned){
                 const dir = isRes ? 'RESISTANCE — lower TF opposing' : 'SUPPORT — lower TF opposing';
@@ -3211,27 +3221,18 @@ async function runCoin(coinId){
 
     // v4.8: Reset cross-TF conflict tracker for this scan cycle
     s._firedDir = null;
-    // v4.8.1: Build lower-TF candle data for LTF alignment checks on ALL timeframes
-    // Each TF checks the TFs below it: 1W/1D→4H+1H, 4H→1H+15m, 1H→15m
-    const lowerForHTF = {};
-    if(h4Entry?.c) lowerForHTF['4H'] = h4Entry.c;
-    if(h1Entry?.c) lowerForHTF['1H'] = h1Entry.c;
-    const hasLowerHTF = Object.keys(lowerForHTF).length > 0 ? lowerForHTF : null;
-
-    const lowerFor4H = {};
-    if(h1Entry?.c) lowerFor4H['1H'] = h1Entry.c;
-    if(m15Entry?.c) lowerFor4H['15m'] = m15Entry.c;
-    const hasLower4H = Object.keys(lowerFor4H).length > 0 ? lowerFor4H : null;
-
-    const lowerFor1H = {};
-    if(m15Entry?.c) lowerFor1H['15m'] = m15Entry.c;
-    const hasLower1H = Object.keys(lowerFor1H).length > 0 ? lowerFor1H : null;
+    // v4.8.2: Build lower-TF candle data for LTF alignment checks on 1W/1D only
+    // 4H/1H/15m signals are left untouched — working well for BTC/SOL/HYPE
+    const lowerTFCandles = {};
+    if(h4Entry?.c) lowerTFCandles['4H'] = h4Entry.c;
+    if(h1Entry?.c) lowerTFCandles['1H'] = h1Entry.c;
+    const hasLower = Object.keys(lowerTFCandles).length > 0 ? lowerTFCandles : null;
 
     // Process each TF — pass dCandles as context (may be null if 1D failed, graceful)
-    if(dCandles) processTF(1, dCandles, dCandles, coinId, hasLowerHTF);
-    if(wCandles && dCandles) processTF(0, wCandles, dCandles, coinId, hasLowerHTF);
-    if(h4Entry?.c && dCandles) processTF(2, h4Entry.c, dCandles, coinId, hasLower4H);
-    if(h1Entry?.c && dCandles) processTF(3, h1Entry.c, dCandles, coinId, hasLower1H);
+    if(dCandles) processTF(1, dCandles, dCandles, coinId, hasLower);
+    if(wCandles && dCandles) processTF(0, wCandles, dCandles, coinId, hasLower);
+    if(h4Entry?.c && dCandles) processTF(2, h4Entry.c, dCandles, coinId);
+    if(h1Entry?.c && dCandles) processTF(3, h1Entry.c, dCandles, coinId);
     if(m15Entry?.c && dCandles) processTF(4, m15Entry.c, dCandles, coinId);
 
     // HTF Story
