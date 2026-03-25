@@ -596,42 +596,46 @@ function hasMomentumAgainst(candles, direction, atrVal) {
   return { blocked: false };
 }
 
-// ── LOWER-TF ALIGNMENT CHECK (v4.8.1) ───────────────────────────────────────
+// ── LOWER-TF ALIGNMENT CHECK (v4.8.2) ───────────────────────────────────────
 // Before ANY signal fires, check if lower-TF candles are moving WITH the signal.
 // 1W/1D check 4H+1H, 4H checks 1H+15m, 1H checks 15m.
-// If lower TFs show clear opposing momentum, the signal is premature.
-// lowerCandles = { h4: [...], h1: [...] } — raw candle arrays
+// Two independent blocking conditions (either one blocks):
+//   A) Candle count: 3+ of last 5 candles are against direction
+//   B) Net move: last 5 candles net move > 0.3 ATR against direction + 2+ candles
 function hasLTFAlignment(direction, lowerCandles) {
   if (!lowerCandles) return { aligned: true };
   const checks = [];
 
   for (const [label, candles] of Object.entries(lowerCandles)) {
-    if (!candles || candles.length < 4) continue;
+    if (!candles || candles.length < 6) continue;
     const n = candles.length;
     const a = atr(candles);
-    // Check last 3 candles for direction
-    let withDir = 0, againstDir = 0;
-    for (let i = 0; i < 3; i++) {
+    const lookback = 5;
+    let againstCount = 0, withCount = 0, netMove = 0;
+    for (let i = 0; i < lookback; i++) {
       const k = candles[n - 1 - i];
       const bodyDir = k.c - k.o;
-      if (direction === 'LONG' && bodyDir > a * 0.02) withDir++;
-      else if (direction === 'LONG' && bodyDir < -a * 0.02) againstDir++;
-      else if (direction === 'SHORT' && bodyDir < -a * 0.02) withDir++;
-      else if (direction === 'SHORT' && bodyDir > a * 0.02) againstDir++;
+      netMove += bodyDir;
+      if (direction === 'LONG' && bodyDir < -a * 0.02) againstCount++;
+      else if (direction === 'LONG' && bodyDir > a * 0.02) withCount++;
+      else if (direction === 'SHORT' && bodyDir > a * 0.02) againstCount++;
+      else if (direction === 'SHORT' && bodyDir < -a * 0.02) withCount++;
     }
-    // Also check: is the current candle's close moving away from the signal?
-    const cur = candles[n - 1];
-    const prev = candles[n - 2];
-    const curMovingAgainst = (direction === 'SHORT' && cur.c > prev.c)
-                          || (direction === 'LONG' && cur.c < prev.c);
-
-    checks.push({ label, withDir, againstDir, curMovingAgainst });
+    // Net move direction: positive = bullish
+    const netAgainst = (direction === 'SHORT' && netMove > a * 0.3)
+                    || (direction === 'LONG' && netMove < -a * 0.3);
+    const netMoveATR = (netMove / a).toFixed(2);
+    checks.push({ label, againstCount, withCount, lookback, netAgainst, netMoveATR });
   }
 
-  // Block if ANY lower TF has 2+ candles against AND current candle moving against
   for (const ch of checks) {
-    if (ch.againstDir >= 2 && ch.curMovingAgainst) {
-      return { aligned: false, reason: `${ch.label} shows ${ch.againstDir}/3 candles against ${direction} + current candle opposing` };
+    // Block A: majority of candles moving against signal
+    if (ch.againstCount >= 3) {
+      return { aligned: false, reason: `${ch.label}: ${ch.againstCount}/${ch.lookback} candles against ${direction} (net ${ch.netMoveATR} ATR)` };
+    }
+    // Block B: strong net move against even if individual candles are mixed
+    if (ch.netAgainst && ch.againstCount >= 2) {
+      return { aligned: false, reason: `${ch.label}: net move ${ch.netMoveATR} ATR against ${direction} (${ch.againstCount}/${ch.lookback} candles)` };
     }
   }
   return { aligned: true };
@@ -683,9 +687,9 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles){
           // v4.8: Require rejection + follow-through + momentum check
           const rejection = hasRejection(c, blindCandidate.price, blindSig, a);
           if(rejection.confirmed){
-            // v4.8.1: LTF alignment — ALL signals must not conflict with lower-TF momentum
-            // 1W/1D check 4H+1H, 4H checks 1H+15m, 1H checks 15m
-            if(lowerCandles){
+            // v4.8.2: LTF alignment — 1W/1D signals must not conflict with lower-TF momentum
+            // Only applies to HTF signals (1W/1D) — 4H/1H left untouched to avoid over-filtering
+            if((tf === '1W' || tf === '1D') && lowerCandles){
               const ltfCheck = hasLTFAlignment(blindSig, lowerCandles);
               if(!ltfCheck.aligned){
                 const waitReason = ltfCheck.reason;
@@ -1612,27 +1616,18 @@ async function scanCoin(coinId){
       return dd;
     })();
 
-    // v4.8.1: Build lower-TF candle data for LTF alignment checks on ALL timeframes
-    // Each TF checks the TFs below it: 1W/1D→4H+1H, 4H→1H+15m, 1H→15m
-    const lowerForHTF = {};
-    if (h4C) lowerForHTF['4H'] = h4C;
-    if (h1C) lowerForHTF['1H'] = h1C;
-    const hasLowerHTF = Object.keys(lowerForHTF).length > 0 ? lowerForHTF : null;
-
-    const lowerFor4H = {};
-    if (h1C) lowerFor4H['1H'] = h1C;
-    if (m15C) lowerFor4H['15m'] = m15C;
-    const hasLower4H = Object.keys(lowerFor4H).length > 0 ? lowerFor4H : null;
-
-    const lowerFor1H = {};
-    if (m15C) lowerFor1H['15m'] = m15C;
-    const hasLower1H = Object.keys(lowerFor1H).length > 0 ? lowerFor1H : null;
+    // v4.8.2: Build lower-TF candle data for LTF alignment checks on 1W/1D only
+    // 4H/1H/15m signals are left untouched — working well for BTC/SOL/HYPE
+    const lowerTFCandles = {};
+    if (h4C) lowerTFCandles['4H'] = h4C;
+    if (h1C) lowerTFCandles['1H'] = h1C;
+    const hasLower = Object.keys(lowerTFCandles).length > 0 ? lowerTFCandles : null;
 
     const tfsToRun = [
-      wC  && dC  ? { i:0, c:wC,   dC, lower:hasLowerHTF } : null,
-      dC         ? { i:1, c:dC,   dC, lower:hasLowerHTF } : null,
-      h4C && dC  ? { i:2, c:h4C,  dC, lower:hasLower4H } : null,
-      h1C && dC  ? { i:3, c:h1C,  dC, lower:hasLower1H } : null,
+      wC  && dC  ? { i:0, c:wC,   dC, lower:hasLower } : null,
+      dC         ? { i:1, c:dC,   dC, lower:hasLower } : null,
+      h4C && dC  ? { i:2, c:h4C,  dC, lower:null } : null,
+      h1C && dC  ? { i:3, c:h1C,  dC, lower:null } : null,
       m15C && dC ? { i:4, c:m15C, dC, lower:null } : null,
     ].filter(Boolean);
 
