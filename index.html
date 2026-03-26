@@ -1790,6 +1790,8 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles){
   const minCandles = (tf==='1W'||tf==='1D') ? 10 : 20;
   if(n < minCandles) return {sig:'NEUTRAL',type:'NONE',reason:'Insufficient data ('+n+' candles)'};
 
+  // v4.8.2: Extract htfDir as primitive string (fixes String object === comparison bug)
+  const htfDir = (htfBias && htfBias.dir) ? htfBias.dir : (typeof htfBias === 'string' ? htfBias : 'UNCLEAR');
   const usePDHL = (tf !== '1W');
   const asiaLvls = (tf === '15m') ? (htfBias.__asiaLevels || []) : [];
   const levels = findDMCLevels(c, usePDHL ? dCandles : null, tf, asiaLvls);
@@ -1855,7 +1857,7 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles){
       const isFlipped = ft === 'flipped_support' || ft === 'flipped_resistance';
       // v4.5: HTF ALWAYS takes precedence — Chris Hunter rule: "higher time frames
       // take more precedent than the lower time frames" — no exceptions, even for strong levels
-      const htfBlocks = (isRes && htfBias==='UP') || (!isRes && htfBias==='DOWN');
+      const htfBlocks = (isRes && htfDir==='UP') || (!isRes && htfDir==='DOWN');
       if(!htfBlocks){
         const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
         const stop = findStopLevel(levels, blindCandidate.price, isRes?'short':'long');
@@ -1865,7 +1867,7 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles){
           // Fall through to AT_LEVEL instead of firing a bad-RR blind entry
         } else {
           const dist = ((blindCandidate.price - cur.c)/cur.c*100).toFixed(2);
-          const htfNote = htfBias!=='UNCLEAR' ? ` · ✓ HTF ${htfBias} aligns` : '';
+          const htfNote = htfDir!=='UNCLEAR' ? ` · ✓ HTF ${htfDir} aligns` : '';
           const typeLabel = isFlipped ? `PASS-THROUGH (flipped to ${effectiveType})` : `UNTESTED ${tf} level`;
           // v4.8: Require rejection + follow-through + momentum check
           const rejection = hasRejection(c, blindCandidate.price, blindSig, a);
@@ -1920,18 +1922,18 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles){
     if(atLevel){
       const isRes = atLevel.type === 'resistance';
       const confSig = isRes ? 'SHORT' : 'LONG';
-      const htfBlocks = (isRes && htfBias==='UP') || (!isRes && htfBias==='DOWN');
+      const htfBlocks = (isRes && htfDir==='UP') || (!isRes && htfDir==='DOWN');
       const dist = ((atLevel.price - cur.c)/cur.c*100).toFixed(2);
       const testedNote = atLevel.testCount >= 2 ? ` · ⚠ tested ×${atLevel.testCount} — weaker`
         : atLevel.testCount === 1 ? ' · tested ×1'
         : ' · UNTESTED';
-      const htfNote = (isRes && htfBias==='UP')
+      const htfNote = (isRes && htfDir==='UP')
         ? ' · ⚠ HTF UP — short here is counter-trend'
-        : (!isRes && htfBias==='DOWN')
+        : (!isRes && htfDir==='DOWN')
           ? ' · ⚠ HTF DOWN — long here is counter-trend'
-          : (isRes && htfBias==='DOWN')
+          : (isRes && htfDir==='DOWN')
             ? ' · ✓ HTF DOWN aligns'
-            : (!isRes && htfBias==='UP')
+            : (!isRes && htfDir==='UP')
               ? ' · ✓ HTF UP aligns'
               : '';
       // 4H/1H: check for confirmed rejection + follow-through → upgrade to trade
@@ -1992,8 +1994,8 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles){
   // HTF hard block — Chris Hunter: counter-trend 15m setups are low probability
   // If HTF story is clearly UP, suppress 15m SHORTs entirely (and vice versa)
   // UNCLEAR = no block, let both directions fire
-  const htfBlockShort = htfBias === 'UP';   // HTF up = no 15m shorts
-  const htfBlockLong  = htfBias === 'DOWN'; // HTF down = no 15m longs
+  const htfBlockShort = htfDir === 'UP';   // HTF up = no 15m shorts
+  const htfBlockLong  = htfDir === 'DOWN'; // HTF down = no 15m longs
 
   // ── FAIL TO GAIN → SHORT ──────────────────────────────
   for(const lv of nearby.filter(l=>l.type==='resistance')){
@@ -2068,10 +2070,10 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles){
       const dist = ((confirm.c - lv.price)/confirm.c*100).toFixed(2);
       return {
         sig:'LONG', type:'FAIL_LOSE',
-        level:lv.price, target:tgt.price, rr,
+        level:lv.price, target:tgt.price, rr, stopPrice:stop,
         strength:lv.strength, score:lv.score,
         reason:`${lv.source} $${fmt(lv.price)} · ${dist}% below · ${lb===1?'just now':lb+' bars ago'}${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)}`,
-        detail:`Wick: $${fmt(trap.l)} | Body: $${fmt(trap.bl)} | Support: $${fmt(lv.price)}`,
+        detail:`Wick: $${fmt(trap.l)} | Body: $${fmt(trap.bl)} | Support: $${fmt(lv.price)} | SL: $${fmt(stop)}`,
         untested:!lv.tested
       };
     }
@@ -2093,10 +2095,10 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles){
     const dist = ((atLevel.price - cur.c)/cur.c*100).toFixed(2);
     const testedNote = atLevel.testCount >= 2 ? ` · ⚠ tested ×${atLevel.testCount}`
       : atLevel.testCount === 1 ? ' · tested ×1' : ' · UNTESTED';
-    const htfNote = (atLevel.type==='resistance' && htfBias==='DOWN') ? ' · ✓ HTF aligns SHORT'
-      : (atLevel.type==='support' && htfBias==='UP') ? ' · ✓ HTF aligns LONG'
-      : (atLevel.type==='resistance' && htfBias==='UP') ? ' · ⚠ HTF says UP'
-      : (atLevel.type==='support' && htfBias==='DOWN') ? ' · ⚠ HTF says DOWN'
+    const htfNote = (atLevel.type==='resistance' && htfDir==='DOWN') ? ' · ✓ HTF aligns SHORT'
+      : (atLevel.type==='support' && htfDir==='UP') ? ' · ✓ HTF aligns LONG'
+      : (atLevel.type==='resistance' && htfDir==='UP') ? ' · ⚠ HTF says UP'
+      : (atLevel.type==='support' && htfDir==='DOWN') ? ' · ⚠ HTF says DOWN'
       : '';
     return {
       sig:'NEUTRAL', type:'AT_LEVEL',
@@ -3064,8 +3066,8 @@ function processTF(i, candles, dCandles, coinId, lowerCandles){
   const s = coinState[coinId];
   const tf = TFS[i];
   const a = atr(candles);
-  // Attach asiaLevels to htfDir as a carrier object for 15m processing
-  const htfCarrier = Object.assign(String(s.htfDir), { __asiaLevels: s.asiaLevels || [] });
+  // Pass htfDir + asiaLevels as plain object (v4.8.2 fix: String objects break === comparison)
+  const htfCarrier = { dir: s.htfDir || 'UNCLEAR', __asiaLevels: s.asiaLevels || [] };
   const d = dms(candles, a, dCandles, tf.l, htfCarrier, lowerCandles || null);
   s.results[tf.l] = d;
   // Alerts fire for all coins regardless of active view
@@ -4195,7 +4197,7 @@ async function saveHLWallet() {
 // ── TRADES PAGE: Positions, P&L, Manual Trading ──────────
 const TRADES_KEY = 'dms_closed_trades';
 function loadClosedTrades(){ try{ return JSON.parse(localStorage.getItem(TRADES_KEY)||'[]'); }catch{ return []; } }
-function saveClosedTrades(t){ localStorage.setItem(TRADES_KEY, JSON.stringify(t.slice(0,50))); }
+function saveClosedTrades(t){ localStorage.setItem(TRADES_KEY, JSON.stringify(t.slice(0,200))); }
 
 // One-time cleanup: remove trades with invalid exit prices ($0 or near-zero)
 (function cleanupBadTrades(){
