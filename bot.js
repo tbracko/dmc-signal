@@ -1514,7 +1514,7 @@ function loadClosedTrades() {
   try { return JSON.parse(fs.readFileSync(CLOSED_TRADES_FILE, 'utf8')); } catch { return []; }
 }
 function saveClosedTrades(trades) {
-  fs.writeFileSync(CLOSED_TRADES_FILE, JSON.stringify(trades.slice(0, 100)));
+  fs.writeFileSync(CLOSED_TRADES_FILE, JSON.stringify(trades.slice(0, 200)));
 }
 
 // One-time cleanup: remove trades with invalid exit prices ($0 or near-zero)
@@ -1736,12 +1736,14 @@ async function scanCoin(coinId){
 
 // ── DAILY SUMMARY ────────────────────────────────────────────────────────────
 const SUMMARY_HOUR = parseInt(process.env.SUMMARY_HOUR || '6', 10); // UTC hour to send daily summary
-let lastSummaryDate = '';
+const SUMMARY_FILE = path.join(__dirname, '.last_summary_date');
+let lastSummaryDate = (() => { try { return fs.readFileSync(SUMMARY_FILE, 'utf8').trim(); } catch { return ''; } })();
 
 async function sendDailySummary() {
   const today = new Date().toISOString().slice(0, 10);
   if (lastSummaryDate === today) return; // already sent today
   lastSummaryDate = today;
+  try { fs.writeFileSync(SUMMARY_FILE, today); } catch {}
 
   try {
     // Refresh equity
