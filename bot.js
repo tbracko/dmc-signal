@@ -646,6 +646,8 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles){
   const n = c.length;
   const minCandles = (tf==='1W'||tf==='1D') ? 10 : 20;
   if(n < minCandles) return { sig:'NEUTRAL', type:'NONE', reason:'Insufficient data' };
+  // v4.8.2: Extract htfDir as primitive string (fixes String object === comparison bug)
+  const htfDir = (htfBias && htfBias.dir) ? htfBias.dir : (typeof htfBias === 'string' ? htfBias : 'UNCLEAR');
   const usePDHL  = (tf !== '1W');
   const asiaLvls = (tf === '15m') ? (htfBias.__asiaLevels || []) : [];
   const levels   = findDMCLevels(c, usePDHL ? dCandles : null, tf, asiaLvls);
@@ -675,14 +677,14 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles){
       const blindSig = isRes ? 'SHORT' : 'LONG';
       const isFlipped = ft==='flipped_support' || ft==='flipped_resistance';
       // v4.5: HTF ALWAYS takes precedence — no strong-level bypass
-      const htfBlocks = (isRes && htfBias==='UP') || (!isRes && htfBias==='DOWN');
+      const htfBlocks = (isRes && htfDir==='UP') || (!isRes && htfDir==='DOWN');
       if(!htfBlocks){
         const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
         const stop = findStopLevel(levels, blindCandidate.price, isRes?'short':'long');
         const rr   = calcRR(cur.c, tgt.price, blindCandidate.price, stop);
         if(rr && parseFloat(rr) >= 1.0){
           const dist = ((blindCandidate.price - cur.c)/cur.c*100).toFixed(2);
-          const htfNote = htfBias!=='UNCLEAR' ? ` · HTF ${htfBias} aligns` : '';
+          const htfNote = htfDir!=='UNCLEAR' ? ` · HTF ${htfDir} aligns` : '';
           const typeLabel = isFlipped ? `PASS-THROUGH` : `UNTESTED ${tf}`;
           // v4.8: Require rejection + follow-through + momentum check
           const rejection = hasRejection(c, blindCandidate.price, blindSig, a);
@@ -717,7 +719,7 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles){
     if(atLevel){
       const isRes = atLevel.type === 'resistance';
       const confSig = isRes ? 'SHORT' : 'LONG';
-      const htfBlocks = (isRes && htfBias==='UP') || (!isRes && htfBias==='DOWN');
+      const htfBlocks = (isRes && htfDir==='UP') || (!isRes && htfDir==='DOWN');
       // On 4H/1H: check for confirmed rejection to upgrade AT_LEVEL → trade
       if((tf === '4H' || tf === '1H') && !htfBlocks){
         const rejection = hasRejection(c, atLevel.price, confSig, a);
@@ -745,8 +747,8 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles){
 
   // 15m trap detection
   const maxLB = 3;
-  const htfBlockShort = htfBias === 'UP';
-  const htfBlockLong  = htfBias === 'DOWN';
+  const htfBlockShort = htfDir === 'UP';
+  const htfBlockLong  = htfDir === 'DOWN';
 
   for(const lv of nearby.filter(l=>l.type==='resistance')){
     for(let lb=1; lb<=maxLB; lb++){
@@ -1642,7 +1644,8 @@ async function scanCoin(coinId){
     for(const { i, c, dC: dc, lower } of tfsToRun){
       const tf = TFS[i];
       const a  = atr(c);
-      const htfCarrier = Object.assign(String(htfDir), { __asiaLevels: asiaLevels });
+      // v4.8.2 fix: pass as plain object (String objects break === comparison)
+      const htfCarrier = { dir: htfDir || 'UNCLEAR', __asiaLevels: asiaLevels };
       const d = dms(c, a, dc, tf.l, htfCarrier, lower);
       allResults[tf.l] = d;
 
