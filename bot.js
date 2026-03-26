@@ -450,6 +450,55 @@ function getLondonLevels(candles15m){
   ];
 }
 
+// ── FIBONACCI RETRACEMENT LEVELS (v4.8.2) ────────────────────────────────────
+// When there's a big gap between nearest support and resistance (>8% of price),
+// generate fib retracements from the recent major swing to fill the void.
+function findFibLevels(candles, existingLevels, currentPrice){
+  if(!candles || candles.length < 20) return [];
+  const n = candles.length;
+  const lookback = Math.min(120, n);
+  let swingHigh = -Infinity, swingLow = Infinity;
+  let hiIdx = -1, loIdx = -1;
+  for(let i = n - lookback; i < n; i++){
+    if(candles[i].h > swingHigh){ swingHigh = candles[i].h; hiIdx = i; }
+    if(candles[i].l < swingLow){ swingLow = candles[i].l; loIdx = i; }
+  }
+  const range = swingHigh - swingLow;
+  if(range / currentPrice < 0.08) return [];
+  const aboveLevels = existingLevels.filter(l => l.price > currentPrice);
+  const belowLevels = existingLevels.filter(l => l.price < currentPrice);
+  const nearestAbove = aboveLevels.length ? Math.min(...aboveLevels.map(l => l.price)) : swingHigh;
+  const nearestBelow = belowLevels.length ? Math.max(...belowLevels.map(l => l.price)) : swingLow;
+  const gapAbove = (nearestAbove - currentPrice) / currentPrice;
+  const gapBelow = (currentPrice - nearestBelow) / currentPrice;
+  if(gapAbove < 0.08 && gapBelow < 0.08) return [];
+  const isDowntrend = loIdx > hiIdx;
+  const fibRatios = [0.236, 0.382, 0.5, 0.618, 0.786];
+  const fibs = [];
+  for(const ratio of fibRatios){
+    let price;
+    if(isDowntrend) price = swingLow + range * ratio;
+    else price = swingHigh - range * ratio;
+    const dist = Math.abs(price - currentPrice) / currentPrice;
+    if(dist > 0.20 || dist < 0.01) continue;
+    const dupExists = existingLevels.some(l => Math.abs(l.price - price) / price < 0.005);
+    if(dupExists) continue;
+    const pctLabel = (ratio * 100).toFixed(1);
+    const isAbove = price > currentPrice;
+    fibs.push({
+      price: Math.round(price * 100) / 100,
+      bh: price * 1.001, bl: price * 0.999,
+      type: isAbove ? 'resistance' : 'support',
+      strength: ratio === 0.5 || ratio === 0.618 ? 'strong' : 'med',
+      score: ratio === 0.618 ? 55 : ratio === 0.5 ? 50 : 40,
+      tested: false, testCount: 0,
+      source: `Fib ${pctLabel}%`,
+      tf: 'FIB', isFib: true
+    });
+  }
+  return fibs;
+}
+
 // ── LEVEL HELPERS ─────────────────────────────────────────────────────────────
 function findDMCLevels(c, dCandles, tf, asiaLevels){
   const vp   = findVPeaks(c, tf);
@@ -461,6 +510,12 @@ function findDMCLevels(c, dCandles, tf, asiaLevels){
     const dup = merged.find(m=>Math.abs(m.price-l.price)/l.price < 0.003);
     if(!dup) merged.push(l);
     else if(l.score > dup.score) Object.assign(dup, l);
+  }
+  // v4.8.2: Add fib levels when there's a large gap in structure
+  if(tf !== '15m'){
+    const curPrice = c[c.length-1].c;
+    const fibs = findFibLevels(c, merged, curPrice);
+    merged.push(...fibs);
   }
   return merged;
 }
