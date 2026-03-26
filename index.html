@@ -1575,6 +1575,80 @@ function findPDHL(dCandles){
   return levels;
 }
 
+// ── FIBONACCI RETRACEMENT LEVELS (v4.8.2) ────────────────
+// When there's a big gap between nearest support and resistance (>8% of price),
+// generate fib retracements from the recent major swing to fill the void.
+// Uses 4H or 1D candles for swing detection to catch the macro move.
+function findFibLevels(candles, existingLevels, currentPrice){
+  if(!candles || candles.length < 20) return [];
+  const n = candles.length;
+
+  // Find recent significant swing high and swing low
+  // Look back up to 120 candles for the major swing points
+  const lookback = Math.min(120, n);
+  let swingHigh = -Infinity, swingLow = Infinity;
+  let hiIdx = -1, loIdx = -1;
+  for(let i = n - lookback; i < n; i++){
+    if(candles[i].h > swingHigh){ swingHigh = candles[i].h; hiIdx = i; }
+    if(candles[i].l < swingLow){ swingLow = candles[i].l; loIdx = i; }
+  }
+
+  // Need a meaningful range (at least 8% between high and low)
+  const range = swingHigh - swingLow;
+  if(range / currentPrice < 0.08) return [];
+
+  // Check if there's actually a gap in existing levels near price
+  const aboveLevels = existingLevels.filter(l => l.price > currentPrice);
+  const belowLevels = existingLevels.filter(l => l.price < currentPrice);
+  const nearestAbove = aboveLevels.length ? Math.min(...aboveLevels.map(l => l.price)) : swingHigh;
+  const nearestBelow = belowLevels.length ? Math.max(...belowLevels.map(l => l.price)) : swingLow;
+  const gapAbove = (nearestAbove - currentPrice) / currentPrice;
+  const gapBelow = (currentPrice - nearestBelow) / currentPrice;
+
+  // Only generate fibs if there's a significant gap (>8%) on either side
+  if(gapAbove < 0.08 && gapBelow < 0.08) return [];
+
+  // Determine fib direction: if swing high came AFTER swing low = uptrend retracement
+  // if swing low came AFTER swing high = downtrend retracement (crash recovery)
+  const isDowntrend = loIdx > hiIdx;
+  const fibRatios = [0.236, 0.382, 0.5, 0.618, 0.786];
+  const fibs = [];
+
+  for(const ratio of fibRatios){
+    let price;
+    if(isDowntrend){
+      // Retracement of the drop: measured from high down to low, levels are above current
+      price = swingLow + range * ratio;
+    } else {
+      // Retracement of a rally: measured from low up to high, levels are below current
+      price = swingHigh - range * ratio;
+    }
+
+    // Skip fibs that are too far from current price (>20%) or too close (<1%)
+    const dist = Math.abs(price - currentPrice) / currentPrice;
+    if(dist > 0.20 || dist < 0.01) continue;
+
+    // Skip fibs that duplicate existing levels (within 0.5%)
+    const dupExists = existingLevels.some(l => Math.abs(l.price - price) / price < 0.005);
+    if(dupExists) continue;
+
+    const pctLabel = (ratio * 100).toFixed(1);
+    const isAbove = price > currentPrice;
+    fibs.push({
+      price: Math.round(price * 100) / 100,
+      bh: price * 1.001, bl: price * 0.999,
+      type: isAbove ? 'resistance' : 'support',
+      strength: ratio === 0.5 || ratio === 0.618 ? 'strong' : 'med',
+      score: ratio === 0.618 ? 55 : ratio === 0.5 ? 50 : 40,
+      tested: false, testCount: 0,
+      source: `Fib ${pctLabel}%`,
+      tf: 'FIB',
+      isFib: true
+    });
+  }
+  return fibs;
+}
+
 // ── COMBINE + DEDUPE + RANK ───────────────────────────────
 function findDMCLevels(c, dCandles, tf, asiaLevels){
   const vp = findVPeaks(c, tf);
@@ -1589,6 +1663,15 @@ function findDMCLevels(c, dCandles, tf, asiaLevels){
     if(!dup) merged.push(l);
     else if(l.score > dup.score) Object.assign(dup, l); // upgrade with higher score
   }
+
+  // v4.8.2: Add fib levels when there's a large gap in structure
+  // Use 4H/1D candles (whichever is available) for fib swing detection
+  if(tf !== '15m'){
+    const curPrice = c[c.length-1].c;
+    const fibs = findFibLevels(c, merged, curPrice);
+    merged.push(...fibs);
+  }
+
   return merged;
 }
 
@@ -2329,19 +2412,25 @@ function collectLevels(wC, dC, p, c15m, h4C, h1C){
   const ny     = c15m ? getNYLevels(c15m).map(l=>({...l,tf:'SESSION'})) : [];
 
   // Sort by score (highest first) so dedup keeps strongest levels
-  const all = [...wLvls,...dLvls,...h4Lvls,...h1Lvls,...pdhl,...asia,...london,...ny].sort((a,b)=>b.score-a.score);
+  const structural = [...wLvls,...dLvls,...h4Lvls,...h1Lvls,...pdhl,...asia,...london,...ny].sort((a,b)=>b.score-a.score);
 
   // Dedupe within 0.15% — tight enough to keep distinct levels, loose enough to merge duplicates
   const dd = [];
-  for(const l of all){
+  for(const l of structural){
     if(!dd.find(d=>Math.abs(d.price-l.price)/l.price<0.0015)) dd.push(l);
   }
 
+  // v4.8.2: Add Fibonacci retracement levels when there's a large gap in structure
+  // Use 4H candles for fib calculation (best balance of range and detail)
+  const fibSource = h4C || dC;
+  const fibs = findFibLevels(fibSource, dd, p);
+  const all = [...dd, ...fibs];
+
   // Filter: keep all levels within 15% of current price, only strong/med beyond that
-  const filtered = dd.filter(l => {
+  const filtered = all.filter(l => {
     const dist = Math.abs(l.price - p) / p;
-    if(dist <= 0.15) return true;  // always keep nearby levels
-    return l.strength !== 'weak';   // filter weak levels only when far away
+    if(dist <= 0.20) return true;  // wider window to include fibs
+    return l.strength !== 'weak';
   });
 
   // Re-sort by price descending
@@ -2484,7 +2573,9 @@ function renderLevelItem(l){
   const strengthCol=l.strength==='strong'?'#00e676':l.strength==='med'?'#ffc107':'#5d7a99';
   const flippedTag = l.flippedType === 'flipped_support' ? '<span style="font-size:8px;color:#64b5f6;margin-left:4px">↕ FLIPPED SUP</span>'
     : l.flippedType === 'flipped_resistance' ? '<span style="font-size:8px;color:#64b5f6;margin-left:4px">↕ FLIPPED RES</span>' : '';
-  return`<div class="lvl-item${!l.tested?' untested':''}"><span class="lvl-badge ${cls}">${isR?'RES':'SUP'}</span><div class="lvl-info"><div class="lvl-tf">${l.tf||'—'} · ${l.source||''}${!l.tested?'<span class="lvl-untag">● UNTESTED</span>':''}${flippedTag}</div></div><div class="lvl-right"><div class="lvl-price ${cls}">$${fmt(l.price)}</div><div class="lvl-dist">${dist>0?'+':''}${dist}% · <span style='color:${strengthCol}'>${l.strength||''}</span></div></div></div>`;
+  const fibTag = l.isFib ? '<span style="font-size:8px;color:#ce93d8;margin-left:4px">◆ FIB</span>' : '';
+  const fibBorder = l.isFib ? 'border-left:2px solid rgba(206,147,216,.3);' : '';
+  return`<div class="lvl-item${!l.tested?' untested':''}" style="${fibBorder}"><span class="lvl-badge ${cls}">${isR?'RES':'SUP'}</span><div class="lvl-info"><div class="lvl-tf">${l.tf||'—'} · ${l.source||''}${!l.tested&&!l.isFib?'<span class="lvl-untag">● UNTESTED</span>':''}${flippedTag}${fibTag}</div></div><div class="lvl-right"><div class="lvl-price ${cls}">$${fmt(l.price)}</div><div class="lvl-dist">${dist>0?'+':''}${dist}% · <span style='color:${strengthCol}'>${l.strength||''}</span></div></div></div>`;
 }
 
 function renderLevels(){
