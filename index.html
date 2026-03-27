@@ -218,6 +218,10 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 .pos-cell{font-family:'IBM Plex Mono',monospace;font-size:9px}
 .pos-cell-lbl{color:#3d5068;font-size:8px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:2px}
 .pos-cell-val{color:#7b8fa8}
+.pos-close-row{display:flex;gap:6px;margin-bottom:6px}
+.pos-pct-btn{flex:1;font-family:'IBM Plex Mono',monospace;font-size:10px;padding:7px 0;border-radius:6px;border:1px solid rgba(255,189,46,.25);background:rgba(255,189,46,.06);color:#ffbd2e;cursor:pointer;letter-spacing:.04em;transition:all .2s;text-align:center}
+.pos-pct-btn:hover{background:rgba(255,189,46,.14);border-color:rgba(255,189,46,.4)}
+.pos-pct-btn:active{transform:scale(.97);background:rgba(255,189,46,.2)}
 .pos-close-btn{width:100%;font-family:'IBM Plex Mono',monospace;font-size:10px;padding:8px;border-radius:6px;border:1px solid rgba(255,61,90,.3);background:rgba(255,61,90,.08);color:#ff3d5a;cursor:pointer;letter-spacing:.06em;transition:all .2s}
 .pos-close-btn:active{transform:scale(.97);background:rgba(255,61,90,.2)}
 .manual-form{margin:0 16px 12px;border-radius:10px;background:#0c0f14;border:1px solid #1a2230;padding:14px}
@@ -591,10 +595,10 @@ const TFS=[{l:'1W',iv:'W',w:5},{l:'1D',iv:'D',w:4},{l:'4H',iv:'240',w:3},{l:'1H'
 // ── MULTI-COIN STATE ──────────────────────────────────────
 // Each coin runs its own independent engine loop
 const COINS = {
-  bitcoin:     { id:'bitcoin',     label:'BTC/USD',  sym:'BINANCE:BTCUSDT', shortLabel:'BTC',  apiSym:'BTCUSDT',  exchange:'binance' },
-  hyperliquid: { id:'hyperliquid', label:'HYPE/USD', sym:'BYBIT:HYPEUSDT',  shortLabel:'HYPE', apiSym:'HYPEUSDT', exchange:'bybit' },
-  solana:      { id:'solana',      label:'SOL/USD',  sym:'BINANCE:SOLUSDT', shortLabel:'SOL',  apiSym:'SOLUSDT',  exchange:'binance' },
-  gold:        { id:'gold',        label:'GOLD/USD', sym:'OANDA:XAUUSD',    shortLabel:'GOLD', apiSym:'xyz:GOLD', exchange:'hyperliquid' },
+  bitcoin:     { id:'bitcoin',     label:'BTC/USD',  sym:'BINANCE:BTCUSDT', shortLabel:'BTC',  apiSym:'BTCUSDT',  exchange:'binance',     minRR: 1.0, feeEst: 0.05 },
+  hyperliquid: { id:'hyperliquid', label:'HYPE/USD', sym:'BYBIT:HYPEUSDT',  shortLabel:'HYPE', apiSym:'HYPEUSDT', exchange:'bybit',       minRR: 1.0, feeEst: 0.05 },
+  solana:      { id:'solana',      label:'SOL/USD',  sym:'BINANCE:SOLUSDT', shortLabel:'SOL',  apiSym:'SOLUSDT',  exchange:'binance',     minRR: 1.0, feeEst: 0.05 },
+  gold:        { id:'gold',        label:'GOLD/USD', sym:'OANDA:XAUUSD',    shortLabel:'GOLD', apiSym:'xyz:GOLD', exchange:'hyperliquid', minRR: 2.0, feeEst: 0.90 },
 };
 const HL_INFO = 'https://api.hyperliquid.xyz/info';
 const HL_INTERVALS = { '1W':'1w', '1D':'1d', '4H':'4h', '1H':'1h', '15m':'15m' };
@@ -1868,7 +1872,8 @@ function hasLTFAlignment(direction, lowerCandles) {
 // ── DMS ENGINE (v4.8 — confirmed follow-through + momentum + HTF + LTF align) ─
 // 1W/1D/4H/1H: require rejection candle + follow-through to fire entries.
 // 15m: existing trap logic (FAIL_GAIN/FAIL_LOSE) is unchanged.
-function dms(c, a, dCandles, tf, htfBias, lowerCandles){
+function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
+  coinMinRR = coinMinRR || 1.0;
   const n = c.length;
   const minCandles = (tf==='1W'||tf==='1D') ? 10 : 20;
   if(n < minCandles) return {sig:'NEUTRAL',type:'NONE',reason:'Insufficient data ('+n+' candles)'};
@@ -1945,8 +1950,8 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles){
         const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
         const stop = findStopLevel(levels, blindCandidate.price, isRes?'short':'long');
         const rr   = calcRR(cur.c, tgt.price, blindCandidate.price, stop);
-        // Require minimum R:R of 1.0 — otherwise not worth the trade
-        if(!rr || parseFloat(rr) < 1.0) {
+        // Require minimum R:R (coin-specific: GOLD needs 2.0+ due to ~0.9% fees)
+        if(!rr || parseFloat(rr) < coinMinRR) {
           // Fall through to AT_LEVEL instead of firing a bad-RR blind entry
         } else {
           const dist = ((blindCandidate.price - cur.c)/cur.c*100).toFixed(2);
@@ -2026,7 +2031,7 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles){
           const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
           const stop = findStopLevel(levels, atLevel.price, isRes?'short':'long');
           const rr   = calcRR(cur.c, tgt.price, atLevel.price, stop);
-          if(rr && parseFloat(rr) >= 1.0){
+          if(rr && parseFloat(rr) >= coinMinRR){
             return {
               sig:confSig, type:'BLIND_ENTRY',
               level:atLevel.price, target:tgt.price, rr, stopPrice:stop,
@@ -3159,7 +3164,8 @@ function processTF(i, candles, dCandles, coinId, lowerCandles){
   const a = atr(candles);
   // Pass htfDir + asiaLevels as plain object (v4.8.2 fix: String objects break === comparison)
   const htfCarrier = { dir: s.htfDir || 'UNCLEAR', __asiaLevels: s.asiaLevels || [] };
-  const d = dms(candles, a, dCandles, tf.l, htfCarrier, lowerCandles || null);
+  const coinMinRR = COINS[coinId] ? COINS[coinId].minRR : 1.0;
+  const d = dms(candles, a, dCandles, tf.l, htfCarrier, lowerCandles || null, coinMinRR);
   s.results[tf.l] = d;
   // Alerts fire for all coins regardless of active view
   if(d.type!=='NONE' && d.type!=='AT_LEVEL'){
@@ -4449,7 +4455,12 @@ async function renderTrades(){
           ${tp ? `<div class="pos-cell"><div class="pos-cell-lbl">Take Profit</div><div class="pos-cell-val" style="color:#00e676">$${fmt(tp)}</div></div>` : ''}
           ${liq ? `<div class="pos-cell"><div class="pos-cell-lbl">Liq. Price</div><div class="pos-cell-val" style="color:#ff6b6b">$${fmt(liq)}</div></div>` : ''}
         </div>
-        <button class="pos-close-btn" onclick="closeTrade('${coin}',${szi},${entry})">CLOSE ${coin} ${side}</button>
+        <div class="pos-close-row">
+          <button class="pos-pct-btn" onclick="closeTrade('${coin}',${szi},${entry},0.25)">25%</button>
+          <button class="pos-pct-btn" onclick="closeTrade('${coin}',${szi},${entry},0.50)">50%</button>
+          <button class="pos-pct-btn" onclick="closeTrade('${coin}',${szi},${entry},0.75)">75%</button>
+        </div>
+        <button class="pos-close-btn" onclick="closeTrade('${coin}',${szi},${entry},1.0)">CLOSE 100% ${coin} ${side}</button>
       </div>`;
     }).join('');
   }
@@ -4466,13 +4477,14 @@ async function renderTrades(){
         : t.reason === 'sl_hit' ? '<span style="color:#ff3d5a;font-size:8px;margin-left:4px">SL</span>'
         : t.reason === 'opposite_signal' ? '<span style="color:#ffc107;font-size:8px;margin-left:4px">REV</span>'
         : '';
+      const partialTag = t.partial ? `<span style="color:#ffbd2e;font-size:8px;margin-left:4px">${t.partial}</span>` : '';
       // Format close date/time
       const closeDate = t.ts ? new Date(t.ts) : null;
       const closeDateStr = closeDate ? closeDate.toLocaleDateString('en-GB', {day:'2-digit',month:'short'}).toUpperCase() : '';
       const closeTimeStr = closeDate ? closeDate.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit',hour12:false}) : '';
       return `<div class="closed-item" style="flex-wrap:wrap">
         <div style="display:flex;align-items:center;width:100%;justify-content:space-between">
-          <span class="closed-coin">${t.coin}${reasonTag}</span>
+          <span class="closed-coin">${t.coin}${reasonTag}${partialTag}</span>
           <span class="closed-side ${t.side}">${t.side}</span>
           <span class="closed-time">${t.size} @ $${fmt(t.entry)} → $${fmt(t.exit)}</span>
           <span class="closed-pnl ${pnlCls}">${t.pnl>=0?'+':''}$${t.pnl.toFixed(2)}</span>
@@ -4483,13 +4495,28 @@ async function renderTrades(){
   }
 }
 
-// Close a position via HL market order
-async function closeTrade(coin, szi, entryPx){
+// Close a position (or partial %) via HL market order
+// pct: 0.25 = 25%, 0.50 = 50%, 0.75 = 75%, 1.0 = 100%
+async function closeTrade(coin, szi, entryPx, pct){
   if(!HL.wallet){ showToast('Connect Hyperliquid wallet first'); return; }
-  if(!confirm('Close ' + coin + ' position?')) return;
+  pct = pct || 1.0;
+  const pctLabel = Math.round(pct * 100) + '%';
+  if(!confirm('Close ' + pctLabel + ' of ' + coin + ' position?')) return;
 
   const isLong = szi > 0;
-  const size = Math.abs(szi);
+  const fullSize = Math.abs(szi);
+
+  // Calculate partial size, respecting szDecimals
+  const szDec = HL.szDecimals[coin] || 3;
+  let closeSize = pct >= 1.0 ? fullSize : parseFloat((fullSize * pct).toFixed(szDec));
+  // Ensure we don't try to close more than we have, and minimum viable size
+  if(closeSize <= 0) { showToast('Position too small to partial close'); return; }
+  if(closeSize > fullSize) closeSize = fullSize;
+  // If remaining would be dust (< 1 unit of szDecimals), close everything instead
+  const remaining = fullSize - closeSize;
+  const minSize = 1 / Math.pow(10, szDec);
+  if(remaining > 0 && remaining < minSize) closeSize = fullSize;
+  const isFullClose = (closeSize >= fullSize - minSize * 0.5);
 
   // Look up current price from coinState
   const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana', GOLD:'gold', 'xyz:GOLD':'gold' };
@@ -4500,15 +4527,16 @@ async function closeTrade(coin, szi, entryPx){
 
   try{
     const btn = event.target;
-    btn.textContent = 'CLOSING...';
+    const origText = btn.textContent;
+    btn.textContent = 'CLOSING ' + pctLabel + '...';
     btn.disabled = true;
 
     // Market close (IOC, reduce only, opposite side)
-    const result = await HL.placeOrder(coin, !isLong, size, closePx, { limit: { tif: 'Ioc' } }, true);
+    const result = await HL.placeOrder(coin, !isLong, closeSize, closePx, { limit: { tif: 'Ioc' } }, true);
 
     if(result.status === 'err'){
       showToast('Close failed: ' + (result.response || 'Unknown error'));
-      btn.textContent = 'RETRY CLOSE';
+      btn.textContent = origText;
       btn.disabled = false;
       return;
     }
@@ -4516,28 +4544,39 @@ async function closeTrade(coin, szi, entryPx){
     // Check if IOC order actually filled (status:"ok" doesn't mean it filled)
     if(result.filled === false || (!result.filled && !result.totalSz)){
       showToast('Close order not filled — try again or use wider slippage');
-      btn.textContent = 'RETRY CLOSE';
+      btn.textContent = origText;
       btn.disabled = false;
       return;
     }
 
-    // Record closed trade with real P&L
+    // Record closed trade with real P&L (proportional to closed size)
     const exitPrice = result.avgPx ? +result.avgPx : px;
     const realEntry = entryPx || exitPrice;
-    const pnl = isLong ? (exitPrice - realEntry) * size : (realEntry - exitPrice) * size;
+    const pnl = isLong ? (exitPrice - realEntry) * closeSize : (realEntry - exitPrice) * closeSize;
     const closed = loadClosedTrades();
     closed.unshift({
-      coin, side: isLong ? 'LONG' : 'SHORT', size,
+      coin, side: isLong ? 'LONG' : 'SHORT', size: closeSize,
       entry: realEntry, exit: exitPrice, pnl: pnl,
-      ts: new Date().toISOString()
+      ts: new Date().toISOString(),
+      partial: !isFullClose ? pctLabel : undefined
     });
     saveClosedTrades(closed);
 
-    showToast('Position closed: ' + coin, '', false);
+    showToast(isFullClose ? 'Position closed: ' + coin : pctLabel + ' of ' + coin + ' closed — P&L: $' + pnl.toFixed(2), '', false);
 
-    // Also clear from HL.activeTrades
-    const coinIdMap2 = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana', GOLD:'gold', 'xyz:GOLD':'gold' };
-    if(coinIdMap2[coin]) { delete HL.activeTrades[coinIdMap2[coin]]; HL.saveActiveTrades(); }
+    // If full close, clear from HL.activeTrades
+    if(isFullClose){
+      const coinIdMap2 = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana', GOLD:'gold', 'xyz:GOLD':'gold' };
+      if(coinIdMap2[coin]) { delete HL.activeTrades[coinIdMap2[coin]]; HL.saveActiveTrades(); }
+    } else {
+      // Partial close: update activeTrade size if tracked
+      const coinIdMap2 = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana', GOLD:'gold', 'xyz:GOLD':'gold' };
+      const cid2 = coinIdMap2[coin];
+      if(cid2 && HL.activeTrades[cid2]){
+        HL.activeTrades[cid2].size = remaining;
+        HL.saveActiveTrades();
+      }
+    }
 
     // Refresh trades page after a short delay for settlement
     setTimeout(renderTrades, 1500);
