@@ -43,10 +43,10 @@ if(!TG_TOKEN || !TG_CHATID){
 
 // ── COINS (BTC, HYPE, SOL + GOLD via Hyperliquid HIP-3) ─────────────────────
 const COINS = {
-  bitcoin:     { id:'bitcoin',     label:'BTC',  apiSym:'BTCUSDT',  asset:'BTC',      exchange:'binance' },
-  hyperliquid: { id:'hyperliquid', label:'HYPE', apiSym:'HYPEUSDT', asset:'HYPE',     exchange:'bybit'   },
-  solana:      { id:'solana',      label:'SOL',  apiSym:'SOLUSDT',  asset:'SOL',      exchange:'binance' },
-  gold:        { id:'gold',        label:'GOLD', apiSym:'xyz:GOLD', asset:'xyz:GOLD', exchange:'hyperliquid' },
+  bitcoin:     { id:'bitcoin',     label:'BTC',  apiSym:'BTCUSDT',  asset:'BTC',      exchange:'binance',     minRR: 1.0, feeEst: 0.05 },
+  hyperliquid: { id:'hyperliquid', label:'HYPE', apiSym:'HYPEUSDT', asset:'HYPE',     exchange:'bybit',       minRR: 1.0, feeEst: 0.05 },
+  solana:      { id:'solana',      label:'SOL',  apiSym:'SOLUSDT',  asset:'SOL',      exchange:'binance',     minRR: 1.0, feeEst: 0.05 },
+  gold:        { id:'gold',        label:'GOLD', apiSym:'xyz:GOLD', asset:'xyz:GOLD', exchange:'hyperliquid', minRR: 2.0, feeEst: 0.90 },
 };
 
 const TFS = [
@@ -697,7 +697,8 @@ function hasLTFAlignment(direction, lowerCandles) {
 }
 
 // ── DMS SIGNAL ENGINE (v4.8 — confirmed follow-through + momentum + HTF + LTF align) ─
-function dms(c, a, dCandles, tf, htfBias, lowerCandles){
+function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
+  coinMinRR = coinMinRR || 1.0;
   const n = c.length;
   const minCandles = (tf==='1W'||tf==='1D') ? 10 : 20;
   if(n < minCandles) return { sig:'NEUTRAL', type:'NONE', reason:'Insufficient data' };
@@ -737,7 +738,7 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles){
         const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
         const stop = findStopLevel(levels, blindCandidate.price, isRes?'short':'long');
         const rr   = calcRR(cur.c, tgt.price, blindCandidate.price, stop);
-        if(rr && parseFloat(rr) >= 1.0){
+        if(rr && parseFloat(rr) >= coinMinRR){
           const dist = ((blindCandidate.price - cur.c)/cur.c*100).toFixed(2);
           const htfNote = htfDir!=='UNCLEAR' ? ` · HTF ${htfDir} aligns` : '';
           const typeLabel = isFlipped ? `PASS-THROUGH` : `UNTESTED ${tf}`;
@@ -782,7 +783,7 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles){
           const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
           const stop = findStopLevel(levels, atLevel.price, isRes?'short':'long');
           const rr   = calcRR(cur.c, tgt.price, atLevel.price, stop);
-          if(rr && parseFloat(rr) >= 1.0){
+          if(rr && parseFloat(rr) >= coinMinRR){
             const dist = ((atLevel.price - cur.c)/cur.c*100).toFixed(2);
             return {
               sig:confSig, type:'BLIND_ENTRY',
@@ -1701,7 +1702,8 @@ async function scanCoin(coinId){
       const a  = atr(c);
       // v4.8.2 fix: pass as plain object (String objects break === comparison)
       const htfCarrier = { dir: htfDir || 'UNCLEAR', __asiaLevels: asiaLevels };
-      const d = dms(c, a, dc, tf.l, htfCarrier, lower);
+      const coinMinRR = COINS[coinId] ? COINS[coinId].minRR : 1.0;
+      const d = dms(c, a, dc, tf.l, htfCarrier, lower, coinMinRR);
       allResults[tf.l] = d;
 
       // Log ALL non-NONE signals for diagnostics
