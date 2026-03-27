@@ -1557,6 +1557,97 @@ function saveClosedTrades(trades) {
   }
 })();
 
+// ── SYNC FILL HISTORY: Backfill closed trades from HL API ─────────────────────
+// This catches trades that were closed (TP/SL) while the bot was down or crashed.
+// Queries HL userFillsByTime and records any closedPnl fills not already tracked.
+async function syncFillHistory() {
+  if (!HL.wallet) return;
+  try {
+    const queryAddr = (HL.masterAddress || HL.address).toLowerCase();
+    const startMs = Date.now() - 48 * 60 * 60 * 1000; // last 48h
+    const HIP3_DEXES = HL.HIP3_DEXES || ['xyz'];
+    const requests = [
+      fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'userFillsByTime', user: queryAddr, startTime: startMs }) }),
+      ...HIP3_DEXES.map(dex =>
+        fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'userFillsByTime', user: queryAddr, startTime: startMs, dex }) }))
+    ];
+    const responses = await Promise.all(requests);
+    const allFills = [];
+    for (const r of responses) {
+      const data = await r.json();
+      if (Array.isArray(data)) allFills.push(...data);
+    }
+
+    // Filter for closing fills (non-zero closedPnl)
+    const closeFills = allFills.filter(f => parseFloat(f.closedPnl || '0') !== 0);
+    if (closeFills.length === 0) return;
+
+    // Cluster fills within 5s of each other for the same coin (one close = multiple fills)
+    closeFills.sort((a, b) => a.time - b.time);
+    const clusters = [];
+    for (const f of closeFills) {
+      const last = clusters.length ? clusters[clusters.length - 1] : null;
+      if (last && last.coin === f.coin && Math.abs(f.time - last.endTs) < 5000) {
+        last.fills.push(f); last.endTs = f.time;
+      } else {
+        clusters.push({ coin: f.coin, fills: [f], startTs: f.time, endTs: f.time });
+      }
+    }
+
+    // Check which clusters are already recorded
+    const closed = loadClosedTrades();
+    const existingTs = new Set(closed.map(t => {
+      // Match by timestamp rounded to 10s (fills and our records may differ by a few seconds)
+      return t.ts ? Math.round(new Date(t.ts).getTime() / 10000) : 0;
+    }));
+
+    const symToId = { BTC:'bitcoin', HYPE:'hyperliquid', SOL:'solana', GOLD:'gold', 'xyz:GOLD':'gold' };
+    let added = 0;
+
+    for (const cl of clusters) {
+      const tsKey = Math.round(cl.startTs / 10000);
+      if (existingTs.has(tsKey)) continue; // already recorded
+
+      const pnl = cl.fills.reduce((s, f) => s + parseFloat(f.closedPnl || '0'), 0);
+      const totalSz = cl.fills.reduce((s, f) => s + parseFloat(f.sz || '0'), 0);
+      const avgPx = cl.fills.reduce((s, f) => s + parseFloat(f.px || '0') * parseFloat(f.sz || '0'), 0) / totalSz;
+      const side = cl.fills[0].side; // B = bought to close short, A = sold to close long
+      const tradeSide = side === 'B' ? 'SHORT' : 'LONG'; // was short if closed by buying
+      const coinId = symToId[cl.coin];
+
+      // Try to find entry price from activeTrades or estimate from PnL
+      let entryPx = avgPx; // fallback
+      if (coinId && HL.activeTrades[coinId]) {
+        entryPx = HL.activeTrades[coinId].entry || avgPx;
+      } else if (totalSz > 0) {
+        // Estimate entry from PnL: pnl = (exit - entry) * size for LONG, (entry - exit) * size for SHORT
+        entryPx = tradeSide === 'LONG' ? avgPx - pnl / totalSz : avgPx + pnl / totalSz;
+      }
+
+      closed.unshift({
+        coin: cl.coin, side: tradeSide, size: totalSz,
+        entry: parseFloat(entryPx.toFixed(2)), exit: parseFloat(avgPx.toFixed(2)),
+        pnl: parseFloat(pnl.toFixed(4)),
+        ts: new Date(cl.startTs).toISOString(),
+        reason: 'synced_from_hl'
+      });
+      existingTs.add(tsKey);
+      added++;
+    }
+
+    if (added > 0) {
+      // Sort by timestamp descending (newest first)
+      closed.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+      saveClosedTrades(closed);
+      console.log(`Fill history sync: added ${added} missed closed trades (total: ${closed.length})`);
+    }
+  } catch (e) {
+    console.warn('syncFillHistory error:', e.message);
+  }
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // ██  ALERT & TRADE EXECUTION LOGIC                                         ██
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1772,13 +1863,17 @@ let lastSummaryDate = (() => { try { return fs.readFileSync(SUMMARY_FILE, 'utf8'
 
 async function sendDailySummary() {
   const today = new Date().toISOString().slice(0, 10);
-  if (lastSummaryDate === today) return; // already sent today
+  // Re-read from disk EVERY time (prevents duplicate across bot restarts or multi-instance)
+  try { lastSummaryDate = fs.readFileSync(SUMMARY_FILE, 'utf8').trim(); } catch {}
+  if (lastSummaryDate === today) return; // already sent today (by this or another instance)
+  // Write FIRST, then send — so a crash mid-send doesn't cause double send on restart
   lastSummaryDate = today;
   try { fs.writeFileSync(SUMMARY_FILE, today); } catch {}
 
   try {
-    // Refresh equity
+    // Refresh equity and backfill any missed closes before building summary
     if (HL.wallet) await HL.syncEquity();
+    await syncFillHistory();
 
     // Get open positions
     const openPositions = Object.entries(HL.activeTrades);
@@ -1868,7 +1963,9 @@ async function main(){
     const hlOk = await HL.init();
     if (hlOk) {
       console.log('Auto-trading ENABLED | Risk:', RISK_PCT + '%', '| Min conf:', MIN_CONFIDENCE + '%', '| Max trades/day:', MAX_TRADES_DAY);
-      await sendTelegram('🤖 <b>DMS Signal Bot v4.8 started</b>\n✅ Auto-trading ENABLED\nScanning BTC · HYPE · SOL · GOLD every 2 min\nRisk: ' + RISK_PCT + '% | Min conf: ' + MIN_CONFIDENCE + '%');
+      // Backfill any closed trades missed during downtime
+      await syncFillHistory();
+      await sendTelegram('🤖 <b>DMS Signal Bot v4.8.2 started</b>\n✅ Auto-trading ENABLED\nScanning BTC · HYPE · SOL · GOLD every 2 min\nRisk: ' + RISK_PCT + '% | Min conf: ' + MIN_CONFIDENCE + '%');
     } else {
       console.warn('Auto-trading init FAILED — running in alert-only mode');
       await sendTelegram('🤖 <b>DMS Signal Bot v4.8 started</b>\n⚠️ Auto-trading FAILED to init\nRunning in alert-only mode');
@@ -1897,11 +1994,12 @@ async function main(){
       } catch (e) { console.warn('Trail check error:', e.message); }
     }, TRAIL_INTERVAL);
 
-    // Sync positions & equity every 5 min
+    // Sync positions, equity & fill history every 5 min
     setInterval(async () => {
       try {
         await HL.syncPositions();
         await HL.syncEquity();
+        await syncFillHistory();
       } catch (e) { console.warn('Periodic sync error:', e.message); }
     }, 300000);
   }
