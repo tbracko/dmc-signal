@@ -1247,7 +1247,7 @@ const HL = {
   // ── Place an order ──
   async placeOrder(asset, isBuy, size, price, orderType, reduceOnly = false) {
     const assetIdx = this.assetMap[asset];
-    if (assetIdx === undefined) throw new Error('Unknown asset: ' + asset);
+    if (assetIdx === undefined) throw new Error('Unknown asset: ' + asset + ' (loaded: ' + Object.keys(this.assetMap).join(',') + ')');
     const szDec = this.szDecimals[asset] || 3;
     const sizeStr = this.floatToWire(parseFloat(size.toFixed(szDec)));
     const priceStr = this.floatToWire(price);
@@ -1255,13 +1255,35 @@ const HL = {
     const action = { type: 'order', orders: [orderWire], grouping: 'na' };
     const nonce = Date.now();
     const signature = await this.signL1Action(action, nonce, null);
+    if (!signature || !signature.r) throw new Error('Signing failed — null signature');
     const payload = { action, nonce, signature: { r: signature.r, s: signature.s, v: signature.v } };
-    console.log('HL order:', asset, isBuy ? 'BUY' : 'SELL', sizeStr, '@', priceStr, reduceOnly ? '(reduce)' : '');
-    const res = await fetch(HL_API + '/exchange', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    const result = await res.json();
+    console.log('HL order:', asset, isBuy ? 'BUY' : 'SELL', sizeStr, '@', priceStr, reduceOnly ? '(reduce)' : '', 'assetIdx:', assetIdx);
+
+    let res;
+    try {
+      res = await fetch(HL_API + '/exchange', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    } catch (fetchErr) {
+      throw new Error('HL API fetch failed: ' + fetchErr.message);
+    }
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '(empty)');
+      throw new Error('HL API HTTP ' + res.status + ': ' + body.slice(0, 200));
+    }
+
+    let result;
+    try {
+      result = await res.json();
+    } catch (parseErr) {
+      throw new Error('HL API response not valid JSON (HTTP ' + res.status + ')');
+    }
+    if (!result) throw new Error('HL API returned null (HTTP ' + res.status + ')');
+
+    // Log raw response for debugging
+    console.log('HL response:', JSON.stringify(result).slice(0, 300));
 
     if (result.status === 'ok' && result.response?.data?.statuses) {
       const s = result.response.data.statuses[0];
@@ -1278,6 +1300,12 @@ const HL = {
         return { status: 'ok', filled: false, resting: true, oid: s.resting.oid, raw: result };
       }
     }
+    // Unexpected response shape — return as-is but log a warning
+    if (result.status === 'err') {
+      console.error('HL API error:', result.response || result);
+      return { status: 'err', response: result.response || JSON.stringify(result).slice(0, 200) };
+    }
+    console.warn('HL unexpected response shape:', JSON.stringify(result).slice(0, 300));
     return result;
   },
 
@@ -1378,6 +1406,7 @@ const HL = {
     try {
       // 1. Market entry
       const entryRes = await this.placeOrder(asset, isBuy, size, entryPx, { limit: { tif: 'Ioc' } });
+      if (!entryRes) { console.error('HL entry returned null'); return null; }
       if (entryRes.status === 'err') { console.error('HL entry failed:', entryRes.response); return null; }
       if (entryRes.filled === false || (!entryRes.filled && !entryRes.totalSz)) { console.error('HL entry not filled'); return null; }
 
