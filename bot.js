@@ -798,6 +798,73 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
       const dist = ((atLevel.price - cur.c)/cur.c*100).toFixed(2);
       return { sig:'NEUTRAL', type:'AT_LEVEL', level:atLevel.price, target:null, strength:atLevel.strength, score:atLevel.score, reason:`${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · ${dir}` };
     }
+
+    // ── BREAKDOWN / BREAKOUT DETECTION (v4.8.2) ──────────────────────────
+    if(isHTF){
+      const breakLookback = Math.min(5, n - 1);
+      for(const lv of nearby.filter(l => l.score >= 25)){
+        const distFromLevel = (cur.c - lv.price) / lv.price;
+        const isSup = lv.type === 'support' || lv.flippedType === 'flipped_support';
+        const isRes = lv.type === 'resistance' || lv.flippedType === 'flipped_resistance';
+
+        // BREAKDOWN SHORT: price broke below support
+        if(isSup && distFromLevel < -0.0015 && cur.c < cur.o){
+          const curBody = cur.o - cur.c;
+          if(curBody < a * 0.08) continue;
+          let aboveCount = 0;
+          for(let bi = 1; bi <= breakLookback; bi++){
+            const bk = c[n - 1 - bi];
+            if(bk && bk.c >= lv.price - a * 0.1) aboveCount++;
+          }
+          if(aboveCount < 2) continue;
+          if(htfDir === 'UP') continue; // counter-trend block
+
+          const tgt  = findNextLevel(levels, cur.c, 'short');
+          const stop = lv.price + a * 0.3;
+          const rr   = calcRR(cur.c, tgt.price, lv.price, stop);
+          if(!rr || parseFloat(rr) < coinMinRR) continue;
+
+          const breakDist = (distFromLevel * 100).toFixed(2);
+          const htfNote = htfDir === 'DOWN' ? ' · HTF DOWN aligns' : '';
+          return {
+            sig:'SHORT', type:'BLIND_ENTRY',
+            level:lv.price, target:tgt.price, rr, stopPrice:stop,
+            strength:lv.strength, score:lv.score,
+            reason:`BREAKDOWN ${tf}: ${lv.source} $${fmt(lv.price)} broken · ${breakDist}% below · ${aboveCount}/${breakLookback} above${htfNote} · R:R ${rr}`,
+            detail:`Support broken — SL: $${fmt(stop)}`, untested:false
+          };
+        }
+
+        // BREAKOUT LONG: price broke above resistance
+        if(isRes && distFromLevel > 0.0015 && cur.c > cur.o){
+          const curBody = cur.c - cur.o;
+          if(curBody < a * 0.08) continue;
+          let belowCount = 0;
+          for(let bi = 1; bi <= breakLookback; bi++){
+            const bk = c[n - 1 - bi];
+            if(bk && bk.c <= lv.price + a * 0.1) belowCount++;
+          }
+          if(belowCount < 2) continue;
+          if(htfDir === 'DOWN') continue;
+
+          const tgt  = findNextLevel(levels, cur.c, 'long');
+          const stop = lv.price - a * 0.3;
+          const rr   = calcRR(cur.c, tgt.price, lv.price, stop);
+          if(!rr || parseFloat(rr) < coinMinRR) continue;
+
+          const breakDist = (distFromLevel * 100).toFixed(2);
+          const htfNote = htfDir === 'UP' ? ' · HTF UP aligns' : '';
+          return {
+            sig:'LONG', type:'BLIND_ENTRY',
+            level:lv.price, target:tgt.price, rr, stopPrice:stop,
+            strength:lv.strength, score:lv.score,
+            reason:`BREAKOUT ${tf}: ${lv.source} $${fmt(lv.price)} broken · +${breakDist}% above · ${belowCount}/${breakLookback} below${htfNote} · R:R ${rr}`,
+            detail:`Resistance broken — SL: $${fmt(stop)}`, untested:false
+          };
+        }
+      }
+    }
+
     return { sig:'NEUTRAL', type:'NONE', level:null, target:null, reason:'Between levels' };
   }
 
@@ -1412,14 +1479,22 @@ const HL = {
 
       // 2. Stop Loss
       const slPx = isBuy ? stopPrice * 0.98 : stopPrice * 1.02;
-      await this.placeOrder(asset, !isBuy, size, slPx,
+      const slRes = await this.placeOrder(asset, !isBuy, size, slPx,
         { trigger: { isMarket: true, triggerPx: stopPrice, tpsl: 'sl' } }, true);
+      if (!slRes || slRes.status === 'err') {
+        console.error('HL SL placement failed:', slRes ? slRes.response : 'null');
+        await sendTelegram(`⚠️ <b>SL FAILED for ${sig} ${asset}</b>\nTrade open WITHOUT stop loss — place manually!`);
+      }
 
       // 3. Take Profit
       if (target) {
         const tpPx = isBuy ? target * 1.02 : target * 0.98;
-        await this.placeOrder(asset, !isBuy, size, tpPx,
+        const tpRes = await this.placeOrder(asset, !isBuy, size, tpPx,
           { trigger: { isMarket: true, triggerPx: target, tpsl: 'tp' } }, true);
+        if (!tpRes || tpRes.status === 'err') {
+          console.error('HL TP placement failed:', tpRes ? tpRes.response : 'null');
+          await sendTelegram(`⚠️ <b>TP FAILED for ${sig} ${asset}</b>\nTrade open without take profit`);
+        }
       }
 
       // Track active trade
@@ -1487,13 +1562,21 @@ const HL = {
         try {
           await this.cancelTriggerOrders(trade.asset);
           const slPx = isLong ? newSl * 0.98 : newSl * 1.02;
-          await this.placeOrder(trade.asset, !isLong, trade.size, slPx,
+          const trailSlRes = await this.placeOrder(trade.asset, !isLong, trade.size, slPx,
             { trigger: { isMarket: true, triggerPx: newSl, tpsl: 'sl' } }, true);
+          if (!trailSlRes || trailSlRes.status === 'err') {
+            console.error('HL trail SL placement failed:', trailSlRes ? trailSlRes.response : 'null');
+            await sendTelegram(`⚠️ <b>TRAIL SL FAILED: ${trade.asset}</b>\nOld SL still active — check manually!`);
+            continue;
+          }
           // Re-place TP
           if (trade.tp) {
             const tpPx = isLong ? trade.tp * 1.02 : trade.tp * 0.98;
-            await this.placeOrder(trade.asset, !isLong, trade.size, tpPx,
+            const trailTpRes = await this.placeOrder(trade.asset, !isLong, trade.size, tpPx,
               { trigger: { isMarket: true, triggerPx: trade.tp, tpsl: 'tp' } }, true);
+            if (!trailTpRes || trailTpRes.status === 'err') {
+              console.error('HL trail TP re-place failed:', trailTpRes ? trailTpRes.response : 'null');
+            }
           }
           trade.sl = newSl;
           this.saveActiveTrades();
@@ -1612,6 +1695,7 @@ async function syncFillHistory() {
 
       const pnl = cl.fills.reduce((s, f) => s + parseFloat(f.closedPnl || '0'), 0);
       const totalSz = cl.fills.reduce((s, f) => s + parseFloat(f.sz || '0'), 0);
+      if (totalSz <= 0) continue; // skip empty fills
       const avgPx = cl.fills.reduce((s, f) => s + parseFloat(f.px || '0') * parseFloat(f.sz || '0'), 0) / totalSz;
       const side = cl.fills[0].side; // B = bought to close short, A = sold to close long
       const tradeSide = side === 'B' ? 'SHORT' : 'LONG'; // was short if closed by buying
