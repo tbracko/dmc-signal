@@ -2055,6 +2055,87 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
         untested:!atLevel.tested
       };
     }
+    // ── BREAKDOWN / BREAKOUT DETECTION (v4.8.2) ───────────────────────────
+    // Detects when price breaks THROUGH a key level convincingly:
+    // - Breakdown SHORT: price was above/near support, now body closes below it
+    // - Breakout LONG: price was below/near resistance, now body closes above it
+    // Requires: strong body candle, recent proximity to the level, HTF alignment
+    if(isHTF){
+      const breakLookback = Math.min(5, n - 1);
+      for(const lv of nearby.filter(l => l.score >= 25)){
+        const distFromLevel = (cur.c - lv.price) / lv.price;
+        const isSup = lv.type === 'support' || lv.flippedType === 'flipped_support';
+        const isRes = lv.type === 'resistance' || lv.flippedType === 'flipped_resistance';
+
+        // BREAKDOWN SHORT: price broke below support
+        // - Current body closes below level by at least 0.15% (not just a wick poke)
+        // - At least 2 of last 5 candles were above or near the level (proves it was support)
+        // - Current candle has a real bearish body (not a doji)
+        if(isSup && distFromLevel < -0.0015 && cur.c < cur.o){
+          const curBody = cur.o - cur.c;
+          if(curBody < a * 0.08) continue; // skip weak/doji candles
+          let aboveCount = 0;
+          for(let bi = 1; bi <= breakLookback; bi++){
+            const bk = c[n - 1 - bi];
+            if(bk && bk.c >= lv.price - a * 0.1) aboveCount++;
+          }
+          if(aboveCount < 2) continue; // wasn't really acting as support recently
+
+          const breakSig = 'SHORT';
+          const htfBlocks = htfDir === 'UP';
+          if(htfBlocks) continue;
+
+          const tgt  = findNextLevel(levels, cur.c, 'short');
+          const stop = lv.price + a * 0.3; // SL above the broken level
+          const rr   = calcRR(cur.c, tgt.price, lv.price, stop);
+          if(!rr || parseFloat(rr) < coinMinRR) continue;
+
+          const breakDist = (distFromLevel * 100).toFixed(2);
+          const htfNote = htfDir === 'DOWN' ? ' · ✓ HTF DOWN aligns' : '';
+          return {
+            sig: breakSig, type: 'BLIND_ENTRY',
+            level: lv.price, target: tgt.price, rr, stopPrice: stop,
+            strength: lv.strength, score: lv.score,
+            reason: `BREAKDOWN ${tf}: ${lv.source} $${fmt(lv.price)} broken · price ${breakDist}% below · ${aboveCount}/${breakLookback} candles were above · body $${fmt(curBody)}${htfNote} · R:R ${rr} → $${fmt(tgt.price)}`,
+            detail: `Support broken — old support becomes resistance | SL: $${fmt(stop)}`,
+            untested: false
+          };
+        }
+
+        // BREAKOUT LONG: price broke above resistance
+        if(isRes && distFromLevel > 0.0015 && cur.c > cur.o){
+          const curBody = cur.c - cur.o;
+          if(curBody < a * 0.08) continue;
+          let belowCount = 0;
+          for(let bi = 1; bi <= breakLookback; bi++){
+            const bk = c[n - 1 - bi];
+            if(bk && bk.c <= lv.price + a * 0.1) belowCount++;
+          }
+          if(belowCount < 2) continue;
+
+          const breakSig = 'LONG';
+          const htfBlocks = htfDir === 'DOWN';
+          if(htfBlocks) continue;
+
+          const tgt  = findNextLevel(levels, cur.c, 'long');
+          const stop = lv.price - a * 0.3;
+          const rr   = calcRR(cur.c, tgt.price, lv.price, stop);
+          if(!rr || parseFloat(rr) < coinMinRR) continue;
+
+          const breakDist = (distFromLevel * 100).toFixed(2);
+          const htfNote = htfDir === 'UP' ? ' · ✓ HTF UP aligns' : '';
+          return {
+            sig: breakSig, type: 'BLIND_ENTRY',
+            level: lv.price, target: tgt.price, rr, stopPrice: stop,
+            strength: lv.strength, score: lv.score,
+            reason: `BREAKOUT ${tf}: ${lv.source} $${fmt(lv.price)} broken · price +${breakDist}% above · ${belowCount}/${breakLookback} candles were below · body $${fmt(curBody)}${htfNote} · R:R ${rr} → $${fmt(tgt.price)}`,
+            detail: `Resistance broken — old resistance becomes support | SL: $${fmt(stop)}`,
+            untested: false
+          };
+        }
+      }
+    }
+
     // NO SETUP — show nearest levels above/below as context
     // Use all levels if nearby is empty (wide fallback for context display)
     const pool = nearby.length > 0 ? nearby : levels;
@@ -2463,15 +2544,20 @@ function renderHero(){
   let wL=0,wS=0,activeW=0;
   TFS.forEach(tf=>{const r=results[tf.l];if(!r)return;if(r.type!=='NONE')activeW+=tf.w;if(r.sig==='LONG')wL+=tf.w;if(r.sig==='SHORT')wS+=tf.w;});
   const loaded=Object.keys(results).length,diff=wL-wS;
+  const pct=activeW>0?Math.round(Math.max(wL,wS)/activeW*100):0;
+  const label=pct>=75?'HIGH':pct>=50?'MED':'LOW';
+  // v4.8.2: Don't show directional hero below 30% confidence — prevents
+  // misleading LONG/SHORT display when only one low-weight TF has a signal
+  // while price is just sitting at a level unconfirmed
+  const MIN_HERO_CONF = 30;
   let sig,cls;
-  if(diff>0&&loaded>=2){sig='LONG ▲';cls='long';}
-  else if(diff<0&&loaded>=2){sig='SHORT ▼';cls='short';}
+  if(diff>0&&loaded>=2&&pct>=MIN_HERO_CONF){sig='LONG ▲';cls='long';}
+  else if(diff<0&&loaded>=2&&pct>=MIN_HERO_CONF){sig='SHORT ▼';cls='short';}
+  else if(diff!==0&&loaded>=2&&pct<MIN_HERO_CONF){sig='AT LEVEL';cls='neutral';}
   else{sig='NEUTRAL';cls='neutral';}
   document.getElementById('hero').className='hero '+cls;
   document.getElementById('hero-dir').textContent=sig;
   document.getElementById('hero-tfs').textContent=loaded+' / '+TFS.length+' TFs';
-  const pct=activeW>0?Math.round(Math.max(wL,wS)/activeW*100):0;
-  const label=pct>=75?'HIGH':pct>=50?'MED':'LOW';
   const confEl=document.getElementById('hero-conf');
   confEl.textContent=pct+'%';
   confEl.className='hero-conf '+(pct>=75?'high':pct>=50?'med':'');
