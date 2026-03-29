@@ -620,6 +620,55 @@ function hasRejection(candles, levelPrice, direction, atrVal) {
   return { confirmed: false };
 }
 
+// ── STRONG BODY BOUNCE (v4.8.2) ─────────────────────────────────────────────
+// Catches V-bounces where price hits a level and reverses with a strong body
+// candle, even if there's no classic wick rejection pattern. This is an
+// alternative to hasRejection for 4H/1H when:
+//   - A recent candle touched/pierced the level (low within 0.5 ATR for LONG)
+//   - Current or recent candle has a strong directional body (>= 0.20 ATR)
+//   - Close is decisively away from the level in the trade direction
+//   - At least 2 of last 3 candles support the direction (multi-candle bounce)
+function hasStrongBodyBounce(candles, levelPrice, direction, atrVal) {
+  const n = candles.length;
+  if (n < 4) return { confirmed: false };
+
+  // Look back up to 3 candles for a touch of the level
+  let touchBar = -1;
+  for (let i = 1; i < Math.min(4, n); i++) {
+    const k = candles[n - 1 - i];
+    if (direction === 'LONG' && k.l <= levelPrice + atrVal * 0.5) { touchBar = i; break; }
+    if (direction === 'SHORT' && k.h >= levelPrice - atrVal * 0.5) { touchBar = i; break; }
+  }
+  // Also check current candle
+  const cur = candles[n - 1];
+  if (touchBar === -1) {
+    if (direction === 'LONG' && cur.l <= levelPrice + atrVal * 0.5) touchBar = 0;
+    if (direction === 'SHORT' && cur.h >= levelPrice - atrVal * 0.5) touchBar = 0;
+  }
+  if (touchBar === -1) return { confirmed: false };
+
+  // Current candle must have a strong body in the direction
+  const curBody = direction === 'LONG' ? (cur.c - cur.o) : (cur.o - cur.c);
+  if (curBody < atrVal * 0.20) return { confirmed: false };
+
+  // Current close must be away from the level in the right direction
+  if (direction === 'LONG' && cur.c < levelPrice + atrVal * 0.1) return { confirmed: false };
+  if (direction === 'SHORT' && cur.c > levelPrice - atrVal * 0.1) return { confirmed: false };
+
+  // Multi-candle confirmation: at least 2 of last 3 candles (including current) are with direction
+  let withDir = 0;
+  for (let i = 0; i < Math.min(3, n); i++) {
+    const k = candles[n - 1 - i];
+    const bd = k.c - k.o;
+    if (direction === 'LONG' && bd > 0) withDir++;
+    if (direction === 'SHORT' && bd < 0) withDir++;
+  }
+  if (withDir < 2) return { confirmed: false };
+
+  const bodyATR = (curBody / atrVal).toFixed(2);
+  return { confirmed: true, barsAgo: touchBar, bodyATR };
+}
+
 // ── MOMENTUM FILTER (v4.8) ──────────────────────────────────────────────────
 // Checks if last 3-5 candles show strong directional momentum AGAINST the
 // proposed trade direction. If price is clearly trending through a level
@@ -791,6 +840,26 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
               strength:atLevel.strength, score:atLevel.score,
               reason:`CONFIRMED ${tf}: ${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · rejection ${rejection.barsAgo} bars ago · follow-through confirmed · R:R ${rr} → $${fmt(tgt.price)}`
             };
+          }
+        }
+
+        // v4.8.2: STRONG BODY BOUNCE — catches V-bounces without strict wick pattern
+        // Fires when price touched level recently and bounced with a strong body candle
+        if(!rejection.confirmed){
+          const bounce = hasStrongBodyBounce(c, atLevel.price, confSig, a);
+          if(bounce.confirmed){
+            const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
+            const stop = findStopLevel(levels, atLevel.price, isRes?'short':'long');
+            const rr   = calcRR(cur.c, tgt.price, atLevel.price, stop);
+            if(rr && parseFloat(rr) >= coinMinRR){
+              const dist = ((atLevel.price - cur.c)/cur.c*100).toFixed(2);
+              return {
+                sig:confSig, type:'BLIND_ENTRY',
+                level:atLevel.price, target:tgt.price, rr, stopPrice:stop,
+                strength:atLevel.strength, score:atLevel.score,
+                reason:`CONFIRMED ${tf}: ${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · strong bounce ${bounce.barsAgo} bars ago · body ${bounce.bodyATR} ATR · R:R ${rr} → $${fmt(tgt.price)}`
+              };
+            }
           }
         }
       }
