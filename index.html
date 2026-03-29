@@ -1800,6 +1800,45 @@ function hasRejection(candles, levelPrice, direction, atrVal) {
   return { confirmed: false };
 }
 
+// ── STRONG BODY BOUNCE (v4.8.2) ─────────────────────────
+// Catches V-bounces where price hits a level and reverses with a strong body
+// candle, even if there's no classic wick rejection pattern.
+function hasStrongBodyBounce(candles, levelPrice, direction, atrVal) {
+  const n = candles.length;
+  if (n < 4) return { confirmed: false };
+
+  let touchBar = -1;
+  for (let i = 1; i < Math.min(4, n); i++) {
+    const k = candles[n - 1 - i];
+    if (direction === 'LONG' && k.l <= levelPrice + atrVal * 0.5) { touchBar = i; break; }
+    if (direction === 'SHORT' && k.h >= levelPrice - atrVal * 0.5) { touchBar = i; break; }
+  }
+  const cur = candles[n - 1];
+  if (touchBar === -1) {
+    if (direction === 'LONG' && cur.l <= levelPrice + atrVal * 0.5) touchBar = 0;
+    if (direction === 'SHORT' && cur.h >= levelPrice - atrVal * 0.5) touchBar = 0;
+  }
+  if (touchBar === -1) return { confirmed: false };
+
+  const curBody = direction === 'LONG' ? (cur.c - cur.o) : (cur.o - cur.c);
+  if (curBody < atrVal * 0.20) return { confirmed: false };
+
+  if (direction === 'LONG' && cur.c < levelPrice + atrVal * 0.1) return { confirmed: false };
+  if (direction === 'SHORT' && cur.c > levelPrice - atrVal * 0.1) return { confirmed: false };
+
+  let withDir = 0;
+  for (let i = 0; i < Math.min(3, n); i++) {
+    const k = candles[n - 1 - i];
+    const bd = k.c - k.o;
+    if (direction === 'LONG' && bd > 0) withDir++;
+    if (direction === 'SHORT' && bd < 0) withDir++;
+  }
+  if (withDir < 2) return { confirmed: false };
+
+  const bodyATR = (curBody / atrVal).toFixed(2);
+  return { confirmed: true, barsAgo: touchBar, bodyATR };
+}
+
 // ── MOMENTUM FILTER (v4.8) ──────────────────────────────
 function hasMomentumAgainst(candles, direction, atrVal) {
   const n = candles.length;
@@ -2040,6 +2079,26 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
               detail:`${tf} rejection + follow-through confirmed at level | SL: $${fmt(stop)}`,
               untested:!atLevel.tested
             };
+          }
+        }
+
+        // v4.8.2: STRONG BODY BOUNCE — catches V-bounces without strict wick pattern
+        if(!rejection.confirmed){
+          const bounce = hasStrongBodyBounce(c, atLevel.price, confSig, a);
+          if(bounce.confirmed){
+            const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
+            const stop = findStopLevel(levels, atLevel.price, isRes?'short':'long');
+            const rr   = calcRR(cur.c, tgt.price, atLevel.price, stop);
+            if(rr && parseFloat(rr) >= coinMinRR){
+              return {
+                sig:confSig, type:'BLIND_ENTRY',
+                level:atLevel.price, target:tgt.price, rr, stopPrice:stop,
+                strength:atLevel.strength, score:atLevel.score,
+                reason:`CONFIRMED ${tf}: ${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · strong bounce ${bounce.barsAgo} bars ago · body ${bounce.bodyATR} ATR${testedNote}${htfNote} · R:R ${rr} → $${fmt(tgt.price)}`,
+                detail:`${tf} strong body bounce at level | SL: $${fmt(stop)}`,
+                untested:!atLevel.tested
+              };
+            }
           }
         }
       }
@@ -3308,6 +3367,7 @@ function processTF(i, candles, dCandles, coinId, lowerCandles){
             const slip = px * 0.01;
             const closePx = isLong ? px - slip : px + slip;
             HL.placeOrder(existing.asset, !isLong, existing.size, closePx, { limit: { tif: 'Ioc' } }, true).then(async result => {
+              if(!result){ console.error('HL auto-close returned null'); return; }
               if(result.status !== 'err' && (result.filled || result.totalSz)){
                 const exitPrice = result.avgPx ? +result.avgPx : px;
                 const pnl = isLong ? (exitPrice - existing.entry) * existing.size : (existing.entry - exitPrice) * existing.size;
@@ -4620,6 +4680,12 @@ async function closeTrade(coin, szi, entryPx, pct){
     // Market close (IOC, reduce only, opposite side)
     const result = await HL.placeOrder(coin, !isLong, closeSize, closePx, { limit: { tif: 'Ioc' } }, true);
 
+    if(!result){
+      showToast('Close failed: no response from exchange');
+      btn.textContent = origText;
+      btn.disabled = false;
+      return;
+    }
     if(result.status === 'err'){
       showToast('Close failed: ' + (result.response || 'Unknown error'));
       btn.textContent = origText;
