@@ -1409,31 +1409,33 @@ function renderSessionBanner(candles15m, coinId){
     return score;
   }
   // Build a smart trap hint for a given position relative to a session range
-  // direction: 'above' (price above high → short trap), 'below' (price below low → long trap), 'inside'
+  // direction: 'above' (price above high), 'below' (price below low), 'inside'
   // levelName: e.g. 'Asia High', 'London High'
   function smartTrapHint(direction, highName, lowName){
     if(direction === 'inside'){
       return `<span class="sb-trap watch">Price inside range — watch breakout direction</span>`;
     }
     if(direction === 'above'){
-      // Classic setup: Fail to GAIN the high → SHORT
-      const c = consensus(false); // false = evaluating short
-      if(c >= 2) return `<span class="sb-trap short">⬇ WATCH: Fail to gain ${highName} → SHORT · story + HTF confirm</span>`;
-      if(c === 1) return `<span class="sb-trap short">WATCH: Fail to gain ${highName} → SHORT · story leans bearish</span>`;
-      if(c === 0) return `<span class="sb-trap watch">WATCH: Fail to gain ${highName} → possible SHORT · no story bias</span>`;
-      if(c === -1) return `<span class="sb-trap watch">⚠ Fail to gain ${highName} → SHORT conflicted · story leans bullish</span>`;
-      // c <= -2: strong conflict — flip suggestion
-      return `<span class="sb-trap long">⚠ ${highName} reject but story BULLISH — watch for reclaim → LONG instead</span>`;
+      // Price is ABOVE the high → it GAINED the level
+      // Watch for: reject back below (SHORT) or hold above (LONG continuation)
+      const cShort = consensus(false); // bearish consensus
+      const cLong  = consensus(true);  // bullish consensus
+      if(cLong >= 2) return `<span class="sb-trap long">⬆ GAINED ${highName} — holding above · story + HTF bullish</span>`;
+      if(cLong === 1) return `<span class="sb-trap long">GAINED ${highName} — holding above · story leans bullish</span>`;
+      if(cShort >= 2) return `<span class="sb-trap short">⬇ ABOVE ${highName} — watch for reject back below → SHORT · story + HTF bearish</span>`;
+      if(cShort === 1) return `<span class="sb-trap short">ABOVE ${highName} — watch for reject back below → SHORT · story leans bearish</span>`;
+      return `<span class="sb-trap watch">ABOVE ${highName} — watch for hold (LONG) or reject (SHORT)</span>`;
     }
     if(direction === 'below'){
-      // Classic setup: Fail to LOSE the low → LONG
-      const c = consensus(true); // true = evaluating long
-      if(c >= 2) return `<span class="sb-trap long">⬆ WATCH: Fail to lose ${lowName} → LONG · story + HTF confirm</span>`;
-      if(c === 1) return `<span class="sb-trap long">WATCH: Fail to lose ${lowName} → LONG · story leans bullish</span>`;
-      if(c === 0) return `<span class="sb-trap watch">WATCH: Fail to lose ${lowName} → possible LONG · no story bias</span>`;
-      if(c === -1) return `<span class="sb-trap watch">⚠ Fail to lose ${lowName} → LONG conflicted · story leans bearish</span>`;
-      // c <= -2: strong conflict — flip suggestion
-      return `<span class="sb-trap short">⚠ ${lowName} breakdown — story BEARISH → watch for SHORT continuation</span>`;
+      // Price is BELOW the low → it LOST the level
+      // Watch for: reclaim back above (LONG) or hold below (SHORT continuation)
+      const cLong  = consensus(true);  // bullish consensus
+      const cShort = consensus(false); // bearish consensus
+      if(cShort >= 2) return `<span class="sb-trap short">⬇ LOST ${lowName} — holding below · story + HTF bearish</span>`;
+      if(cShort === 1) return `<span class="sb-trap short">LOST ${lowName} — holding below · story leans bearish</span>`;
+      if(cLong >= 2) return `<span class="sb-trap long">⬆ BELOW ${lowName} — watch for reclaim back above → LONG · story + HTF bullish</span>`;
+      if(cLong === 1) return `<span class="sb-trap long">BELOW ${lowName} — watch for reclaim back above → LONG · story leans bullish</span>`;
+      return `<span class="sb-trap watch">BELOW ${lowName} — watch for hold (SHORT) or reclaim (LONG)</span>`;
     }
     return '';
   }
