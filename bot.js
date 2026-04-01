@@ -45,7 +45,7 @@ process.exit(1);
 const COINS = {
 bitcoin:     { id:‘bitcoin’,     label:‘BTC’,    apiSym:‘BTCUSDT’,      asset:‘BTC’,        exchange:‘binance’,     minRR: 1.0, feeEst: 0.05 },
 hyperliquid: { id:‘hyperliquid’, label:‘HYPE’,   apiSym:‘HYPEUSDT’,     asset:‘HYPE’,       exchange:‘bybit’,       minRR: 1.0, feeEst: 0.05 },
-sp500:       { id:‘sp500’,       label:‘S&P500’, apiSym:‘xyz:S&P500’,   asset:‘xyz:S&P500’, exchange:‘hyperliquid’, minRR: 2.0, feeEst: 0.90 },
+sp500:       { id:‘sp500’,       label:‘S&P500’, apiSym:‘xyz:SP500’,   asset:‘xyz:SP500’, exchange:‘hyperliquid’, minRR: 2.0, feeEst: 0.90 },
 gold:        { id:‘gold’,        label:‘GOLD’,   apiSym:‘xyz:GOLD’,     asset:‘xyz:GOLD’,   exchange:‘hyperliquid’, minRR: 2.0, feeEst: 0.90 },
 };
 
@@ -148,7 +148,7 @@ body: JSON.stringify({ type: ‘candleSnapshot’, req: { coin, interval, startT
 });
 if(!r.ok) throw new Error(`HL candles ${coin} ${interval}: ${r.status}`);
 const raw = await r.json();
-// v4.9: lowered from 4 to 2 — HIP-3 assets (xyz:S&P500, xyz:GOLD) may have limited history
+// v4.9: lowered from 4 to 2 — HIP-3 assets (xyz:SP500, xyz:GOLD) may have limited history
 if(!Array.isArray(raw) || raw.length < 2) throw new Error(`HL candles ${coin} ${interval}: empty (${raw.length || 0})`);
 return raw.map(k => ({
 t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c,
@@ -1315,7 +1315,7 @@ for (const r of hip3PosRes) {
 const d = await r.json();
 if (d.assetPositions) positions.push(…d.assetPositions);
 }
-const symToId = { BTC: ‘bitcoin’, HYPE: ‘hyperliquid’, ‘S&P500’: ‘sp500’, ‘xyz:S&P500’: ‘sp500’, GOLD: ‘gold’, ‘xyz:GOLD’: ‘gold’ };
+const symToId = { BTC: ‘bitcoin’, HYPE: ‘hyperliquid’, ‘S&P500’: ‘sp500’, ‘xyz:SP500’: ‘sp500’, GOLD: ‘gold’, ‘xyz:GOLD’: ‘gold’ };
 
 ```
   // Build SL/TP map from trigger orders
@@ -1794,7 +1794,7 @@ const existingTs = new Set(closed.map(t => {
   return t.ts ? Math.round(new Date(t.ts).getTime() / 10000) : 0;
 }));
 
-const symToId = { BTC:'bitcoin', HYPE:'hyperliquid', 'S&P500':'sp500', 'xyz:S&P500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
+const symToId = { BTC:'bitcoin', HYPE:'hyperliquid', 'S&P500':'sp500', 'xyz:SP500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
 let added = 0;
 
 for (const cl of clusters) {
