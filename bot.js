@@ -148,17 +148,21 @@ body: JSON.stringify({ type: ‘candleSnapshot’, req: { coin, interval, startT
 });
 if(!r.ok) throw new Error(`HL candles ${coin} ${interval}: ${r.status}`);
 const raw = await r.json();
-if(!Array.isArray(raw) || raw.length < 4) throw new Error(`HL candles ${coin} ${interval}: empty (${raw.length || 0})`);
+// v4.9: lowered from 4 to 2 — HIP-3 assets (xyz:S&P500, xyz:GOLD) may have limited history
+if(!Array.isArray(raw) || raw.length < 2) throw new Error(`HL candles ${coin} ${interval}: empty (${raw.length || 0})`);
 return raw.map(k => ({
 t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c,
 bh: Math.max(+k.o, +k.c), bl: Math.min(+k.o, +k.c)
 }));
 }
 
+// v4.9: reduced limits for HIP-3 assets — they have shorter history than BTC/HYPE
+const HL_LIMITS = { ‘1W’:26, ‘1D’:90, ‘4H’:200, ‘1H’:500, ‘15m’:192 };
+
 async function getCandles(tfLabel, coinId){
 const coin = COINS[coinId];
 if(coin.exchange === ‘hyperliquid’){
-return hlKlines(coin.apiSym, HL_INTERVALS[tfLabel], LIMITS[tfLabel]);
+return hlKlines(coin.apiSym, HL_INTERVALS[tfLabel], HL_LIMITS[tfLabel]);
 }
 const iv   = INTERVAL_MAP[coin.exchange][tfLabel];
 const limit = coin.exchange === ‘bybit’ ? Math.min(LIMITS[tfLabel], 200) : LIMITS[tfLabel];
