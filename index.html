@@ -610,7 +610,7 @@ const TFS=[{l:'1W',iv:'W',w:5},{l:'1D',iv:'D',w:4},{l:'4H',iv:'240',w:3},{l:'1H'
 const COINS = {
   bitcoin:     { id:'bitcoin',     label:'BTC/USD',  sym:'BINANCE:BTCUSDT', shortLabel:'BTC',  apiSym:'BTCUSDT',  exchange:'binance',     minRR: 1.0, feeEst: 0.05 },
   hyperliquid: { id:'hyperliquid', label:'HYPE/USD', sym:'BYBIT:HYPEUSDT',  shortLabel:'HYPE', apiSym:'HYPEUSDT', exchange:'bybit',       minRR: 1.0, feeEst: 0.05 },
-  sp500:       { id:'sp500',       label:'S&P500',   sym:'OANDA:SPX500USD', shortLabel:'SPX',  apiSym:'xyz:S&P500', exchange:'hyperliquid', minRR: 2.0, feeEst: 0.90 },
+  sp500:       { id:'sp500',       label:'S&P500',   sym:'OANDA:SPX500USD', shortLabel:'SPX',  apiSym:'xyz:SP500', exchange:'hyperliquid', minRR: 2.0, feeEst: 0.90 },
   gold:        { id:'gold',        label:'GOLD/USD', sym:'OANDA:XAUUSD',    shortLabel:'GOLD', apiSym:'xyz:GOLD', exchange:'hyperliquid', minRR: 2.0, feeEst: 0.90 },
 };
 const HL_INFO = 'https://api.hyperliquid.xyz/info';
@@ -899,7 +899,7 @@ async function hlKlines(coin, interval, limit){
     body:JSON.stringify({type:'candleSnapshot',req:{coin,interval,startTime:Math.floor(startTime),endTime:Math.floor(now)}})});
   if(!r.ok) throw new Error(`HL candles ${coin} ${interval}: ${r.status}`);
   const raw=await r.json();
-  // v4.9: lowered from 4 to 2 — HIP-3 assets (xyz:S&P500, xyz:GOLD) may have limited history
+  // v4.9: lowered from 4 to 2 — HIP-3 assets (xyz:SP500, xyz:GOLD) may have limited history
   if(!Array.isArray(raw)||raw.length<2) throw new Error(`HL candles ${coin} ${interval}: empty (${raw.length||0})`);
   return raw.map(k=>({t:k.t,o:+k.o,h:+k.h,l:+k.l,c:+k.c,bh:Math.max(+k.o,+k.c),bl:Math.min(+k.o,+k.c)}));
 }
@@ -3864,7 +3864,7 @@ const HL = {
         const d = await r.json();
         if (d.assetPositions) positions.push(...d.assetPositions);
       }
-      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SPX: 'sp500', 'S&P500': 'sp500', 'xyz:S&P500': 'sp500', GOLD: 'gold', 'xyz:GOLD': 'gold' };
+      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SPX: 'sp500', 'S&P500': 'sp500', 'xyz:SP500': 'sp500', GOLD: 'gold', 'xyz:GOLD': 'gold' };
 
       // Build SL/TP map from trigger orders: { "BTC": { sl: price, tp: price } }
       const trigMap = {};
@@ -3991,7 +3991,7 @@ const HL = {
       // We look for fills we haven't already recorded in closedTrades
       const closed = loadClosedTrades();
       const recorded = new Set(closed.map(c => c.ts)); // existing timestamps
-      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SPX: 'sp500', 'S&P500': 'sp500', 'xyz:S&P500': 'sp500', GOLD: 'gold', 'xyz:GOLD': 'gold' };
+      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SPX: 'sp500', 'S&P500': 'sp500', 'xyz:SP500': 'sp500', GOLD: 'gold', 'xyz:GOLD': 'gold' };
 
       // Group consecutive fills by coin+dir to find close events
       // HL marks closing fills with closedPnl !== "0" or closedPnl field
@@ -4180,7 +4180,7 @@ const HL = {
   resolveAsset(asset) {
     if (this.assetMap[asset] !== undefined) return asset;
     // Map short names to prefixed HIP-3 names
-    const hlMap = { GOLD: 'xyz:GOLD', 'S&P500': 'xyz:S&P500' };
+    const hlMap = { GOLD: 'xyz:GOLD', 'S&P500': 'xyz:SP500' };
     return hlMap[asset] || asset;
   },
 
@@ -4613,7 +4613,7 @@ async function renderTrades(){
       const leverage = pos.leverage ? pos.leverage.value : '—';
 
       // Look up SL/TP from activeTrades
-      const symToId = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:S&P500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
+      const symToId = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:SP500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
       const cid = symToId[coin];
       const at = cid ? HL.activeTrades[cid] : null;
       const sl = at ? at.sl : null;
@@ -4698,7 +4698,7 @@ async function closeTrade(coin, szi, entryPx, pct){
   const isFullClose = (closeSize >= fullSize - minSize * 0.5);
 
   // Look up current price from coinState
-  const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:S&P500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
+  const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:SP500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
   const cid = coinIdMap[coin];
   const px = cid ? coinState[cid].price : 0;
   const slip = px * 0.01; // 1% slippage for IOC close to ensure fill
@@ -4751,11 +4751,11 @@ async function closeTrade(coin, szi, entryPx, pct){
 
     // If full close, clear from HL.activeTrades
     if(isFullClose){
-      const coinIdMap2 = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:S&P500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
+      const coinIdMap2 = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:SP500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
       if(coinIdMap2[coin]) { delete HL.activeTrades[coinIdMap2[coin]]; HL.saveActiveTrades(); }
     } else {
       // Partial close: update activeTrade size if tracked
-      const coinIdMap2 = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:S&P500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
+      const coinIdMap2 = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:SP500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
       const cid2 = coinIdMap2[coin];
       if(cid2 && HL.activeTrades[cid2]){
         HL.activeTrades[cid2].size = remaining;
@@ -4787,8 +4787,8 @@ function prefillTrade(coin, sig, sl, tp){
     // Auto-calculate suggested size from risk settings
     const accountSize = parseFloat(localStorage.getItem('account_size') || '100');
     const riskPct = parseFloat(localStorage.getItem('risk_pct') || '1');
-    const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:S&P500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
-    const hlAsset = { BTC:'BTC', HYPE:'HYPE', SPX:'xyz:S&P500', GOLD:'xyz:GOLD' };
+    const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:SP500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
+    const hlAsset = { BTC:'BTC', HYPE:'HYPE', SPX:'xyz:SP500', GOLD:'xyz:GOLD' };
     const cid = coinIdMap[coin];
     const px = cid ? coinState[cid].price : 0;
     if(px && sl){
@@ -4824,7 +4824,7 @@ async function manualOpenTrade(){
   btn.disabled = true;
 
   const isBuy = side === 'LONG';
-  const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:S&P500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
+  const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:SP500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
   const cid = coinIdMap[coin];
   const px = cid ? coinState[cid].price : 0;
   if(!px){ btn.textContent = 'OPEN TRADE'; btn.disabled = false; showToast('No price data for ' + coin); return; }
