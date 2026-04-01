@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// DMS Signal Bot v4.9 — AUTO-TRADE edition
-// Mirrors the DMS algorithm from index.html exactly — same levels, same scoring, same signals
+// DMS Signal Bot v4.9 – AUTO-TRADE edition
+// Mirrors the DMS algorithm from index.html exactly – same levels, same scoring, same signals
 // Now also executes trades on Hyperliquid with TP/SL/trailing stops
 // Node 18+ required (uses built-in fetch)
 ‘use strict’;
@@ -8,7 +8,7 @@ const fs    = require(‘fs’);
 const path  = require(‘path’);
 const ethers = require(‘ethers’);
 
-// ── CONFIG (env vars or .env file) ──────────────────────────────────────────
+// – CONFIG (env vars or .env file) ——————————————
 (function loadDotEnv(){
 const f = path.join(__dirname, ‘.env’);
 if(!fs.existsSync(f)) return;
@@ -27,7 +27,7 @@ const MIN_RR        = parseFloat(process.env.MIN_RR || ‘1.5’);
 const INTERVAL_MS   = parseInt(process.env.INTERVAL_MS || ‘120000’, 10);
 const DEDUP_FILE    = path.join(__dirname, ‘.dedup.json’);
 
-// ── AUTO-TRADE CONFIG ────────────────────────────────────────────────────────
+// – AUTO-TRADE CONFIG ––––––––––––––––––––––––––––
 const HL_PRIVATE_KEY  = process.env.HL_PRIVATE_KEY;   // Agent wallet private key
 const HL_MASTER_ADDR  = process.env.HL_MASTER_ADDR || ‘’;  // Master account address (if agent wallet)
 const AUTO_TRADE      = process.env.AUTO_TRADE === ‘true’;
@@ -41,7 +41,7 @@ console.error(‘ERROR: TG_TOKEN and TG_CHATID must be set.’);
 process.exit(1);
 }
 
-// ── COINS (BTC, HYPE, SPX + GOLD via Hyperliquid HIP-3) ─────────────────────
+// – COINS (BTC, HYPE, SPX + GOLD via Hyperliquid HIP-3) ———————
 const COINS = {
 bitcoin:     { id:‘bitcoin’,     label:‘BTC’,    apiSym:‘BTCUSDT’,      asset:‘BTC’,        exchange:‘binance’,     minRR: 1.0, feeEst: 0.05 },
 hyperliquid: { id:‘hyperliquid’, label:‘HYPE’,   apiSym:‘HYPEUSDT’,     asset:‘HYPE’,       exchange:‘bybit’,       minRR: 1.0, feeEst: 0.05 },
@@ -69,12 +69,12 @@ const BINANCE = ‘https://api.binance.com/api/v3’;
 const BYBIT   = ‘https://api.bybit.com/v5/market’;
 const HL_API  = ‘https://api.hyperliquid.xyz’;
 
-// ── STATE ────────────────────────────────────────────────────────────────────
+// – STATE ––––––––––––––––––––––––––––––––––
 const coinState = {};  // coinId -> { price, htfDir, results: { tf: dmsResult } }
 const ACTIVE_TRADES_FILE = path.join(__dirname, ‘.active_trades.json’);
 const CLOSED_TRADES_FILE = path.join(__dirname, ‘.closed_trades.json’);
 
-// ── DEDUP ─────────────────────────────────────────────────────────────────────
+// – DEDUP ———————————————————————
 function loadDedup(){
 try{ return JSON.parse(fs.readFileSync(DEDUP_FILE,‘utf8’)); }catch{ return {}; }
 }
@@ -96,7 +96,7 @@ d[key] = Date.now();
 saveDedup(d);
 }
 
-// ── TELEGRAM ──────────────────────────────────────────────────────────────────
+// – TELEGRAM ——————————————————————
 async function sendTelegram(msg){
 try{
 const r = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`,{
@@ -109,7 +109,7 @@ return r.ok;
 }catch(e){ console.warn(‘Telegram fetch error:’, e.message); return false; }
 }
 
-// ── EXCHANGE APIs ─────────────────────────────────────────────────────────────
+// – EXCHANGE APIs ———————————————————––
 async function bnKlines(sym, interval, limit){
 const url = `${BINANCE}/klines?symbol=${sym}&interval=${interval}&limit=${limit}`;
 const r   = await fetch(url);
@@ -148,7 +148,7 @@ body: JSON.stringify({ type: ‘candleSnapshot’, req: { coin, interval, startT
 });
 if(!r.ok) throw new Error(`HL candles ${coin} ${interval}: ${r.status}`);
 const raw = await r.json();
-// v4.9: lowered from 4 to 2 — HIP-3 assets (xyz:SP500, xyz:GOLD) may have limited history
+// v4.9: lowered from 4 to 2 – HIP-3 assets (xyz:SP500, xyz:GOLD) may have limited history
 if(!Array.isArray(raw) || raw.length < 2) throw new Error(`HL candles ${coin} ${interval}: empty (${raw.length || 0})`);
 return raw.map(k => ({
 t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c,
@@ -156,7 +156,7 @@ bh: Math.max(+k.o, +k.c), bl: Math.min(+k.o, +k.c)
 }));
 }
 
-// v4.9: reduced limits for HIP-3 assets — they have shorter history than BTC/HYPE
+// v4.9: reduced limits for HIP-3 assets – they have shorter history than BTC/HYPE
 const HL_LIMITS = { ‘1W’:26, ‘1D’:90, ‘4H’:200, ‘1H’:500, ‘15m’:192 };
 
 async function getCandles(tfLabel, coinId){
@@ -215,7 +215,7 @@ const d = await r.json();
 return { price: +d.lastPrice, change: +d.priceChangePercent };
 }
 
-// ── UTILITIES ─────────────────────────────────────────────────────────────────
+// – UTILITIES —————————————————————–
 function fmt(n){ return n>=1000 ? n.toLocaleString(‘en-US’,{maximumFractionDigits:0}) : n.toFixed(2); }
 function atr(c, p=14){
 const tr = c.slice(1).map((x,i)=>Math.max(x.h-x.l, Math.abs(x.h-c[i].c), Math.abs(x.l-c[i].c)));
@@ -353,7 +353,7 @@ levels.push({ price:prev2.bl, bh:prev2.bl, bl:prev2.l, type:‘support’, stren
 return levels;
 }
 
-// ── SESSION LEVELS ────────────────────────────────────────────────────────────
+// – SESSION LEVELS ————————————————————
 function getSessionBoundaries(){
 const now = new Date();
 const londonOffset = (() => {
@@ -453,7 +453,7 @@ return [
 ];
 }
 
-// ── FIBONACCI RETRACEMENT LEVELS (v4.9) ────────────────────────────────────
+// – FIBONACCI RETRACEMENT LEVELS (v4.9) ————————————
 // When there’s a big gap between nearest support and resistance (>8% of price),
 // generate fib retracements from the recent major swing to fill the void.
 function findFibLevels(candles, existingLevels, currentPrice){
@@ -502,7 +502,7 @@ tf: ‘FIB’, isFib: true
 return fibs;
 }
 
-// ── LEVEL HELPERS ─────────────────────────────────────────────────────────────
+// – LEVEL HELPERS ———————————————————––
 function findDMCLevels(c, dCandles, tf, asiaLevels){
 const vp   = findVPeaks(c, tf);
 const pdhl = dCandles ? findPDHL(dCandles) : [];
@@ -523,7 +523,7 @@ merged.push(…fibs);
 return merged;
 }
 function findNextLevel(levels, currentPrice, direction){
-// Use all levels with score >= 10 — lower threshold catches more 4H/1H levels
+// Use all levels with score >= 10 – lower threshold catches more 4H/1H levels
 const qualityLevels = levels.filter(l => l.score >= 10);
 const pool   = qualityLevels.length >= 2 ? qualityLevels : levels;
 const sorted = […pool].sort((a,b)=>a.price-b.price);
@@ -536,14 +536,14 @@ if(candidates.length) return { price:candidates[candidates.length-1].price, sour
 }
 return { price: direction === ‘long’ ? currentPrice*1.025 : currentPrice*0.975, source:‘ATR est.’ };
 }
-// v4.9: ATR-aware — enforces minimum 1.0 ATR distance to avoid noise wicks
+// v4.9: ATR-aware – enforces minimum 1.0 ATR distance to avoid noise wicks
 function findStopLevel(levels, trapPrice, direction, atrVal){
 const qualityLevels = levels.filter(l => l.score >= 10);
 const pool   = qualityLevels.length >= 2 ? qualityLevels : levels;
 const sorted = […pool].sort((a,b)=>a.price-b.price);
 // ATR-based minimum distance: at least 1.0 ATR from trap, floor 0.5%
 const minDist = atrVal ? Math.max(atrVal * 1.0, trapPrice * 0.005) : trapPrice * 0.005;
-// Max stop distance: 4% from trap — prevents absurdly wide stops
+// Max stop distance: 4% from trap – prevents absurdly wide stops
 const maxStopDist = trapPrice * 0.04;
 if(direction === ‘short’){
 const candidates = sorted.filter(l=>l.price > trapPrice + minDist && l.price < trapPrice + maxStopDist);
@@ -565,16 +565,16 @@ const risk    = Math.abs(entry - stopRef) * 1.05;
 const reward  = Math.abs(entry - target);
 if(risk < 1) return null;
 const rr = reward / risk;
-// Cap R:R at 2.5 — beyond this, targets are unrealistically far
+// Cap R:R at 2.5 – beyond this, targets are unrealistically far
 return Math.min(rr, 2.5).toFixed(1);
 }
 
-// ── REJECTION CANDLE DETECTION (v4.9 — follow-through confirmation) ──────────
-// Phase 1: Rejection candle must NOT be the current candle — we need at least
+// – REJECTION CANDLE DETECTION (v4.9 – follow-through confirmation) –––––
+// Phase 1: Rejection candle must NOT be the current candle – we need at least
 //          one follow-through candle that confirms the bounce direction.
 //          This prevents firing signals the instant a wick appears, before
 //          knowing whether price actually bounced or sliced through.
-// Phase 2: Momentum filter — if last 3-5 candles show strong directional
+// Phase 2: Momentum filter – if last 3-5 candles show strong directional
 //          momentum AGAINST the signal, suppress it (price is trending through
 //          the level, not bouncing).
 // Returns { confirmed: true/false, barsAgo, wickRatio, followThrough }
@@ -603,10 +603,10 @@ if (direction === 'LONG') {
     // Follow-through: current candle must close above rejection candle's body low
     const followOk = cur.c > k.bl && cur.c >= levelPrice - atrVal * 0.1;
     if (followOk) {
-      // Check follow-through strength — a strong candle overrides momentum
+      // Check follow-through strength -- a strong candle overrides momentum
       const curBody = cur.c - cur.o; // positive = bullish
       const strongFollow = curBody > atrVal * 0.15; // decent bullish body
-      // Momentum filter — only blocks if follow-through is weak
+      // Momentum filter -- only blocks if follow-through is weak
       if (!strongFollow) {
         const mom = hasMomentumAgainst(candles, direction, atrVal);
         if (mom.blocked) return { confirmed: false, reason: mom.reason };
@@ -640,7 +640,7 @@ if (direction === 'LONG') {
 return { confirmed: false };
 }
 
-// ── STRONG BODY BOUNCE (v4.9) ─────────────────────────────────────────────
+// – STRONG BODY BOUNCE (v4.9) ———————————————
 // Catches V-bounces where price hits a level and reverses with a strong body
 // candle, even if there’s no classic wick rejection pattern. This is an
 // alternative to hasRejection for 4H/1H when:
@@ -689,11 +689,11 @@ const bodyATR = (curBody / atrVal).toFixed(2);
 return { confirmed: true, barsAgo: touchBar, bodyATR };
 }
 
-// ── MOMENTUM FILTER (v4.9) ──────────────────────────────────────────────────
+// – MOMENTUM FILTER (v4.9) –––––––––––––––––––––––––
 // Checks if last 3-5 candles show strong directional momentum AGAINST the
 // proposed trade direction. If price is clearly trending through a level
 // (e.g., 4 consecutive bearish candles breaking support), a wick at that level
-// is just a pause, not a reversal — don’t fire a LONG.
+// is just a pause, not a reversal – don’t fire a LONG.
 function hasMomentumAgainst(candles, direction, atrVal) {
 const n = candles.length;
 if (n < 4) return { blocked: false };
@@ -720,7 +720,7 @@ return { blocked: true, reason: `${againstCount}/${lookback} candles against ${d
 return { blocked: false };
 }
 
-// ── LOWER-TF ALIGNMENT CHECK (v4.9) ───────────────────────────────────────
+// – LOWER-TF ALIGNMENT CHECK (v4.9) —————————————
 // Before ANY signal fires, check if lower-TF candles are moving WITH the signal.
 // 1W/1D check 4H+1H, 4H checks 1H+15m, 1H checks 15m.
 // Two independent blocking conditions (either one blocks):
@@ -765,7 +765,7 @@ return { aligned: false, reason: `${ch.label}: net move ${ch.netMoveATR} ATR aga
 return { aligned: true };
 }
 
-// ── DMS SIGNAL ENGINE (v4.9 — confirmed follow-through + momentum + HTF + LTF align) ─
+// – DMS SIGNAL ENGINE (v4.9 – confirmed follow-through + momentum + HTF + LTF align) -
 function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
 coinMinRR = coinMinRR || 1.0;
 const n = c.length;
@@ -802,7 +802,7 @@ if(blindCandidate){
   const isRes  = effectiveType === 'resistance';
   const blindSig = isRes ? 'SHORT' : 'LONG';
   const isFlipped = ft==='flipped_support' || ft==='flipped_resistance';
-  // v4.5: HTF ALWAYS takes precedence — no strong-level bypass
+  // v4.5: HTF ALWAYS takes precedence -- no strong-level bypass
   const htfBlocks = (isRes && htfDir==='UP') || (!isRes && htfDir==='DOWN');
   if(!htfBlocks){
     const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
@@ -810,43 +810,43 @@ if(blindCandidate){
     const rr   = calcRR(cur.c, tgt.price, blindCandidate.price, stop);
     if(rr && parseFloat(rr) >= coinMinRR){
       const dist = ((blindCandidate.price - cur.c)/cur.c*100).toFixed(2);
-      const htfNote = htfDir!=='UNCLEAR' ? ` · HTF ${htfDir} aligns` : '';
+      const htfNote = htfDir!=='UNCLEAR' ? ` . HTF ${htfDir} aligns` : '';
       const typeLabel = isFlipped ? `PASS-THROUGH` : `UNTESTED ${tf}`;
       // v4.9: Require rejection + follow-through + momentum check
       const rejection = hasRejection(c, blindCandidate.price, blindSig, a);
       if(rejection.confirmed){
-        // v4.9: LTF alignment — 1W/1D signals must not conflict with lower-TF momentum
-        // Only applies to HTF signals (1W/1D) — 4H/1H left untouched to avoid over-filtering
+        // v4.9: LTF alignment -- 1W/1D signals must not conflict with lower-TF momentum
+        // Only applies to HTF signals (1W/1D) -- 4H/1H left untouched to avoid over-filtering
         if((tf === '1W' || tf === '1D') && lowerCandles){
           const ltfCheck = hasLTFAlignment(blindSig, lowerCandles);
           if(!ltfCheck.aligned){
             const waitReason = ltfCheck.reason;
-            const dir = isRes ? 'RESISTANCE — lower TF opposing' : 'SUPPORT — lower TF opposing';
-            return { sig:'NEUTRAL', type:'AT_LEVEL', level:blindCandidate.price, target:tgt.price, strength:blindCandidate.strength, score:blindCandidate.score, reason:`WAIT: ${blindCandidate.source} $${fmt(blindCandidate.price)} · rejection confirmed BUT ${waitReason} · ${dir}` };
+            const dir = isRes ? 'RESISTANCE -- lower TF opposing' : 'SUPPORT -- lower TF opposing';
+            return { sig:'NEUTRAL', type:'AT_LEVEL', level:blindCandidate.price, target:tgt.price, strength:blindCandidate.strength, score:blindCandidate.score, reason:`WAIT: ${blindCandidate.source} $${fmt(blindCandidate.price)} . rejection confirmed BUT ${waitReason} . ${dir}` };
           }
         }
         return {
           sig:blindSig, type:'BLIND_ENTRY',
           level:blindCandidate.price, target:tgt.price, rr, stopPrice:stop,
           strength:blindCandidate.strength, score:blindCandidate.score,
-          reason:`CONFIRMED: ${blindCandidate.source} $${fmt(blindCandidate.price)} · ${dist>0?'+':''}${dist}% · ${typeLabel} · rejection ${rejection.barsAgo} bars ago · follow-through confirmed${htfNote} · R:R ${rr} → $${fmt(tgt.price)}`
+          reason:`CONFIRMED: ${blindCandidate.source} $${fmt(blindCandidate.price)} . ${dist>0?'+':''}${dist}% . ${typeLabel} . rejection ${rejection.barsAgo} bars ago . follow-through confirmed${htfNote} . R:R ${rr} -> $${fmt(tgt.price)}`
         };
       }
-      // No confirmed rejection → downgrade to AT_LEVEL alert (no auto-trade)
+      // No confirmed rejection -> downgrade to AT_LEVEL alert (no auto-trade)
       const waitReason = rejection.reason || 'no confirmed rejection + follow-through';
-      const dir = isRes ? 'RESISTANCE — waiting for confirmation' : 'SUPPORT — waiting for confirmation';
-      return { sig:'NEUTRAL', type:'AT_LEVEL', level:blindCandidate.price, target:tgt.price, strength:blindCandidate.strength, score:blindCandidate.score, reason:`PENDING: ${blindCandidate.source} $${fmt(blindCandidate.price)} · ${dist>0?'+':''}${dist}% · ${typeLabel} · ${waitReason} · ${dir}` };
+      const dir = isRes ? 'RESISTANCE -- waiting for confirmation' : 'SUPPORT -- waiting for confirmation';
+      return { sig:'NEUTRAL', type:'AT_LEVEL', level:blindCandidate.price, target:tgt.price, strength:blindCandidate.strength, score:blindCandidate.score, reason:`PENDING: ${blindCandidate.source} $${fmt(blindCandidate.price)} . ${dist>0?'+':''}${dist}% . ${typeLabel} . ${waitReason} . ${dir}` };
     }
   }
 }
-// 4H/1H: Check if price is at a level WITH confirmed rejection → produce entry
+// 4H/1H: Check if price is at a level WITH confirmed rejection -> produce entry
 const atLevelWindow = isHTF ? a * 0.4 : a * 1.0;
 const atLevel = nearby.find(l=>Math.abs(l.price-cur.c) < atLevelWindow && l.score >= 20);
 if(atLevel){
   const isRes = atLevel.type === 'resistance';
   const confSig = isRes ? 'SHORT' : 'LONG';
   const htfBlocks = (isRes && htfDir==='UP') || (!isRes && htfDir==='DOWN');
-  // On 4H/1H: check for confirmed rejection to upgrade AT_LEVEL → trade
+  // On 4H/1H: check for confirmed rejection to upgrade AT_LEVEL -> trade
   if((tf === '4H' || tf === '1H') && !htfBlocks){
     const rejection = hasRejection(c, atLevel.price, confSig, a);
     if(rejection.confirmed){
@@ -859,12 +859,12 @@ if(atLevel){
           sig:confSig, type:'BLIND_ENTRY',
           level:atLevel.price, target:tgt.price, rr, stopPrice:stop,
           strength:atLevel.strength, score:atLevel.score,
-          reason:`CONFIRMED ${tf}: ${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · rejection ${rejection.barsAgo} bars ago · follow-through confirmed · R:R ${rr} → $${fmt(tgt.price)}`
+          reason:`CONFIRMED ${tf}: ${atLevel.source} $${fmt(atLevel.price)} . ${dist>0?'+':''}${dist}% . rejection ${rejection.barsAgo} bars ago . follow-through confirmed . R:R ${rr} -> $${fmt(tgt.price)}`
         };
       }
     }
 
-    // v4.9: STRONG BODY BOUNCE — catches V-bounces without strict wick pattern
+    // v4.9: STRONG BODY BOUNCE -- catches V-bounces without strict wick pattern
     // Fires when price touched level recently and bounced with a strong body candle
     if(!rejection.confirmed){
       const bounce = hasStrongBodyBounce(c, atLevel.price, confSig, a);
@@ -878,18 +878,18 @@ if(atLevel){
             sig:confSig, type:'BLIND_ENTRY',
             level:atLevel.price, target:tgt.price, rr, stopPrice:stop,
             strength:atLevel.strength, score:atLevel.score,
-            reason:`CONFIRMED ${tf}: ${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · strong bounce ${bounce.barsAgo} bars ago · body ${bounce.bodyATR} ATR · R:R ${rr} → $${fmt(tgt.price)}`
+            reason:`CONFIRMED ${tf}: ${atLevel.source} $${fmt(atLevel.price)} . ${dist>0?'+':''}${dist}% . strong bounce ${bounce.barsAgo} bars ago . body ${bounce.bodyATR} ATR . R:R ${rr} -> $${fmt(tgt.price)}`
           };
         }
       }
     }
   }
-  const dir  = atLevel.type==='resistance' ? 'RESISTANCE — watch for rejection + follow-through' : 'SUPPORT — watch for rejection + follow-through';
+  const dir  = atLevel.type==='resistance' ? 'RESISTANCE -- watch for rejection + follow-through' : 'SUPPORT -- watch for rejection + follow-through';
   const dist = ((atLevel.price - cur.c)/cur.c*100).toFixed(2);
-  return { sig:'NEUTRAL', type:'AT_LEVEL', level:atLevel.price, target:null, strength:atLevel.strength, score:atLevel.score, reason:`${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · ${dir}` };
+  return { sig:'NEUTRAL', type:'AT_LEVEL', level:atLevel.price, target:null, strength:atLevel.strength, score:atLevel.score, reason:`${atLevel.source} $${fmt(atLevel.price)} . ${dist>0?'+':''}${dist}% . ${dir}` };
 }
 
-// ── BREAKDOWN / BREAKOUT DETECTION (v4.9) ──────────────────────────
+// -- BREAKDOWN / BREAKOUT DETECTION (v4.9) --------------------------
 if(isHTF){
   const breakLookback = Math.min(5, n - 1);
   for(const lv of nearby.filter(l => l.score >= 25)){
@@ -915,13 +915,13 @@ if(isHTF){
       if(!rr || parseFloat(rr) < coinMinRR) continue;
 
       const breakDist = (distFromLevel * 100).toFixed(2);
-      const htfNote = htfDir === 'DOWN' ? ' · HTF DOWN aligns' : '';
+      const htfNote = htfDir === 'DOWN' ? ' . HTF DOWN aligns' : '';
       return {
         sig:'SHORT', type:'BLIND_ENTRY',
         level:lv.price, target:tgt.price, rr, stopPrice:stop,
         strength:lv.strength, score:lv.score,
-        reason:`BREAKDOWN ${tf}: ${lv.source} $${fmt(lv.price)} broken · ${breakDist}% below · ${aboveCount}/${breakLookback} above${htfNote} · R:R ${rr}`,
-        detail:`Support broken — SL: $${fmt(stop)}`, untested:false
+        reason:`BREAKDOWN ${tf}: ${lv.source} $${fmt(lv.price)} broken . ${breakDist}% below . ${aboveCount}/${breakLookback} above${htfNote} . R:R ${rr}`,
+        detail:`Support broken -- SL: $${fmt(stop)}`, untested:false
       };
     }
 
@@ -943,13 +943,13 @@ if(isHTF){
       if(!rr || parseFloat(rr) < coinMinRR) continue;
 
       const breakDist = (distFromLevel * 100).toFixed(2);
-      const htfNote = htfDir === 'UP' ? ' · HTF UP aligns' : '';
+      const htfNote = htfDir === 'UP' ? ' . HTF UP aligns' : '';
       return {
         sig:'LONG', type:'BLIND_ENTRY',
         level:lv.price, target:tgt.price, rr, stopPrice:stop,
         strength:lv.strength, score:lv.score,
-        reason:`BREAKOUT ${tf}: ${lv.source} $${fmt(lv.price)} broken · +${breakDist}% above · ${belowCount}/${breakLookback} below${htfNote} · R:R ${rr}`,
-        detail:`Resistance broken — SL: $${fmt(stop)}`, untested:false
+        reason:`BREAKOUT ${tf}: ${lv.source} $${fmt(lv.price)} broken . +${breakDist}% above . ${belowCount}/${breakLookback} below${htfNote} . R:R ${rr}`,
+        detail:`Resistance broken -- SL: $${fmt(stop)}`, untested:false
       };
     }
   }
@@ -988,7 +988,7 @@ const stop = findStopLevel(levels, lv.price, ‘short’, a);
 const rr   = calcRR(confirm.c, tgt.price, lv.price, stop);
 if(rr && parseFloat(rr) < MIN_RR) continue;
 const dist = ((lv.price - confirm.c)/confirm.c*100).toFixed(2);
-return { sig:‘SHORT’, type:‘FAIL_GAIN’, level:lv.price, target:tgt.price, rr, stopPrice:stop, strength:lv.strength, score:lv.score, reason:`${lv.source} $${fmt(lv.price)} · ${dist}% above · ${lb===1?'just now':lb+' bars ago'}${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)}` };
+return { sig:‘SHORT’, type:‘FAIL_GAIN’, level:lv.price, target:tgt.price, rr, stopPrice:stop, strength:lv.strength, score:lv.score, reason:`${lv.source} $${fmt(lv.price)} . ${dist}% above . ${lb===1?'just now':lb+' bars ago'}${rr?` . R:R ${rr}`:''} -> $${fmt(tgt.price)}` };
 }
 }
 for(const lv of nearby.filter(l=>l.type===‘support’)){
@@ -1014,19 +1014,19 @@ const stop = findStopLevel(levels, lv.price, ‘long’, a);
 const rr   = calcRR(confirm.c, tgt.price, lv.price, stop);
 if(rr && parseFloat(rr) < MIN_RR) continue;
 const dist = ((confirm.c - lv.price)/confirm.c*100).toFixed(2);
-return { sig:‘LONG’, type:‘FAIL_LOSE’, level:lv.price, target:tgt.price, rr, stopPrice:stop, strength:lv.strength, score:lv.score, reason:`${lv.source} $${fmt(lv.price)} · ${dist}% below · ${lb===1?'just now':lb+' bars ago'}${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)}` };
+return { sig:‘LONG’, type:‘FAIL_LOSE’, level:lv.price, target:tgt.price, rr, stopPrice:stop, strength:lv.strength, score:lv.score, reason:`${lv.source} $${fmt(lv.price)} . ${dist}% below . ${lb===1?'just now':lb+' bars ago'}${rr?` . R:R ${rr}`:''} -> $${fmt(tgt.price)}` };
 }
 }
 const atLevel = nearby.find(l=>Math.abs(l.price-cur.c) < a*1.5 && l.score>=20);
 if(atLevel){
 const dist = ((atLevel.price - cur.c)/cur.c*100).toFixed(2);
-const dir  = atLevel.type===‘resistance’ ? ‘RESISTANCE — watch for wick + body close back below’ : ‘SUPPORT — watch for wick + body close back above’;
-return { sig:‘NEUTRAL’, type:‘AT_LEVEL’, level:atLevel.price, target:null, strength:atLevel.strength, score:atLevel.score, reason:`${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · ${dir}` };
+const dir  = atLevel.type===‘resistance’ ? ‘RESISTANCE – watch for wick + body close back below’ : ‘SUPPORT – watch for wick + body close back above’;
+return { sig:‘NEUTRAL’, type:‘AT_LEVEL’, level:atLevel.price, target:null, strength:atLevel.strength, score:atLevel.score, reason:`${atLevel.source} $${fmt(atLevel.price)} . ${dist>0?'+':''}${dist}% . ${dir}` };
 }
 return { sig:‘NEUTRAL’, type:‘NONE’, level:null, target:null, reason:‘Between levels’ };
 }
 
-// ── HTF BIAS ──────────────────────────────────────────────────────────────────
+// – HTF BIAS ——————————————————————
 function nextMove(h4C, h1C){
 const n4=h4C.length, n1=h1C.length;
 if(n4<8||n1<8) return { dir:‘UNCLEAR’ };
@@ -1057,9 +1057,9 @@ if(h4n.bh<h4p.bh && h4n.bl<h4p.bl) return { dir:‘DOWN’ };
 return { dir:‘UNCLEAR’ };
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// ██  HYPERLIQUID TRADING MODULE                                            ██
-// ══════════════════════════════════════════════════════════════════════════════
+// ==============================================================================
+// ##  HYPERLIQUID TRADING MODULE                                            ##
+// ==============================================================================
 
 const HL = {
 wallet: null,
@@ -1074,7 +1074,7 @@ _lastEquitySync: 0,
 tradesToday: 0,
 lastTradeDay: ‘’,
 
-// ── MSGPACK encoder (matches app exactly) ──
+// – MSGPACK encoder (matches app exactly) –
 msgpack(obj) {
 const buf = [];
 const writeStr = (s) => {
@@ -1110,7 +1110,7 @@ enc(obj);
 return new Uint8Array(buf);
 },
 
-// ── Compute action hash for phantom agent signing ──
+// – Compute action hash for phantom agent signing –
 computeActionHash(action, nonce, vaultAddress) {
 const packed = this.msgpack(action);
 const nonceBuf = new Uint8Array(8);
@@ -1132,7 +1132,7 @@ combined.set(vaultBuf, packed.length + nonceBuf.length);
 return ethers.utils.keccak256(combined);
 },
 
-// ── Sign L1 action (phantom agent EIP-712) ──
+// – Sign L1 action (phantom agent EIP-712) –
 async signL1Action(action, nonce, vaultAddress) {
 const hash = this.computeActionHash(action, nonce, vaultAddress || null);
 const domain = {
@@ -1151,14 +1151,14 @@ const sig = await this.wallet._signTypedData(domain, types, value);
 return ethers.utils.splitSignature(sig);
 },
 
-// ── Float to wire: match Python SDK ──
+// – Float to wire: match Python SDK –
 floatToWire(x) {
 const s = parseFloat(parseFloat(x).toPrecision(5)).toString();
 if (s.includes(’.’)) return s.replace(/.?0+$/, ‘’) || ‘0’;
 return s;
 },
 
-// ── Build order type wire ──
+// – Build order type wire –
 orderTypeToWire(orderType) {
 if (orderType.limit) {
 return { limit: { tif: orderType.limit.tif } };
@@ -1172,7 +1172,7 @@ tpsl: orderType.trigger.tpsl
 return orderType;
 },
 
-// ── Initialize HL module ──
+// – Initialize HL module –
 async init() {
 if (!HL_PRIVATE_KEY) {
 console.log(‘HL: No private key configured, auto-trade disabled.’);
@@ -1187,7 +1187,7 @@ this.enabled = AUTO_TRADE;
 this.tradesToday = 0;
 this.lastTradeDay = new Date().toDateString();
 this.loadActiveTrades();
-console.log(‘HL loaded persisted trades:’, Object.keys(this.activeTrades).length, ‘→’, JSON.stringify(this.activeTrades));
+console.log(‘HL loaded persisted trades:’, Object.keys(this.activeTrades).length, ‘->’, JSON.stringify(this.activeTrades));
 await this.syncPositions();
 await this.syncEquity();
 console.log(‘HL ready:’, this.address, ‘| Master:’, this.masterAddress || ‘not set’, ‘| Auto:’, this.enabled, ‘| Equity: $’ + this.cachedEquity.toFixed(2), ‘| Assets:’, Object.keys(this.assetMap).join(’, ’));
@@ -1215,10 +1215,10 @@ this.szDecimals[a.name] = a.szDecimals;
 });
 });
 console.log(‘HL meta: ’ + Object.keys(this.assetMap).length + ’ assets loaded (’ + allMetas.length + ’ dexes)’);
-if (this.assetMap[‘xyz:GOLD’] !== undefined) console.log(’  xyz:GOLD → assetId’, this.assetMap[‘xyz:GOLD’], ‘szDec’, this.szDecimals[‘xyz:GOLD’]);
+if (this.assetMap[‘xyz:GOLD’] !== undefined) console.log(’  xyz:GOLD -> assetId’, this.assetMap[‘xyz:GOLD’], ‘szDec’, this.szDecimals[‘xyz:GOLD’]);
 },
 
-// ── Get balance (perps + spot) ──
+// – Get balance (perps + spot) –
 async getBalance() {
 if (!this.wallet) return 0;
 const queryAddr = (this.masterAddress || this.address).toLowerCase();
@@ -1258,7 +1258,7 @@ console.log(‘HL equity synced: $’ + bal.toFixed(2));
 } catch (e) { console.warn(‘HL syncEquity failed:’, e.message); }
 },
 
-// ── Persist active trades to file (replaces localStorage) ──
+// – Persist active trades to file (replaces localStorage) –
 saveActiveTrades() {
 try { fs.writeFileSync(ACTIVE_TRADES_FILE, JSON.stringify(this.activeTrades)); } catch(e){}
 },
@@ -1270,10 +1270,10 @@ this.activeTrades = JSON.parse(fs.readFileSync(ACTIVE_TRADES_FILE, ‘utf8’));
 } catch(e){ this.activeTrades = {}; }
 },
 
-// ── HIP-3 dexes we trade on (for querying positions, orders, fills) ──
+// – HIP-3 dexes we trade on (for querying positions, orders, fills) –
 HIP3_DEXES: [‘xyz’],
 
-// ── Fetch trigger orders (SL/TP) — queries main + HIP-3 dexes ──
+// – Fetch trigger orders (SL/TP) – queries main + HIP-3 dexes –
 async fetchTriggerOrders() {
 try {
 const queryAddr = (this.masterAddress || this.address).toLowerCase();
@@ -1294,7 +1294,7 @@ return allOrders;
 } catch(e) { console.warn(‘fetchTriggerOrders error:’, e.message); return []; }
 },
 
-// ── Sync positions with real HL state (main + HIP-3 dexes) ──
+// – Sync positions with real HL state (main + HIP-3 dexes) –
 async syncPositions() {
 try {
 const queryAddr = (this.masterAddress || this.address).toLowerCase();
@@ -1393,7 +1393,7 @@ const symToId = { BTC: ‘bitcoin’, HYPE: ‘hyperliquid’, ‘S&P500’: ‘
     });
     saveClosedTrades(closed);
 
-    const emoji = reason === 'tp_hit' ? '✅' : reason === 'sl_hit' ? '🛑' : '📊';
+    const emoji = reason === 'tp_hit' ? '[TP]' : reason === 'sl_hit' ? '[SL]' : '[STATS]';
     const label = reason === 'tp_hit' ? 'TP HIT' : reason === 'sl_hit' ? 'SL HIT' : 'CLOSED';
     console.log(`HL POSITION CLOSED: ${label} ${old.side} ${old.asset} | P&L: $${pnl.toFixed(2)}`);
     await sendTelegram(`${emoji} <b>${label}: ${old.side} ${old.asset}</b>\nEntry: $${fmt(old.entry)}\nExit: $${fmt(exitPx)}\nP&L: <b>$${pnl.toFixed(2)}</b>`);
@@ -1406,7 +1406,7 @@ const symToId = { BTC: ‘bitcoin’, HYPE: ‘hyperliquid’, ‘S&P500’: ‘
 
 },
 
-// ── Place an order ──
+// – Place an order –
 async placeOrder(asset, isBuy, size, price, orderType, reduceOnly = false) {
 const assetIdx = this.assetMap[asset];
 if (assetIdx === undefined) throw new Error(‘Unknown asset: ’ + asset + ’ (loaded: ’ + Object.keys(this.assetMap).join(’,’) + ‘)’);
@@ -1417,7 +1417,7 @@ const orderWire = { a: assetIdx, b: isBuy, p: priceStr, s: sizeStr, r: reduceOnl
 const action = { type: ‘order’, orders: [orderWire], grouping: ‘na’ };
 const nonce = Date.now();
 const signature = await this.signL1Action(action, nonce, null);
-if (!signature || !signature.r) throw new Error(‘Signing failed — null signature’);
+if (!signature || !signature.r) throw new Error(‘Signing failed – null signature’);
 const payload = { action, nonce, signature: { r: signature.r, s: signature.s, v: signature.v } };
 console.log(‘HL order:’, asset, isBuy ? ‘BUY’ : ‘SELL’, sizeStr, ‘@’, priceStr, reduceOnly ? ‘(reduce)’ : ‘’, ‘assetIdx:’, assetIdx);
 
@@ -1463,7 +1463,7 @@ if (result.status === 'ok' && result.response?.data?.statuses) {
     return { status: 'ok', filled: false, resting: true, oid: s.resting.oid, raw: result };
   }
 }
-// Unexpected response shape — return as-is but log a warning
+// Unexpected response shape -- return as-is but log a warning
 if (result.status === 'err') {
   console.error('HL API error:', result.response || result);
   return { status: 'err', response: result.response || JSON.stringify(result).slice(0, 200) };
@@ -1474,7 +1474,7 @@ return result;
 
 },
 
-// ── Fetch open orders (main + HIP-3 dexes) ──
+// – Fetch open orders (main + HIP-3 dexes) –
 async fetchOpenOrders() {
 const queryAddr = (this.masterAddress || this.address).toLowerCase();
 const requests = [
@@ -1493,7 +1493,7 @@ if (Array.isArray(data)) allOrders.push(…data);
 return allOrders;
 },
 
-// ── Cancel an order ──
+// – Cancel an order –
 async cancelOrder(asset, oid) {
 const assetIdx = this.assetMap[asset];
 if (assetIdx === undefined) return;
@@ -1508,7 +1508,7 @@ body: JSON.stringify(payload)
 return await res.json();
 },
 
-// ── Cancel all trigger orders for an asset ──
+// – Cancel all trigger orders for an asset –
 async cancelTriggerOrders(asset) {
 try {
 const orders = await this.fetchOpenOrders();
@@ -1518,7 +1518,7 @@ return triggers.length;
 } catch (e) { console.warn(‘cancelTriggerOrders error:’, e.message); return 0; }
 },
 
-// ── Execute full trade: market entry + SL + TP ──
+// – Execute full trade: market entry + SL + TP –
 async executeTrade(coinId, signal, confidence) {
 const asset = COINS[coinId]?.asset;
 if (!asset || !this.enabled || !this.wallet) return null;
@@ -1550,7 +1550,7 @@ if (target) {
   const actualReward = Math.abs(target - currentPrice);
   if (actualReward > maxReward) {
     target = isBuy ? currentPrice + maxReward : currentPrice - maxReward;
-    console.log(`HL: capped TP to R:R ${maxRR} (${withTrend?'with':'counter'}-trend) →`, target.toFixed(1));
+    console.log(`HL: capped TP to R:R ${maxRR} (${withTrend?'with':'counter'}-trend) ->`, target.toFixed(1));
   }
 }
 
@@ -1582,7 +1582,7 @@ try {
     { trigger: { isMarket: true, triggerPx: stopPrice, tpsl: 'sl' } }, true);
   if (!slRes || slRes.status === 'err') {
     console.error('HL SL placement failed:', slRes ? slRes.response : 'null');
-    await sendTelegram(`⚠️ <b>SL FAILED for ${sig} ${asset}</b>\nTrade open WITHOUT stop loss — place manually!`);
+    await sendTelegram(`[!] <b>SL FAILED for ${sig} ${asset}</b>\nTrade open WITHOUT stop loss -- place manually!`);
   }
 
   // 3. Take Profit
@@ -1592,7 +1592,7 @@ try {
       { trigger: { isMarket: true, triggerPx: target, tpsl: 'tp' } }, true);
     if (!tpRes || tpRes.status === 'err') {
       console.error('HL TP placement failed:', tpRes ? tpRes.response : 'null');
-      await sendTelegram(`⚠️ <b>TP FAILED for ${sig} ${asset}</b>\nTrade open without take profit`);
+      await sendTelegram(`[!] <b>TP FAILED for ${sig} ${asset}</b>\nTrade open without take profit`);
     }
   }
 
@@ -1608,21 +1608,21 @@ try {
   this.saveActiveTrades();
   this.tradesToday++;
 
-  const tradeMsg = `${isBuy ? '🟢' : '🔴'} <b>AUTO-TRADE: ${sig} ${asset}</b>\nEntry: <b>$${fmt(actualEntry)}</b>\nSize: ${size.toFixed(szDec)}\nSL: <b>$${fmt(stopPrice)}</b>${target ? '\nTP: <b>$' + fmt(target) + '</b>' : ''}\nR:R ${rr || '?'}\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
+  const tradeMsg = `${isBuy ? '[LONG]' : '[SHORT]'} <b>AUTO-TRADE: ${sig} ${asset}</b>\nEntry: <b>$${fmt(actualEntry)}</b>\nSize: ${size.toFixed(szDec)}\nSL: <b>$${fmt(stopPrice)}</b>${target ? '\nTP: <b>$' + fmt(target) + '</b>' : ''}\nR:R ${rr || '?'}\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
   console.log(`HL TRADE: ${sig} ${asset} | Size: ${size.toFixed(szDec)} | Entry: $${fmt(actualEntry)} | SL: $${fmt(stopPrice)}${target ? ' | TP: $' + fmt(target) : ''}`);
   await sendTelegram(tradeMsg);
 
   return entryRes;
 } catch (e) {
   console.error('HL trade error:', e);
-  await sendTelegram(`❌ <b>TRADE FAILED: ${sig} ${asset}</b>\n${e.message}`);
+  await sendTelegram(`[X] <b>TRADE FAILED: ${sig} ${asset}</b>\n${e.message}`);
   return null;
 }
 ```
 
 },
 
-// ── Trailing stop logic ──
+// – Trailing stop logic –
 async trailStops() {
 if (!this.wallet || !this.enabled) return;
 for (const [coinId, trade] of Object.entries(this.activeTrades)) {
@@ -1646,8 +1646,8 @@ if (risk <= 0) continue;
   if (trade.trailState === 'initial' && rMultiple >= 1.0) {
     newSl = trade.entry;
     trade.trailState = 'breakeven';
-    console.log(`HL TRAIL ${trade.asset}: SL → BREAKEVEN $${fmt(newSl)} (1:1 R hit)`);
-    await sendTelegram(`🔄 <b>SL → BREAKEVEN: ${trade.asset}</b>\nEntry: $${fmt(trade.entry)}\n1:1 R reached`);
+    console.log(`HL TRAIL ${trade.asset}: SL -> BREAKEVEN $${fmt(newSl)} (1:1 R hit)`);
+    await sendTelegram(`[REV] <b>SL -> BREAKEVEN: ${trade.asset}</b>\nEntry: $${fmt(trade.entry)}\n1:1 R reached`);
   } else if (trade.trailState === 'breakeven' && rMultiple >= 1.5) {
     trade.trailState = 'trailing';
     newSl = isLong ? trade.bestPrice - risk * 1.5 : trade.bestPrice + risk * 1.5;
@@ -1668,7 +1668,7 @@ if (risk <= 0) continue;
         { trigger: { isMarket: true, triggerPx: newSl, tpsl: 'sl' } }, true);
       if (!trailSlRes || trailSlRes.status === 'err') {
         console.error('HL trail SL placement failed:', trailSlRes ? trailSlRes.response : 'null');
-        await sendTelegram(`⚠️ <b>TRAIL SL FAILED: ${trade.asset}</b>\nOld SL still active — check manually!`);
+        await sendTelegram(`[!] <b>TRAIL SL FAILED: ${trade.asset}</b>\nOld SL still active -- check manually!`);
         continue;
       }
       // Re-place TP
@@ -1689,7 +1689,7 @@ if (risk <= 0) continue;
 
 },
 
-// ── Close a position (used for reverse trades) ──
+// – Close a position (used for reverse trades) –
 async closePosition(coinId) {
 const trade = this.activeTrades[coinId];
 if (!trade) return null;
@@ -1716,7 +1716,7 @@ try {
     this.saveActiveTrades();
 
     console.log(`HL CLOSED ${trade.side} ${trade.asset}: P&L $${pnl.toFixed(2)}`);
-    await sendTelegram(`🔄 <b>REVERSED: ${trade.side} ${trade.asset}</b>\nExit: $${fmt(exitPrice)}\nP&L: <b>$${pnl.toFixed(2)}</b>`);
+    await sendTelegram(`[REV] <b>REVERSED: ${trade.side} ${trade.asset}</b>\nExit: $${fmt(exitPrice)}\nP&L: <b>$${pnl.toFixed(2)}</b>`);
     return { exitPrice, pnl };
   }
   return null;
@@ -1729,7 +1729,7 @@ try {
 }
 };
 
-// ── CLOSED TRADES persistence (file-based) ──
+// – CLOSED TRADES persistence (file-based) –
 function loadClosedTrades() {
 try { return JSON.parse(fs.readFileSync(CLOSED_TRADES_FILE, ‘utf8’)); } catch { return []; }
 }
@@ -1747,7 +1747,7 @@ saveClosedTrades(cleaned);
 }
 })();
 
-// ── SYNC FILL HISTORY: Backfill closed trades from HL API ─────────────────────
+// – SYNC FILL HISTORY: Backfill closed trades from HL API ———————
 // This catches trades that were closed (TP/SL) while the bot was down or crashed.
 // Queries HL userFillsByTime and records any closedPnl fills not already tracked.
 async function syncFillHistory() {
@@ -1842,9 +1842,9 @@ console.warn(‘syncFillHistory error:’, e.message);
 }
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// ██  ALERT & TRADE EXECUTION LOGIC                                         ██
-// ══════════════════════════════════════════════════════════════════════════════
+// ==============================================================================
+// ##  ALERT & TRADE EXECUTION LOGIC                                         ##
+// ==============================================================================
 
 async function maybeAlert(sig, tf, type, level, target, rr, stopPrice, coinId, price, allLevels){
 if(isDedupSuppressed(coinId, tf, type, level)) return;
@@ -1855,12 +1855,12 @@ if(type===‘AT_LEVEL’){
 if(!WANT_ATLEVEL) return;
 if(sig !== ‘NEUTRAL’) return;
 }
-const icon      = sig===‘LONG’ ? ‘🟢’ : sig===‘SHORT’ ? ‘🔴’ : ‘🟡’;
+const icon      = sig===‘LONG’ ? ‘[LONG]’ : sig===‘SHORT’ ? ‘[SHORT]’ : ‘[NEUTRAL]’;
 const coinLabel = COINS[coinId].label;
 const dir       = type===‘FAIL_GAIN’ ? ‘FAIL TO GAIN’ : type===‘FAIL_LOSE’ ? ‘FAIL TO LOSE’ : type===‘BLIND_ENTRY’ ? ‘CONFIRMED ENTRY’ : ‘AT LEVEL’;
 let msg;
 if(type===‘AT_LEVEL’){
-msg = `${icon} <b>DMS AT LEVEL</b> · ${coinLabel} [${tf}]\n👁 Approaching $${fmt(level)} — watch 15m candle\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
+msg = `${icon} <b>DMS AT LEVEL</b> . ${coinLabel} [${tf}]\n[EYE] Approaching $${fmt(level)} -- watch 15m candle\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
 } else {
 const rrLine  = rr     ? `\nR:R <b>${rr}</b>` : ‘’;
 const tpLine  = target ? `\nTake Profit: <b>$${fmt(target)}</b>` : ‘’;
@@ -1869,14 +1869,14 @@ allLevels.length ? allLevels : [{ price:level, type:sig===‘SHORT’?‘resista
 level, sig===‘SHORT’?‘short’:‘long’
 );
 const slLine  = slLevel ? `\nStop Loss: <b>$${fmt(slLevel)}</b>` : ‘’;
-msg = `${icon} <b>DMS ${dir}</b> · ${coinLabel} [${tf}]\n\nEntry now: <b>$${fmt(price)}</b>\nLevel: <b>$${fmt(level)}</b>${tpLine}${slLine}${rrLine}\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
+msg = `${icon} <b>DMS ${dir}</b> . ${coinLabel} [${tf}]\n\nEntry now: <b>$${fmt(price)}</b>\nLevel: <b>$${fmt(level)}</b>${tpLine}${slLine}${rrLine}\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
 }
 markDedupFired(coinId, tf, type, level);
 const ok = await sendTelegram(msg);
 console.log(`[${new Date().toISOString()}] ${ok?'SENT':'FAILED'} alert: ${coinLabel} [${tf}] ${type} ${sig} @ $${fmt(level)}`);
 }
 
-// ── AUTO-TRADE DECISION LOGIC (mirrors app’s handleCandle auto-trade block) ──
+// – AUTO-TRADE DECISION LOGIC (mirrors app’s handleCandle auto-trade block) –
 async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
 if (!HL.enabled || !HL.wallet) return;
 const d = dmsResult;
@@ -1906,7 +1906,7 @@ const withTrend = (d.sig === ‘LONG’ && htfDir === ‘UP’) || (d.sig === �
 const counterTrend = (d.sig === ‘LONG’ && htfDir === ‘DOWN’) || (d.sig === ‘SHORT’ && htfDir === ‘UP’);
 
 if (counterTrend) {
-console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: counter-trend (HTF ${htfDir}) — hard block v4.9`);
+console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: counter-trend (HTF ${htfDir}) -- hard block v4.9`);
 return;
 }
 
@@ -1925,10 +1925,10 @@ return;
 const existing = HL.activeTrades[coinId];
 if (existing) {
 if (existing.side === d.sig) {
-// Same direction — SKIP (max 1 position per coin to limit exposure)
+// Same direction – SKIP (max 1 position per coin to limit exposure)
 console.log(`HL auto-trade SKIP ${sym}: already in ${existing.side} (no stacking)`);
 } else {
-// Opposite direction — close and reverse
+// Opposite direction – close and reverse
 console.log(`HL REVERSE: close ${existing.side} ${sym}, open ${d.sig} (${TFS[tfIdx].l}, conf ${conf}%)`);
 const closeResult = await HL.closePosition(coinId);
 if (closeResult) {
@@ -1937,7 +1937,7 @@ await HL.syncPositions();
 }
 }
 } else {
-// No existing position — check max concurrent positions (default 3)
+// No existing position – check max concurrent positions (default 3)
 const MAX_POSITIONS = parseInt(process.env.MAX_POSITIONS || ‘4’);
 const openCount = Object.keys(HL.activeTrades).length;
 if (openCount >= MAX_POSITIONS) {
@@ -1950,9 +1950,9 @@ await HL.syncPositions();
 }
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// ██  PER-COIN SCAN                                                         ██
-// ══════════════════════════════════════════════════════════════════════════════
+// ==============================================================================
+// ##  PER-COIN SCAN                                                         ##
+// ==============================================================================
 
 async function scanCoin(coinId){
 const label = COINS[coinId].label;
@@ -1990,7 +1990,7 @@ const allLevels = (() => {
 })();
 
 // v4.9: Build lower-TF candle data for LTF alignment checks on 1W/1D only
-// 4H/1H/15m signals are left untouched — working well for BTC/SPX/HYPE
+// 4H/1H/15m signals are left untouched -- working well for BTC/SPX/HYPE
 const lowerTFCandles = {};
 if (h4C) lowerTFCandles['4H'] = h4C;
 if (h1C) lowerTFCandles['1H'] = h1C;
@@ -2007,7 +2007,7 @@ const tfsToRun = [
 // Store all results for confidence calculation
 const allResults = {};
 
-// v4.9: Cross-TF conflict prevention — track which direction fired first
+// v4.9: Cross-TF conflict prevention -- track which direction fired first
 // If 4H says LONG and 1D says SHORT, only the first (higher-weight TF) fires
 let firedDirection = null; // 'LONG' or 'SHORT' once a tradeable signal fires
 
@@ -2049,11 +2049,11 @@ console.error(`[${new Date().toISOString()}] Error scanning ${label}:`, e.messag
 }
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// ██  MAIN LOOP                                                             ██
-// ══════════════════════════════════════════════════════════════════════════════
+// ==============================================================================
+// ##  MAIN LOOP                                                             ##
+// ==============================================================================
 
-// ── DAILY SUMMARY ────────────────────────────────────────────────────────────
+// – DAILY SUMMARY ————————————————————
 const SUMMARY_HOUR = parseInt(process.env.SUMMARY_HOUR || ‘6’, 10); // UTC hour to send daily summary
 const SUMMARY_FILE = path.join(__dirname, ‘.last_summary_date’);
 let lastSummaryDate = (() => { try { return fs.readFileSync(SUMMARY_FILE, ‘utf8’).trim(); } catch { return ‘’; } })();
@@ -2063,7 +2063,7 @@ const today = new Date().toISOString().slice(0, 10);
 // Re-read from disk EVERY time (prevents duplicate across bot restarts or multi-instance)
 try { lastSummaryDate = fs.readFileSync(SUMMARY_FILE, ‘utf8’).trim(); } catch {}
 if (lastSummaryDate === today) return; // already sent today (by this or another instance)
-// Write FIRST, then send — so a crash mid-send doesn’t cause double send on restart
+// Write FIRST, then send – so a crash mid-send doesn’t cause double send on restart
 lastSummaryDate = today;
 try { fs.writeFileSync(SUMMARY_FILE, today); } catch {}
 
@@ -2083,7 +2083,7 @@ if (openPositions.length > 0) {
     const upnl = px > 0 ? (isLong ? (px - t.entry) * t.size : (t.entry - px) * t.size) : 0;
     const upnlStr = upnl >= 0 ? `+$${upnl.toFixed(2)}` : `-$${Math.abs(upnl).toFixed(2)}`;
     const trail = t.trailState !== 'initial' ? ` [${t.trailState}]` : '';
-    openLines += `\n  ${t.side === 'LONG' ? '🟢' : '🔴'} ${t.asset} ${t.side} @ $${fmt(t.entry)} → ${upnlStr}${trail}`;
+    openLines += `\n  ${t.side === 'LONG' ? '[LONG]' : '[SHORT]'} ${t.asset} ${t.side} @ $${fmt(t.entry)} -> ${upnlStr}${trail}`;
   }
 } else {
   openLines = '\n  No open positions';
@@ -2099,8 +2099,8 @@ let wins = 0, losses = 0;
 if (yesterdayTrades.length > 0) {
   for (const t of yesterdayTrades) {
     const pnlStr = t.pnl >= 0 ? `+$${t.pnl.toFixed(2)}` : `-$${Math.abs(t.pnl).toFixed(2)}`;
-    const emoji = t.reason === 'tp_hit' ? '✅' : t.reason === 'sl_hit' ? '🛑' : '🔄';
-    closedLines += `\n  ${emoji} ${t.coin} ${t.side} → ${pnlStr}`;
+    const emoji = t.reason === 'tp_hit' ? '[TP]' : t.reason === 'sl_hit' ? '[SL]' : '[REV]';
+    closedLines += `\n  ${emoji} ${t.coin} ${t.side} -> ${pnlStr}`;
     dayPnl += t.pnl;
     if (t.pnl >= 0) wins++; else losses++;
   }
@@ -2119,12 +2119,12 @@ const equity = HL.cachedEquity > 0 ? `$${HL.cachedEquity.toFixed(2)}` : 'N/A';
 const dayPnlStr = dayPnl >= 0 ? `+$${dayPnl.toFixed(2)}` : `-$${Math.abs(dayPnl).toFixed(2)}`;
 const totalPnlStr = totalPnl >= 0 ? `+$${totalPnl.toFixed(2)}` : `-$${Math.abs(totalPnl).toFixed(2)}`;
 
-const msg = `📊 <b>DMS Daily Summary</b> · ${today}\n` +
-  `\n💰 <b>Equity:</b> ${equity}` +
-  `\n\n📈 <b>Open Positions:</b>${openLines}` +
-  `\n\n📋 <b>Yesterday's Trades:</b>${closedLines}` +
+const msg = `[STATS] <b>DMS Daily Summary</b> . ${today}\n` +
+  `\n[BAL] <b>Equity:</b> ${equity}` +
+  `\n\n[UP] <b>Open Positions:</b>${openLines}` +
+  `\n\n[LIST] <b>Yesterday's Trades:</b>${closedLines}` +
   (yesterdayTrades.length > 0 ? `\n  Day P&L: <b>${dayPnlStr}</b> (${wins}W/${losses}L)` : '') +
-  `\n\n📊 <b>All-Time:</b> ${winRate}% win rate (${allWins}W/${allLosses}L)` +
+  `\n\n[STATS] <b>All-Time:</b> ${winRate}% win rate (${allWins}W/${allLosses}L)` +
   `\nTotal P&L: <b>${totalPnlStr}</b>` +
   `\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
 
@@ -2165,14 +2165,14 @@ if (hlOk) {
 console.log(‘Auto-trading ENABLED | Risk:’, RISK_PCT + ‘%’, ‘| Min conf:’, MIN_CONFIDENCE + ‘%’, ‘| Max trades/day:’, MAX_TRADES_DAY);
 // Backfill any closed trades missed during downtime
 await syncFillHistory();
-await sendTelegram(’🤖 <b>DMS Signal Bot v4.9 started</b>\n✅ Auto-trading ENABLED\nScanning BTC · HYPE · SPX · GOLD every 2 min\nRisk: ’ + RISK_PCT + ’% | Min conf: ’ + MIN_CONFIDENCE + ‘%’);
+await sendTelegram(’[BOT] <b>DMS Signal Bot v4.9 started</b>\n[TP] Auto-trading ENABLED\nScanning BTC . HYPE . SPX . GOLD every 2 min\nRisk: ’ + RISK_PCT + ‘% | Min conf: ’ + MIN_CONFIDENCE + ‘%’);
 } else {
-console.warn(‘Auto-trading init FAILED — running in alert-only mode’);
-await sendTelegram(‘🤖 <b>DMS Signal Bot v4.9 started</b>\n⚠️ Auto-trading FAILED to init\nRunning in alert-only mode’);
+console.warn(‘Auto-trading init FAILED – running in alert-only mode’);
+await sendTelegram(’[BOT] <b>DMS Signal Bot v4.9 started</b>\n[!] Auto-trading FAILED to init\nRunning in alert-only mode’);
 }
 } else {
 console.log(‘Auto-trading DISABLED (set AUTO_TRADE=true and HL_PRIVATE_KEY to enable)’);
-await sendTelegram(‘🤖 <b>DMS Signal Bot v4.9 started</b>\nScanning BTC · HYPE · SPX · GOLD every 2 minutes.\n🔔 Alert-only mode’);
+await sendTelegram(’[BOT] <b>DMS Signal Bot v4.9 started</b>\nScanning BTC . HYPE . SPX . GOLD every 2 minutes.\n[ALERT] Alert-only mode’);
 }
 
 await scanAll();
