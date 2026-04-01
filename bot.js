@@ -1386,7 +1386,7 @@ const HL = {
         });
         saveClosedTrades(closed);
 
-        const emoji = reason === 'tp_hit' ? '[TP]' : reason === 'sl_hit' ? '[SL]' : '[STATS]';
+        const emoji = reason === 'tp_hit' ? '✅' : reason === 'sl_hit' ? '🛑' : '📊';
         const label = reason === 'tp_hit' ? 'TP HIT' : reason === 'sl_hit' ? 'SL HIT' : 'CLOSED';
         console.log(`HL POSITION CLOSED: ${label} ${old.side} ${old.asset} | P&L: $${pnl.toFixed(2)}`);
         await sendTelegram(`${emoji} <b>${label}: ${old.side} ${old.asset}</b>\nEntry: $${fmt(old.entry)}\nExit: $${fmt(exitPx)}\nP&L: <b>$${pnl.toFixed(2)}</b>`);
@@ -1569,7 +1569,7 @@ const HL = {
         { trigger: { isMarket: true, triggerPx: stopPrice, tpsl: 'sl' } }, true);
       if (!slRes || slRes.status === 'err') {
         console.error('HL SL placement failed:', slRes ? slRes.response : 'null');
-        await sendTelegram(`[!] <b>SL FAILED for ${sig} ${asset}</b>\nTrade open WITHOUT stop loss -- place manually!`);
+        await sendTelegram(`⚠️ <b>SL FAILED for ${sig} ${asset}</b>\nTrade open WITHOUT stop loss -- place manually!`);
       }
 
       // 3. Take Profit
@@ -1579,7 +1579,7 @@ const HL = {
           { trigger: { isMarket: true, triggerPx: target, tpsl: 'tp' } }, true);
         if (!tpRes || tpRes.status === 'err') {
           console.error('HL TP placement failed:', tpRes ? tpRes.response : 'null');
-          await sendTelegram(`[!] <b>TP FAILED for ${sig} ${asset}</b>\nTrade open without take profit`);
+          await sendTelegram(`⚠️ <b>TP FAILED for ${sig} ${asset}</b>\nTrade open without take profit`);
         }
       }
 
@@ -1595,14 +1595,14 @@ const HL = {
       this.saveActiveTrades();
       this.tradesToday++;
 
-      const tradeMsg = `${isBuy ? '[LONG]' : '[SHORT]'} <b>AUTO-TRADE: ${sig} ${asset}</b>\nEntry: <b>$${fmt(actualEntry)}</b>\nSize: ${size.toFixed(szDec)}\nSL: <b>$${fmt(stopPrice)}</b>${target ? '\nTP: <b>$' + fmt(target) + '</b>' : ''}\nR:R ${rr || '?'}\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
+      const tradeMsg = `${isBuy ? '🟢' : '🔴'} <b>AUTO-TRADE: ${sig} ${asset}</b>\nEntry: <b>$${fmt(actualEntry)}</b>\nSize: ${size.toFixed(szDec)}\nSL: <b>$${fmt(stopPrice)}</b>${target ? '\nTP: <b>$' + fmt(target) + '</b>' : ''}\nR:R ${rr || '?'}\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
       console.log(`HL TRADE: ${sig} ${asset} | Size: ${size.toFixed(szDec)} | Entry: $${fmt(actualEntry)} | SL: $${fmt(stopPrice)}${target ? ' | TP: $' + fmt(target) : ''}`);
       await sendTelegram(tradeMsg);
 
       return entryRes;
     } catch (e) {
       console.error('HL trade error:', e);
-      await sendTelegram(`[X] <b>TRADE FAILED: ${sig} ${asset}</b>\n${e.message}`);
+      await sendTelegram(`❌ <b>TRADE FAILED: ${sig} ${asset}</b>\n${e.message}`);
       return null;
     }
   },
@@ -1631,7 +1631,7 @@ const HL = {
         newSl = trade.entry;
         trade.trailState = 'breakeven';
         console.log(`HL TRAIL ${trade.asset}: SL -> BREAKEVEN $${fmt(newSl)} (1:1 R hit)`);
-        await sendTelegram(`[REV] <b>SL -> BREAKEVEN: ${trade.asset}</b>\nEntry: $${fmt(trade.entry)}\n1:1 R reached`);
+        await sendTelegram(`🔄 <b>SL -> BREAKEVEN: ${trade.asset}</b>\nEntry: $${fmt(trade.entry)}\n1:1 R reached`);
       } else if (trade.trailState === 'breakeven' && rMultiple >= 1.5) {
         trade.trailState = 'trailing';
         newSl = isLong ? trade.bestPrice - risk * 1.5 : trade.bestPrice + risk * 1.5;
@@ -1652,7 +1652,7 @@ const HL = {
             { trigger: { isMarket: true, triggerPx: newSl, tpsl: 'sl' } }, true);
           if (!trailSlRes || trailSlRes.status === 'err') {
             console.error('HL trail SL placement failed:', trailSlRes ? trailSlRes.response : 'null');
-            await sendTelegram(`[!] <b>TRAIL SL FAILED: ${trade.asset}</b>\nOld SL still active -- check manually!`);
+            await sendTelegram(`⚠️ <b>TRAIL SL FAILED: ${trade.asset}</b>\nOld SL still active -- check manually!`);
             continue;
           }
           // Re-place TP
@@ -1697,7 +1697,7 @@ const HL = {
         this.saveActiveTrades();
 
         console.log(`HL CLOSED ${trade.side} ${trade.asset}: P&L $${pnl.toFixed(2)}`);
-        await sendTelegram(`[REV] <b>REVERSED: ${trade.side} ${trade.asset}</b>\nExit: $${fmt(exitPrice)}\nP&L: <b>$${pnl.toFixed(2)}</b>`);
+        await sendTelegram(`🔄 <b>REVERSED: ${trade.side} ${trade.asset}</b>\nExit: $${fmt(exitPrice)}\nP&L: <b>$${pnl.toFixed(2)}</b>`);
         return { exitPrice, pnl };
       }
       return null;
@@ -1831,12 +1831,12 @@ async function maybeAlert(sig, tf, type, level, target, rr, stopPrice, coinId, p
     if(!WANT_ATLEVEL) return;
     if(sig !== 'NEUTRAL') return;
   }
-  const icon      = sig==='LONG' ? '[LONG]' : sig==='SHORT' ? '[SHORT]' : '[NEUTRAL]';
+  const icon      = sig==='LONG' ? '🟢' : sig==='SHORT' ? '🔴' : '🟡';
   const coinLabel = COINS[coinId].label;
   const dir       = type==='FAIL_GAIN' ? 'FAIL TO GAIN' : type==='FAIL_LOSE' ? 'FAIL TO LOSE' : type==='BLIND_ENTRY' ? 'CONFIRMED ENTRY' : 'AT LEVEL';
   let msg;
   if(type==='AT_LEVEL'){
-    msg = `${icon} <b>DMS AT LEVEL</b> . ${coinLabel} [${tf}]\n[EYE] Approaching $${fmt(level)} -- watch 15m candle\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
+    msg = `${icon} <b>DMS AT LEVEL</b> . ${coinLabel} [${tf}]\n👁 Approaching $${fmt(level)} -- watch 15m candle\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
   } else {
     const rrLine  = rr     ? `\nR:R <b>${rr}</b>` : '';
     const tpLine  = target ? `\nTake Profit: <b>$${fmt(target)}</b>` : '';
@@ -2055,7 +2055,7 @@ async function sendDailySummary() {
         const upnl = px > 0 ? (isLong ? (px - t.entry) * t.size : (t.entry - px) * t.size) : 0;
         const upnlStr = upnl >= 0 ? `+$${upnl.toFixed(2)}` : `-$${Math.abs(upnl).toFixed(2)}`;
         const trail = t.trailState !== 'initial' ? ` [${t.trailState}]` : '';
-        openLines += `\n  ${t.side === 'LONG' ? '[LONG]' : '[SHORT]'} ${t.asset} ${t.side} @ $${fmt(t.entry)} -> ${upnlStr}${trail}`;
+        openLines += `\n  ${t.side === 'LONG' ? '🟢' : '🔴'} ${t.asset} ${t.side} @ $${fmt(t.entry)} -> ${upnlStr}${trail}`;
       }
     } else {
       openLines = '\n  No open positions';
@@ -2071,7 +2071,7 @@ async function sendDailySummary() {
     if (yesterdayTrades.length > 0) {
       for (const t of yesterdayTrades) {
         const pnlStr = t.pnl >= 0 ? `+$${t.pnl.toFixed(2)}` : `-$${Math.abs(t.pnl).toFixed(2)}`;
-        const emoji = t.reason === 'tp_hit' ? '[TP]' : t.reason === 'sl_hit' ? '[SL]' : '[REV]';
+        const emoji = t.reason === 'tp_hit' ? '✅' : t.reason === 'sl_hit' ? '🛑' : '🔄';
         closedLines += `\n  ${emoji} ${t.coin} ${t.side} -> ${pnlStr}`;
         dayPnl += t.pnl;
         if (t.pnl >= 0) wins++; else losses++;
@@ -2091,12 +2091,12 @@ async function sendDailySummary() {
     const dayPnlStr = dayPnl >= 0 ? `+$${dayPnl.toFixed(2)}` : `-$${Math.abs(dayPnl).toFixed(2)}`;
     const totalPnlStr = totalPnl >= 0 ? `+$${totalPnl.toFixed(2)}` : `-$${Math.abs(totalPnl).toFixed(2)}`;
 
-    const msg = `[STATS] <b>DMS Daily Summary</b> . ${today}\n` +
-      `\n[BAL] <b>Equity:</b> ${equity}` +
-      `\n\n[UP] <b>Open Positions:</b>${openLines}` +
-      `\n\n[LIST] <b>Yesterday's Trades:</b>${closedLines}` +
+    const msg = `📊 <b>DMS Daily Summary</b> . ${today}\n` +
+      `\n💰 <b>Equity:</b> ${equity}` +
+      `\n\n📈 <b>Open Positions:</b>${openLines}` +
+      `\n\n📋 <b>Yesterday's Trades:</b>${closedLines}` +
       (yesterdayTrades.length > 0 ? `\n  Day P&L: <b>${dayPnlStr}</b> (${wins}W/${losses}L)` : '') +
-      `\n\n[STATS] <b>All-Time:</b> ${winRate}% win rate (${allWins}W/${allLosses}L)` +
+      `\n\n📊 <b>All-Time:</b> ${winRate}% win rate (${allWins}W/${allLosses}L)` +
       `\nTotal P&L: <b>${totalPnlStr}</b>` +
       `\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
 
@@ -2135,14 +2135,14 @@ async function main(){
       console.log('Auto-trading ENABLED | Risk:', RISK_PCT + '%', '| Min conf:', MIN_CONFIDENCE + '%', '| Max trades/day:', MAX_TRADES_DAY);
       // Backfill any closed trades missed during downtime
       await syncFillHistory();
-      await sendTelegram('[BOT] <b>DMS Signal Bot v4.9 started</b>\n[TP] Auto-trading ENABLED\nScanning BTC . HYPE . SPX . GOLD every 2 min\nRisk: ' + RISK_PCT + '% | Min conf: ' + MIN_CONFIDENCE + '%');
+      await sendTelegram('🤖 <b>DMS Signal Bot v4.9 started</b>\n✅ Auto-trading ENABLED\nScanning BTC . HYPE . SPX . GOLD every 2 min\nRisk: ' + RISK_PCT + '% | Min conf: ' + MIN_CONFIDENCE + '%');
     } else {
       console.warn('Auto-trading init FAILED -- running in alert-only mode');
-      await sendTelegram('[BOT] <b>DMS Signal Bot v4.9 started</b>\n[!] Auto-trading FAILED to init\nRunning in alert-only mode');
+      await sendTelegram('🤖 <b>DMS Signal Bot v4.9 started</b>\n⚠️ Auto-trading FAILED to init\nRunning in alert-only mode');
     }
   } else {
     console.log('Auto-trading DISABLED (set AUTO_TRADE=true and HL_PRIVATE_KEY to enable)');
-    await sendTelegram('[BOT] <b>DMS Signal Bot v4.9 started</b>\nScanning BTC . HYPE . SPX . GOLD every 2 minutes.\n[ALERT] Alert-only mode');
+    await sendTelegram('🤖 <b>DMS Signal Bot v4.9 started</b>\nScanning BTC . HYPE . SPX . GOLD every 2 minutes.\n🔔 Alert-only mode');
   }
 
   await scanAll();
