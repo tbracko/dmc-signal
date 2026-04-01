@@ -744,7 +744,7 @@ async function sendTelegram(msg){
   }catch{return false;}
 }
 
-function maybeAlert(sig, tf, type, level, target, rr, coinId, state){
+function maybeAlert(sig, tf, type, level, target, rr, coinId, state, stopPrice){
   // NOTE: localStorage dedup is already checked in processTF before calling maybeAlert
   // Do NOT check isDedupSuppressed here — it was already marked fired right before this call
   coinId = coinId || activeCoin;
@@ -800,7 +800,7 @@ function maybeAlert(sig, tf, type, level, target, rr, coinId, state){
 R:R <b>${rr}</b>` : '';
     const tpLine  = target? `
 Take Profit: <b>$${fmt(target)}</b>` : '';
-    const slLevel = findStopLevel(
+    const slLevel = stopPrice || findStopLevel(
       state.allLevels.length ? state.allLevels : [{price:level,type:sig==='SHORT'?'resistance':'support'}],
       level, sig==='SHORT'?'short':'long'
     );
@@ -3353,7 +3353,7 @@ function processTF(i, candles, dCandles, coinId, lowerCandles){
       markDedupFired(coinId, tf.l, d.type, d.level);
       // Track committed direction for this scan cycle
       if(d.sig !== 'NEUTRAL' && d.type === 'BLIND_ENTRY') s._firedDir = d.sig;
-      maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, coinId, s);
+      maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, coinId, s, d.stopPrice);
       addLog(d.sig, tf.l, d.reason, d.type, d.level, d.target, d.rr, d.stopPrice, coinId);
       // ── AUTO-TRADE: trigger Hyperliquid execution if enabled ──
       if(HL.enabled && HL.wallet && d.sig !== 'NEUTRAL' && d.stopPrice){
