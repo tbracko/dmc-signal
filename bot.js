@@ -1878,16 +1878,23 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
   // This prevents the exact scenarios from the DMS review: LONG signals firing
   // when everything points down, or SHORT signals in clear uptrends
   const htfDir = s.htfDir || 'UNCLEAR';
+  const storyDir = s.storyDir || 'UNCLEAR';
   const withTrend = (d.sig === 'LONG' && htfDir === 'UP') || (d.sig === 'SHORT' && htfDir === 'DOWN');
   const counterTrend = (d.sig === 'LONG' && htfDir === 'DOWN') || (d.sig === 'SHORT' && htfDir === 'UP');
+  const storyConflicts = (d.sig === 'LONG' && storyDir === 'DOWN') || (d.sig === 'SHORT' && storyDir === 'UP');
 
   if (counterTrend) {
     console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: counter-trend (HTF ${htfDir}) -- hard block v4.9`);
     return;
   }
+  if (storyConflicts && htfDir === 'UNCLEAR') {
+    console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: story ${storyDir} conflicts, HTF unclear -- counter-structure`);
+    return;
+  }
 
-  const minConf = withTrend ? Math.max(MIN_CONFIDENCE - 15, 25) : MIN_CONFIDENCE;
-  const trendLabel = withTrend ? 'WITH-TREND' : 'NEUTRAL-TREND';
+  const effectiveWithTrend = withTrend && !storyConflicts;
+  const minConf = effectiveWithTrend ? Math.max(MIN_CONFIDENCE - 15, 25) : storyConflicts ? Math.min(MIN_CONFIDENCE + 15, 80) : MIN_CONFIDENCE;
+  const trendLabel = effectiveWithTrend ? 'WITH-TREND' : storyConflicts ? 'COUNTER-STORY' : 'NEUTRAL-TREND';
 
   if (conf < minConf) {
     console.log(`HL auto-trade SKIP ${sym} ${d.sig}: conf ${conf}% < ${minConf}% (${trendLabel})`);
@@ -1949,6 +1956,59 @@ async function scanCoin(coinId){
     if(h4C && h1C) htfDir = nextMove(h4C, h1C).dir;
     else if(h4C)   htfDir = nextMove(h4C, h4C).dir;
     coinState[coinId].htfDir = htfDir;
+
+    // v4.9: Compute storyDir for auto-trade filtering (mirrors HTML buildStory)
+    let storyDir = 'UNCLEAR';
+    if(h4C && h1C && h4C.length >= 6 && h1C.length >= 12){
+      const h4R = h4C.slice(-6), h1R = h1C.slice(-12);
+      const sLevels = (() => {
+        const wLvls = wC ? findVPeaks(wC,'1W') : [];
+        const dLvls = findVPeaks(dC,'1D');
+        const pdhl = findPDHL(dC);
+        const all = [...wLvls,...dLvls,...pdhl].sort((a,b)=>b.score-a.score);
+        return all.filter(l => Math.abs(l.price - price)/price < 0.06 && l.score >= 20).slice(0,6);
+      })();
+      if(sLevels.length >= 2){
+        let bp = 0, brp = 0;
+        for(const lv of sLevels){
+          const tol = lv.price * 0.004;
+          const isR = lv.type === 'resistance';
+          for(let ci=0;ci<h4R.length;ci++){
+            const k=h4R[ci], rec=(ci>=h4R.length-2)?2:1;
+            const touched = isR ? (k.h>=lv.price-tol) : (k.l<=lv.price+tol);
+            if(!touched) continue;
+            const gained = isR ? (k.bh>lv.price+tol) : (k.bl<lv.price-tol);
+            const failed = isR ? (k.bh<lv.price-tol*0.5) : (k.bl>lv.price+tol*0.5);
+            if(gained){ isR ? bp+=2*rec : brp+=2*rec; }
+            else if(failed){ isR ? brp+=2*rec : bp+=2*rec; }
+          }
+          for(let ci=0;ci<h1R.length;ci++){
+            const k=h1R[ci], rec=(ci>=h1R.length-2)?2:1;
+            const touched = isR ? (k.h>=lv.price-tol) : (k.l<=lv.price+tol);
+            if(!touched) continue;
+            const gained = isR ? (k.bh>lv.price+tol) : (k.bl<lv.price-tol);
+            const failed = isR ? (k.bh<lv.price-tol*0.5) : (k.bl>lv.price+tol*0.5);
+            if(gained){ isR ? bp+=rec : brp+=rec; }
+            else if(failed){ isR ? brp+=rec : bp+=rec; }
+          }
+        }
+        // Price position context (same as HTML)
+        const last3 = h1C.slice(-3);
+        if(last3.length>=3){
+          const trend = last3[2].c - last3[0].c;
+          if(Math.abs(trend)/price > 0.002){
+            const resAbove = sLevels.filter(l=>l.type==='resistance'&&l.price>price*1.005);
+            const supBelow = sLevels.filter(l=>l.type==='support'&&l.price<price*0.995);
+            if(trend<0 && resAbove.length>0) brp+=3;
+            if(trend>0 && supBelow.length>0) bp+=3;
+          }
+        }
+        const net = bp - brp;
+        if(net>=3) storyDir='UP';
+        else if(net<=-3) storyDir='DOWN';
+      }
+    }
+    coinState[coinId].storyDir = storyDir;
 
     const asiaLevels = m15C
       ? [...getAsiaLevels(m15C), ...getLondonLevels(m15C), ...getNYLevels(m15C)]
