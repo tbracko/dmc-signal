@@ -2394,7 +2394,7 @@ function buildStory(levels, h4C, h1C, currentPrice){
   if(!levels || !levels.length || !h4C || !h1C) return null;
   if(h4C.length < 4 || h1C.length < 4) return null;
 
-  // Focus on the 4-6 most significant levels within 6% of current price
+  // Focus on the 6 most significant levels within 6% of current price
   const nearby = levels
     .filter(l => Math.abs(l.price - currentPrice)/currentPrice < 0.06 && l.score >= 20)
     .sort((a,b) => b.score - a.score)
@@ -2405,92 +2405,130 @@ function buildStory(levels, h4C, h1C, currentPrice){
   const rows = [];
   let bullPoints = 0, bearPoints = 0;
 
-  // Use last 12 h1 candles + last 6 h4 candles for recency
+  // v4.9: Use last 12 h1 + 6 h4 candles, with recency weighting
+  // Last 2 candles = 2x weight (fresh), older = 1x
   const h1Recent = h1C.slice(-12);
   const h4Recent = h4C.slice(-6);
+  const h4Len = h4Recent.length;
+  const h1Len = h1Recent.length;
 
   for(const lv of nearby){
     const tol = lv.price * 0.004; // 0.4% touch zone
     const isRes = lv.type === 'resistance';
 
-    // ── Scan 4H candles for level interactions (weight=2) ──────────────
-    // Count gains and fails separately, then emit a single collapsed row
-    let h4GainCount = 0, h4FailCount = 0;
-    for(const k of h4Recent){
+    // ── Scan 4H candles (base weight=2, recency 2x for last 2) ──────
+    let h4GainCount = 0, h4FailCount = 0, h4GainPts = 0, h4FailPts = 0;
+    for(let ci = 0; ci < h4Len; ci++){
+      const k = h4Recent[ci];
+      const recency = (ci >= h4Len - 2) ? 2 : 1; // last 2 candles = 2x
       const touched = isRes
-        ? (k.h >= lv.price - tol)          // approached resistance from below
-        : (k.l <= lv.price + tol);          // approached support from above
-
+        ? (k.h >= lv.price - tol)
+        : (k.l <= lv.price + tol);
       if(!touched) continue;
-
       const gained = isRes
-        ? (k.bh > lv.price + tol)          // body closed above resistance = gained
-        : (k.bl < lv.price - tol);          // body closed below support = lost (failed to hold)
+        ? (k.bh > lv.price + tol)
+        : (k.bl < lv.price - tol);
       const failed = isRes
-        ? (k.bh < lv.price - tol * 0.5)   // approached but body stayed below = failed to gain
-        : (k.bl > lv.price + tol * 0.5);   // approached but body stayed above = failed to lose
-
-      if(gained) h4GainCount++;
-      else if(failed) h4FailCount++;
+        ? (k.bh < lv.price - tol * 0.5)
+        : (k.bl > lv.price + tol * 0.5);
+      if(gained){ h4GainCount++; h4GainPts += 2 * recency; }
+      else if(failed){ h4FailCount++; h4FailPts += 2 * recency; }
     }
 
     if(h4GainCount > 0){
       const label = isRes ? 'Gained' : 'Lost';
-      const countStr = h4GainCount > 1 ? ` ×${h4GainCount}` : '';
+      const countStr = h4GainCount > 1 ? ` \u00d7${h4GainCount}` : '';
       rows.push({
         icon: isRes ? 'gain' : 'fail',
         text:`<strong>4H ${label} $${fmt(lv.price)}</strong>${countStr} — body closed ${isRes?'above':'below'} · ${lv.source}`,
         weight:2, dir: isRes ? 'bull' : 'bear'
       });
-      isRes ? bullPoints += 2 * h4GainCount : bearPoints += 2 * h4GainCount;
+      isRes ? bullPoints += h4GainPts : bearPoints += h4GainPts;
     }
     if(h4FailCount > 0){
       const label = isRes ? 'Failed to gain' : 'Held';
-      const countStr = h4FailCount > 1 ? ` ×${h4FailCount}` : '';
+      const countStr = h4FailCount > 1 ? ` \u00d7${h4FailCount}` : '';
       rows.push({
         icon: isRes ? 'fail' : 'gain',
         text:`<strong>4H ${label} $${fmt(lv.price)}</strong>${countStr} — ${isRes?'rejected':'held above'} · ${lv.source}`,
         weight:2, dir: isRes ? 'bear' : 'bull'
       });
-      isRes ? bearPoints += 2 * h4FailCount : bullPoints += 2 * h4FailCount;
+      isRes ? bearPoints += h4FailPts : bullPoints += h4FailPts;
     }
 
-    // ── Scan 1H candles for level interactions (weight=1) ──────────────
-    let h1GainCount = 0, h1FailCount = 0;
-    for(const k of h1Recent){
+    // ── Scan 1H candles (base weight=1, recency 2x for last 2) ──────
+    let h1GainCount = 0, h1FailCount = 0, h1GainPts = 0, h1FailPts = 0;
+    for(let ci = 0; ci < h1Len; ci++){
+      const k = h1Recent[ci];
+      const recency = (ci >= h1Len - 2) ? 2 : 1;
       const touched = isRes ? (k.h >= lv.price - tol) : (k.l <= lv.price + tol);
       if(!touched) continue;
       const gained = isRes ? (k.bh > lv.price + tol) : (k.bl < lv.price - tol);
       const failed = isRes ? (k.bh < lv.price - tol*0.5) : (k.bl > lv.price + tol*0.5);
-      if(gained) h1GainCount++;
-      else if(failed) h1FailCount++;
+      if(gained){ h1GainCount++; h1GainPts += recency; }
+      else if(failed){ h1FailCount++; h1FailPts += recency; }
     }
 
     if(h1GainCount > 0){
       const label = isRes ? 'gaining' : 'losing';
       rows.push({
         icon: isRes ? 'gain' : 'fail',
-        text:`<strong>1H ${label} $${fmt(lv.price)}</strong> · ${h1GainCount}× body close ${isRes?'above':'below'} · ${lv.source}`,
+        text:`<strong>1H ${label} $${fmt(lv.price)}</strong> · ${h1GainCount}\u00d7 body close ${isRes?'above':'below'} · ${lv.source}`,
         weight:1, dir: isRes ? 'bull' : 'bear'
       });
-      isRes ? bullPoints += h1GainCount : bearPoints += h1GainCount;
+      isRes ? bullPoints += h1GainPts : bearPoints += h1GainPts;
     }
     if(h1FailCount > 0){
       const label = isRes ? 'failing' : 'holding';
       rows.push({
         icon: isRes ? 'fail' : 'gain',
-        text:`<strong>1H ${label} $${fmt(lv.price)}</strong> · ${isRes?'rejected':'held'} ${h1FailCount}× · ${lv.source}`,
+        text:`<strong>1H ${label} $${fmt(lv.price)}</strong> · ${isRes?'rejected':'held'} ${h1FailCount}\u00d7 · ${lv.source}`,
         weight:1, dir: isRes ? 'bear' : 'bull'
       });
-      isRes ? bearPoints += h1FailCount : bullPoints += h1FailCount;
+      isRes ? bearPoints += h1FailPts : bullPoints += h1FailPts;
     }
   }
 
-  // Limit to 5 most recent/significant rows to keep card readable
+  // v4.9: PRICE POSITION CONTEXT — if price dropped below resistance levels
+  // or rallied above support levels WITHOUT touching them, that's still directional info.
+  // "Price is below $68K resistance and falling" = bearish even without a touch.
+  const resAbove = nearby.filter(l => l.type === 'resistance' && l.price > currentPrice * 1.005);
+  const supBelow = nearby.filter(l => l.type === 'support' && l.price < currentPrice * 0.995);
+  // Check if price is trending away from resistance (bearish) or support (bullish)
+  const last3h1 = h1C.slice(-3);
+  if(last3h1.length >= 3){
+    const trending = last3h1[2].c - last3h1[0].c; // positive = rising, negative = falling
+    const trendPct = Math.abs(trending) / currentPrice;
+    if(trendPct > 0.002){ // at least 0.2% move in last 3 candles
+      if(trending < 0 && resAbove.length > 0){
+        // Falling away from resistance = bearish
+        const nearest = resAbove.sort((a,b) => a.price - b.price)[0];
+        const dist = ((nearest.price - currentPrice)/currentPrice * 100).toFixed(1);
+        bearPoints += 3;
+        rows.push({
+          icon:'fail',
+          text:`<strong>Dropping from $${fmt(nearest.price)}</strong> — ${dist}% below · ${nearest.source}`,
+          weight:2, dir:'bear'
+        });
+      }
+      if(trending > 0 && supBelow.length > 0){
+        // Rising away from support = bullish
+        const nearest = supBelow.sort((a,b) => b.price - a.price)[0];
+        const dist = ((currentPrice - nearest.price)/currentPrice * 100).toFixed(1);
+        bullPoints += 3;
+        rows.push({
+          icon:'gain',
+          text:`<strong>Bouncing from $${fmt(nearest.price)}</strong> — ${dist}% above · ${nearest.source}`,
+          weight:2, dir:'bull'
+        });
+      }
+    }
+  }
+
+  // Limit to 8 most significant rows
   const topRows = rows.slice(-8);
 
   if(topRows.length === 0){
-    // No level interactions detected — tell the user
     return {
       rows:[{ icon:'neutral', text:'No significant level interactions yet this session' }],
       conclusion:'Watching for price to engage a key level',
@@ -3368,14 +3406,23 @@ function processTF(i, candles, dCandles, coinId, lowerCandles){
 
         // v4.9 Phase 3: Hard-block counter-trend auto-trades
         const htfDir = s.htfDir || 'UNCLEAR';
+        const storyDir = s.lastStory?.storyDir || 'UNCLEAR';
         const withTrend = (d.sig === 'LONG' && htfDir === 'UP') || (d.sig === 'SHORT' && htfDir === 'DOWN');
         const counterTrend = (d.sig === 'LONG' && htfDir === 'DOWN') || (d.sig === 'SHORT' && htfDir === 'UP');
+        const storyAgrees = (d.sig === 'LONG' && storyDir === 'UP') || (d.sig === 'SHORT' && storyDir === 'DOWN');
+        const storyConflicts = (d.sig === 'LONG' && storyDir === 'DOWN') || (d.sig === 'SHORT' && storyDir === 'UP');
 
         if(counterTrend){
           console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: counter-trend (HTF ${htfDir}) — hard block v4.9`);
+        } else if(storyConflicts && htfDir === 'UNCLEAR'){
+          // Scenario A: HTF unclear but story says opposite — block
+          console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: story ${storyDir} conflicts, HTF unclear — counter-structure`);
         } else {
-        const minConf = withTrend ? Math.max(baseMinConf - 15, 25) : baseMinConf;
-        const trendLabel = withTrend ? 'WITH-TREND' : 'NEUTRAL-TREND';
+        // Scenario B: story conflicts but HTF agrees — remove with-trend bonus
+        // Scenario C: both agree — keep with-trend bonus
+        const effectiveWithTrend = withTrend && !storyConflicts;
+        const minConf = effectiveWithTrend ? Math.max(baseMinConf - 15, 25) : storyConflicts ? Math.min(baseMinConf + 15, 80) : baseMinConf;
+        const trendLabel = effectiveWithTrend ? 'WITH-TREND' : storyConflicts ? 'COUNTER-STORY' : 'NEUTRAL-TREND';
 
         if(conf < minConf){
           console.log(`HL auto-trade SKIP ${sym} ${d.sig}: conf ${conf}% < ${minConf}% (${trendLabel}, base ${baseMinConf}%)`);
@@ -3574,7 +3621,7 @@ async function runCoin(coinId){
       // Build session story from level interactions — runs alongside momentum calc
       const story = buildStory(s.allLevels, h4Entry?.c || [], h1Entry?.c || [], s.price);
       nm.story = story;
-      s.lastStory = { dir: nm.dir, reason: nm.reason, story }; // persist for coin switch
+      s.lastStory = { dir: nm.dir, reason: nm.reason, story, storyDir: story?.storyDir || 'UNCLEAR' };
       if(isActive){ syncActiveState(); renderNM(nm); }
     }
 
