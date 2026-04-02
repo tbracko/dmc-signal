@@ -2016,6 +2016,51 @@ async function scanCoin(coinId){
       }
     }
     const sigStr = signalSummary.length > 0 ? signalSummary.join(' | ') : 'no signals';
+    // -- v4.9: MULTI-TF CONFLUENCE DETECTION ----------------------------------
+    // After all TFs processed, check if 2+ TFs broke the same level in the same
+    // direction. This is the highest conviction DMS signal.
+    const breakoutTypes = ['BLIND_ENTRY', 'BREAKOUT', 'FAIL_GAIN', 'FAIL_LOSE'];
+    const confluenceSignals = [];
+    for(const tf of TFS){
+      const r = allResults[tf.l];
+      if(!r || !r.level || r.sig === 'NEUTRAL') continue;
+      if(!breakoutTypes.includes(r.type)) continue;
+      confluenceSignals.push({ tf: tf.l, weight: tf.w, sig: r.sig, level: r.level, target: r.target, rr: r.rr, stopPrice: r.stopPrice, type: r.type });
+    }
+    if(confluenceSignals.length >= 2){
+      for(let i = 0; i < confluenceSignals.length; i++){
+        const matches = [confluenceSignals[i]];
+        for(let j = i+1; j < confluenceSignals.length; j++){
+          if(confluenceSignals[j].sig === confluenceSignals[i].sig && Math.abs(confluenceSignals[j].level - confluenceSignals[i].level) / confluenceSignals[i].level < 0.005){
+            matches.push(confluenceSignals[j]);
+          }
+        }
+        if(matches.length < 2) continue;
+        const sig = matches[0].sig;
+        const level = matches[0].level;
+        const tfList = matches.map(m => m.tf).join('+');
+        const bestRR = matches.map(m => m.rr).filter(Boolean).sort((a,b) => +b - +a)[0] || null;
+        const bestStop = matches.map(m => m.stopPrice).filter(Boolean)[0] || null;
+        const bestTarget = matches.map(m => m.target).filter(Boolean)[0] || null;
+        if(isDedupSuppressed(coinId, 'MULTI', 'BLIND_ENTRY', level)) break;
+        markDedupFired(coinId, 'MULTI', 'BLIND_ENTRY', level);
+        const coinLabel = COINS[coinId].label;
+        const icon = sig === 'LONG' ? '\u{1F7E2}' : '\u{1F534}';
+        const tpLine = bestTarget ? `\nTake Profit: <b>$${fmt(bestTarget)}</b>` : '';
+        const slLine = bestStop ? `\nStop Loss: <b>$${fmt(bestStop)}</b>` : '';
+        const rrLine = bestRR ? `\nR:R <b>${bestRR}</b>` : '';
+        const msg = `${icon} <b>MULTI-TF ${sig}</b> \u{26A1} ${coinLabel} [${tfList}]\n${matches.length} timeframes confirm at $${fmt(level)}\n\nEntry now: <b>$${fmt(price)}</b>\nLevel: <b>$${fmt(level)}</b>${tpLine}${slLine}${rrLine}\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
+        await sendTelegram(msg);
+        console.log(`MULTI-TF ${sig} ${coinLabel} [${tfList}] at $${fmt(level)} -- ${matches.length} TFs confirm`);
+        // Auto-trade with high conviction override (skip if already in position)
+        if(HL.enabled && HL.wallet && bestStop && !HL.activeTrades[coinId]){
+          const tradeSignal = { sig, level, target: bestTarget, rr: bestRR, stopPrice: bestStop, type: 'BLIND_ENTRY', tf: tfList };
+          await HL.executeTrade(coinId, tradeSignal, 80);
+          await HL.syncPositions();
+        }
+        break; // only fire once per scan
+      }
+    }
     console.log(`  ${label}: $${fmt(price)} | HTF: ${htfDir} | Session: ${getCurrentSession()} | ${sigStr}`);
   }catch(e){
     console.error(`[${new Date().toISOString()}] Error scanning ${label}:`, e.message);
