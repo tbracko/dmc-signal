@@ -2394,7 +2394,8 @@ function buildStory(levels, h4C, h1C, currentPrice){
   if(!levels || !levels.length || !h4C || !h1C) return null;
   if(h4C.length < 4 || h1C.length < 4) return null;
 
-  // Focus on the 6 most significant levels within 6% of current price
+  // Focus on the 6 most significant levels within 2% of current price
+  // v4.9: tightened from 6% to avoid stale distant levels inflating points
   const nearby = levels
     .filter(l => Math.abs(l.price - currentPrice)/currentPrice < 0.02 && l.score >= 20)
     .sort((a,b) => b.score - a.score)
@@ -3611,31 +3612,29 @@ async function runCoin(coinId){
       }
     })();
 
-    // HTF Story
-    let nm;
-    if(h4Entry?.c && h1Entry?.c)      nm = nextMove(h4Entry.c, h1Entry.c);
-    else if(h4Entry?.c)               nm = nextMove(h4Entry.c, h4Entry.c);
-    else if(dCandles)                  nm = nextMove(dCandles, dCandles);
-    if(nm){
-      s.htfDir = nm.dir;
-      // Build session story from level interactions — runs alongside momentum calc
-      const story = buildStory(s.allLevels, h4Entry?.c || [], h1Entry?.c || [], s.price);
-      nm.story = story;
-      s.lastStory = { dir: nm.dir, reason: nm.reason, story, storyDir: story?.storyDir || 'UNCLEAR' };
-      if(isActive){ syncActiveState(); renderNM(nm); }
-    }
-
-    // Levels — use 1W + 1D for key level detection
-    // Store 15m candles and compute Asia session levels
+    // Levels — compute FIRST so buildStory uses fresh data for this coin
     if(m15Entry?.c){
       s.candles15m = m15Entry.c;
-      // Combine Asia + London session levels for the 15m engine
       s.asiaLevels = [...getAsiaLevels(m15Entry.c), ...getLondonLevels(m15Entry.c), ...getNYLevels(m15Entry.c)];
     }
     const h4Candles = h4Entry?.c || null;
     const h1Candles = h1Entry?.c || null;
     if(wCandles && dCandles) s.allLevels = collectLevels(wCandles, dCandles, s.price, s.candles15m, h4Candles, h1Candles);
     else if(dCandles)        s.allLevels = collectLevels(dCandles, dCandles, s.price, s.candles15m, h4Candles, h1Candles);
+
+    // HTF Story — now uses freshly computed levels
+    let nm;
+    if(h4Entry?.c && h1Entry?.c)      nm = nextMove(h4Entry.c, h1Entry.c);
+    else if(h4Entry?.c)               nm = nextMove(h4Entry.c, h4Entry.c);
+    else if(dCandles)                  nm = nextMove(dCandles, dCandles);
+    if(nm){
+      s.htfDir = nm.dir;
+      const story = buildStory(s.allLevels, h4Entry?.c || [], h1Entry?.c || [], s.price);
+      nm.story = story;
+      s.lastStory = { dir: nm.dir, reason: nm.reason, story, storyDir: story?.storyDir || 'UNCLEAR' };
+      if(isActive){ syncActiveState(); renderNM(nm); }
+    }
+
     if(isActive){
       syncActiveState();
       renderLevels();
