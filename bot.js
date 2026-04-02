@@ -1966,7 +1966,7 @@ async function scanCoin(coinId){
         const dLvls = findVPeaks(dC,'1D');
         const pdhl = findPDHL(dC);
         const all = [...wLvls,...dLvls,...pdhl].sort((a,b)=>b.score-a.score);
-        return all.filter(l => Math.abs(l.price - price)/price < 0.06 && l.score >= 20).slice(0,6);
+        return all.filter(l => Math.abs(l.price - price)/price < 0.02 && l.score >= 20).slice(0,6);
       })();
       if(sLevels.length >= 2){
         let bp = 0, brp = 0;
