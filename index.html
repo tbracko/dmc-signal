@@ -645,7 +645,6 @@ function switchCoin(coinId){
   renderHero();
   renderCards();
   renderLevels();
-  renderNM({dir:cs().htfDir, reason:''});
   renderTopFromState();
   // Update status bar + session banner to reflect current coin
   const s = cs();
@@ -2754,7 +2753,7 @@ function renderNM(nm){
   const divider = document.getElementById('nm-divider');
   const lbl = document.getElementById('nm-story-lbl');
   const storyEl = document.getElementById('nm-story');
-  if(!story || !storyEl){ if(divider) divider.style.display='none'; if(lbl) lbl.style.display='none'; return; }
+  if(!story || !storyEl){ if(divider) divider.style.display='none'; if(lbl) lbl.style.display='none'; if(storyEl){ storyEl.style.display='none'; storyEl.innerHTML=''; } return; }
 
   divider.style.display='block';
   lbl.style.display='block';
