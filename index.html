@@ -2435,21 +2435,21 @@ function buildStory(levels, h4C, h1C, currentPrice){
     }
 
     if(h4GainCount > 0){
-      const label = isRes ? 'Gained' : 'Held';
+      const label = isRes ? 'Gained' : 'Lost';
       const countStr = h4GainCount > 1 ? ` ×${h4GainCount}` : '';
       rows.push({
-        icon:'gain',
+        icon: isRes ? 'gain' : 'fail',
         text:`<strong>4H ${label} $${fmt(lv.price)}</strong>${countStr} — body closed ${isRes?'above':'below'} · ${lv.source}`,
         weight:2, dir: isRes ? 'bull' : 'bear'
       });
       isRes ? bullPoints += 2 * h4GainCount : bearPoints += 2 * h4GainCount;
     }
     if(h4FailCount > 0){
-      const label = isRes ? 'Failed to gain' : 'Failed to hold';
+      const label = isRes ? 'Failed to gain' : 'Held';
       const countStr = h4FailCount > 1 ? ` ×${h4FailCount}` : '';
       rows.push({
-        icon:'fail',
-        text:`<strong>4H ${label} $${fmt(lv.price)}</strong>${countStr} — rejected · ${lv.source}`,
+        icon: isRes ? 'fail' : 'gain',
+        text:`<strong>4H ${label} $${fmt(lv.price)}</strong>${countStr} — ${isRes?'rejected':'held above'} · ${lv.source}`,
         weight:2, dir: isRes ? 'bear' : 'bull'
       });
       isRes ? bearPoints += 2 * h4FailCount : bullPoints += 2 * h4FailCount;
@@ -2467,19 +2467,19 @@ function buildStory(levels, h4C, h1C, currentPrice){
     }
 
     if(h1GainCount > 0){
-      const label = isRes ? 'gaining' : 'holding';
+      const label = isRes ? 'gaining' : 'losing';
       rows.push({
-        icon:'gain',
+        icon: isRes ? 'gain' : 'fail',
         text:`<strong>1H ${label} $${fmt(lv.price)}</strong> · ${h1GainCount}× body close ${isRes?'above':'below'} · ${lv.source}`,
         weight:1, dir: isRes ? 'bull' : 'bear'
       });
       isRes ? bullPoints += h1GainCount : bearPoints += h1GainCount;
     }
     if(h1FailCount > 0){
-      const label = isRes ? 'failing' : 'losing';
+      const label = isRes ? 'failing' : 'holding';
       rows.push({
-        icon:'fail',
-        text:`<strong>1H ${label} $${fmt(lv.price)}</strong> · rejected ${h1FailCount}× · ${lv.source}`,
+        icon: isRes ? 'fail' : 'gain',
+        text:`<strong>1H ${label} $${fmt(lv.price)}</strong> · ${isRes?'rejected':'held'} ${h1FailCount}× · ${lv.source}`,
         weight:1, dir: isRes ? 'bear' : 'bull'
       });
       isRes ? bearPoints += h1FailCount : bullPoints += h1FailCount;
@@ -3507,6 +3507,62 @@ async function runCoin(coinId){
     if(h4Entry?.c && dCandles) processTF(2, h4Entry.c, dCandles, coinId);
     if(h1Entry?.c && dCandles) processTF(3, h1Entry.c, dCandles, coinId);
     if(m15Entry?.c && dCandles) processTF(4, m15Entry.c, dCandles, coinId);
+
+    // ── v4.9: MULTI-TF CONFLUENCE DETECTION ──────────────────────────────
+    // After all TFs processed, check if 2+ TFs broke the same level in the same
+    // direction. This is the highest conviction DMS signal — fire with boosted priority.
+    (function checkMultiTFConfluence(){
+      const breakoutTypes = ['BLIND_ENTRY', 'BREAKOUT', 'FAIL_GAIN', 'FAIL_LOSE'];
+      const signals = [];
+      for(const tf of TFS){
+        const r = s.results[tf.l];
+        if(!r || !r.level || r.sig === 'NEUTRAL') continue;
+        if(!breakoutTypes.includes(r.type)) continue;
+        signals.push({ tf: tf.l, weight: tf.w, sig: r.sig, level: r.level, target: r.target, rr: r.rr, stopPrice: r.stopPrice, type: r.type });
+      }
+      if(signals.length < 2) return;
+      // Group by level (within 0.5%) and direction
+      for(let i = 0; i < signals.length; i++){
+        const matches = [signals[i]];
+        for(let j = i+1; j < signals.length; j++){
+          if(signals[j].sig === signals[i].sig && Math.abs(signals[j].level - signals[i].level) / signals[i].level < 0.005){
+            matches.push(signals[j]);
+          }
+        }
+        if(matches.length < 2) continue;
+        // Found multi-TF confluence!
+        const sig = matches[0].sig;
+        const level = matches[0].level;
+        const tfList = matches.map(m => m.tf).join('+');
+        const bestRR = matches.map(m => m.rr).filter(Boolean).sort((a,b) => +b - +a)[0] || null;
+        const bestStop = matches.map(m => m.stopPrice).filter(Boolean)[0] || null;
+        const bestTarget = matches.map(m => m.target).filter(Boolean)[0] || null;
+        if(isDedupSuppressed(coinId, 'MULTI', 'BLIND_ENTRY', level)) return;
+        markDedupFired(coinId, 'MULTI', 'BLIND_ENTRY', level);
+        const coinLabel = COINS[coinId] ? COINS[coinId].shortLabel : coinId.toUpperCase();
+        const px = s.price || 0;
+        // Log it
+        addLog(sig, tfList, `MULTI-TF BREAKOUT: ${tfList} at $${fmt(level)} — ${matches.length} TFs confirm ${sig}`, 'BLIND_ENTRY', level, bestTarget, bestRR, bestStop, coinId);
+        // Alert (Telegram + toast)
+        const icon = sig === 'LONG' ? '\u{1F7E2}' : '\u{1F534}';
+        const tpLine = bestTarget ? `\nTake Profit: <b>$${fmt(bestTarget)}</b>` : '';
+        const slLine = bestStop ? `\nStop Loss: <b>$${fmt(bestStop)}</b>` : '';
+        const rrLine = bestRR ? `\nR:R <b>${bestRR}</b>` : '';
+        const msg = `${icon} <b>MULTI-TF ${sig}</b> \u{26A1} ${coinLabel} [${tfList}]\n${matches.length} timeframes confirm at $${fmt(level)}\n\nEntry now: <b>$${fmt(px)}</b>\nLevel: <b>$${fmt(level)}</b>${tpLine}${slLine}${rrLine}\n\n<a href="https://tbracko.github.io/dms-signal">Open DMS</a>`;
+        sendTelegram(msg);
+        showToast(`\u{26A1} MULTI-TF ${sig} ${coinLabel} [${tfList}]`, `${matches.length} TFs at $${fmt(level)}`, sig === 'SHORT');
+        // Auto-trade with high conviction override (skip if already in position)
+        if(HL.enabled && HL.wallet && bestStop && !HL.activeTrades[coinId]){
+          const multiConf = 80; // Multi-TF = high conviction override
+          const tradeSignal = { sig, level, target: bestTarget, rr: bestRR, stopPrice: bestStop, type: 'BLIND_ENTRY', tf: tfList };
+          console.log(`HL MULTI-TF FIRE ${coinLabel} ${sig} | ${tfList} | level: $${fmt(level)} | SL: $${fmt(bestStop)}`);
+          HL.executeTrade(coinId, tradeSignal, multiConf).then(r => {
+            if(r) { showToast(`FILLED: MULTI-TF ${sig} ${coinLabel}`, '', sig === 'SHORT'); HL.syncPositions(); }
+          }).catch(e => console.error('HL multi-TF trade error:', e));
+        }
+        return; // only fire once per scan cycle
+      }
+    })();
 
     // HTF Story
     let nm;
