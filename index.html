@@ -4279,10 +4279,10 @@ const HL = {
 
   // ── Translate short coin symbols to HL asset names (for HIP-3 assets) ──
   resolveAsset(asset) {
-    if (this.assetMap[asset] !== undefined) return asset;
-    // Map short names to prefixed HIP-3 names
+    // Check explicit mappings FIRST — SPX exists on main dex but we want xyz:SP500
     const hlMap = { GOLD: 'xyz:GOLD', 'S&P500': 'xyz:SP500', SPX: 'xyz:SP500' };
-    return hlMap[asset] || asset;
+    if (hlMap[asset]) return hlMap[asset];
+    return asset;
   },
 
   // ── Place a single order ──
