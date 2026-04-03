@@ -44,8 +44,8 @@ if(!TG_TOKEN || !TG_CHATID){
 const COINS = {
   bitcoin:     { id:'bitcoin',     label:'BTC',    apiSym:'BTCUSDT',      asset:'BTC',        exchange:'binance',     minRR: 1.0, feeEst: 0.05 },
   hyperliquid: { id:'hyperliquid', label:'HYPE',   apiSym:'HYPEUSDT',     asset:'HYPE',       exchange:'bybit',       minRR: 1.0, feeEst: 0.05 },
-  sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',   asset:'xyz:SP500', exchange:'hyperliquid', minRR: 2.0, feeEst: 0.90 },
-  gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',     asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 2.0, feeEst: 0.90 },
+  sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',   asset:'xyz:SP500', exchange:'hyperliquid', minRR: 1.5, feeEst: 0.05 },
+  gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',    asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.5, feeEst: 0.05 },
 };
 
 const TFS = [
