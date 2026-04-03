@@ -2281,7 +2281,7 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
       const tgt  = findNextLevel(levels, confirm.c, 'short');
       const stop = findStopLevel(levels, lv.price, 'short', a);
       const rr   = calcRR(confirm.c, tgt.price, lv.price, stop);
-      if(rr && parseFloat(rr) < 1.5) continue; // Skip low R:R setups — min 1.5 on 15m
+      if(rr && parseFloat(rr) < 1.0) continue; // Skip low R:R setups -- min 1.0 on 15m (widened for ATR stops)
       const dist = ((lv.price - confirm.c)/confirm.c*100).toFixed(2);
       return {
         sig:'SHORT', type:'FAIL_GAIN',
@@ -2321,7 +2321,7 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
       const tgt  = findNextLevel(levels, confirm.c, 'long');
       const stop = findStopLevel(levels, lv.price, 'long', a);
       const rr   = calcRR(confirm.c, tgt.price, lv.price, stop);
-      if(rr && parseFloat(rr) < 1.5) continue; // Skip low R:R setups — min 1.5 on 15m
+      if(rr && parseFloat(rr) < 1.0) continue; // Skip low R:R setups -- min 1.0 on 15m (widened for ATR stops)
       const dist = ((confirm.c - lv.price)/confirm.c*100).toFixed(2);
       return {
         sig:'LONG', type:'FAIL_LOSE',
