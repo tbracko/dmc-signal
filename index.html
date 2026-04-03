@@ -4912,7 +4912,10 @@ function prefillTrade(coin, sig, sl, tp){
 async function manualOpenTrade(){
   if(!HL.wallet){ showToast('Connect Hyperliquid wallet first'); return; }
 
-  const coin = document.getElementById('mf-coin').value;
+  const rawCoin = document.getElementById('mf-coin').value;
+  // Map dropdown names to HL asset names (SPX on main dex is a different token)
+  const hlCoinMap = { SPX: 'xyz:SP500', GOLD: 'xyz:GOLD' };
+  const coin = hlCoinMap[rawCoin] || rawCoin;
   const side = document.getElementById('mf-side').value;
   const size = parseFloat(document.getElementById('mf-size').value);
   const sl = parseFloat(document.getElementById('mf-sl').value) || null;
