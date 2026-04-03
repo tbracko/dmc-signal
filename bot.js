@@ -22,7 +22,7 @@ const TG_CHATID = process.env.TG_CHATID;
 const WANT_LONG     = process.env.ALERT_LONG    !== 'false';
 const WANT_SHORT    = process.env.ALERT_SHORT   !== 'false';
 const WANT_ATLEVEL  = process.env.ALERT_ATLEVEL === 'true';
-const MIN_RR        = parseFloat(process.env.MIN_RR || '1.5');
+const MIN_RR        = parseFloat(process.env.MIN_RR || '1.0');
 const INTERVAL_MS   = parseInt(process.env.INTERVAL_MS || '120000', 10);
 const DEDUP_FILE    = path.join(__dirname, '.dedup.json');
 
