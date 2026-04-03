@@ -4281,7 +4281,7 @@ const HL = {
   resolveAsset(asset) {
     if (this.assetMap[asset] !== undefined) return asset;
     // Map short names to prefixed HIP-3 names
-    const hlMap = { GOLD: 'xyz:GOLD', 'S&P500': 'xyz:SP500' };
+    const hlMap = { GOLD: 'xyz:GOLD', 'S&P500': 'xyz:SP500', SPX: 'xyz:SP500' };
     return hlMap[asset] || asset;
   },
 
