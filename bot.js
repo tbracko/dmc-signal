@@ -813,7 +813,8 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
           if(rejection.confirmed){
             // v4.9: LTF alignment -- 1W/1D signals must not conflict with lower-TF momentum
             // Only applies to HTF signals (1W/1D) -- 4H/1H left untouched to avoid over-filtering
-            if((tf === '1W' || tf === '1D') && lowerCandles){
+            // v4.9: LTF alignment -- signals must not conflict with lower-TF momentum
+            if(lowerCandles){
               const ltfCheck = hasLTFAlignment(blindSig, lowerCandles);
               if(!ltfCheck.aligned){
                 const waitReason = ltfCheck.reason;
@@ -2031,11 +2032,18 @@ async function scanCoin(coinId){
     if (h1C) lowerTFCandles['1H'] = h1C;
     const hasLower = Object.keys(lowerTFCandles).length > 0 ? lowerTFCandles : null;
 
+    // Build lower-TF data for each TF level
+    const lowerFor4H = {};
+    if (h1C) lowerFor4H['1H'] = h1C;
+    if (m15C) lowerFor4H['15m'] = m15C;
+    const lowerFor1H = {};
+    if (m15C) lowerFor1H['15m'] = m15C;
+
     const tfsToRun = [
       wC  && dC  ? { i:0, c:wC,   dC, lower:hasLower } : null,
       dC         ? { i:1, c:dC,   dC, lower:hasLower } : null,
-      h4C && dC  ? { i:2, c:h4C,  dC, lower:null } : null,
-      h1C && dC  ? { i:3, c:h1C,  dC, lower:null } : null,
+      h4C && dC  ? { i:2, c:h4C,  dC, lower:Object.keys(lowerFor4H).length ? lowerFor4H : null } : null,
+      h1C && dC  ? { i:3, c:h1C,  dC, lower:Object.keys(lowerFor1H).length ? lowerFor1H : null } : null,
       m15C && dC ? { i:4, c:m15C, dC, lower:null } : null,
     ].filter(Boolean);
 
