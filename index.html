@@ -765,8 +765,8 @@ function maybeAlert(sig, tf, type, level, target, rr, coinId, state, stopPrice){
   const coinLabel = COINS[coinId] ? COINS[coinId].shortLabel : coinId.toUpperCase();
   const px = state.price || 0;
 
-  // ── In-app toast (2 lines: signal + entry/TP) — only for active coin ──
-  if(wantToast && coinId === activeCoin){
+  // ── In-app toast (2 lines: signal + entry/TP) — fires for ALL coins ──
+  if(wantToast){
     const line1 = `${icon} ${coinLabel} ${sig} [${tf}]${rrTxt}`;
     const line2 = target
       ? `Entry: $${fmt(px)} · TP: $${fmt(target)}`
@@ -2013,8 +2013,9 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
           // v4.9: Require rejection + follow-through + momentum check
           const rejection = hasRejection(c, blindCandidate.price, blindSig, a);
           if(rejection.confirmed){
-            // v4.9: LTF alignment -- signals must not conflict with lower-TF momentum
-            if(lowerCandles){
+            // v4.9: LTF alignment — 1W/1D signals must not conflict with lower-TF momentum
+            // Only applies to HTF signals (1W/1D) — 4H/1H left untouched to avoid over-filtering
+            if((tf === '1W' || tf === '1D') && lowerCandles){
               const ltfCheck = hasLTFAlignment(blindSig, lowerCandles);
               if(!ltfCheck.aligned){
                 const dir = isRes ? 'RESISTANCE — lower TF opposing' : 'SUPPORT — lower TF opposing';
@@ -3527,6 +3528,18 @@ async function runCoin(coinId){
 
     // v4.9: Reset cross-TF conflict tracker for this scan cycle
     s._firedDir = null;
+
+    // v4.9 FIX: Compute htfDir + storyDir BEFORE processing TFs
+    // (was computed AFTER, causing signals to use stale htfDir from previous cycle)
+    // This matches bot.js order where htfDir is computed first.
+    let nm;
+    if(h4Entry?.c && h1Entry?.c)      nm = nextMove(h4Entry.c, h1Entry.c);
+    else if(h4Entry?.c)               nm = nextMove(h4Entry.c, h4Entry.c);
+    else if(dCandles)                  nm = nextMove(dCandles, dCandles);
+    if(nm){
+      s.htfDir = nm.dir;
+    }
+
     // v4.9: Build lower-TF candle data for LTF alignment checks on 1W/1D only
     // 4H/1H/15m signals are left untouched — working well for BTC/SPX/HYPE
     const lowerTFCandles = {};
@@ -3537,15 +3550,8 @@ async function runCoin(coinId){
     // Process each TF — pass dCandles as context (may be null if 1D failed, graceful)
     if(dCandles) processTF(1, dCandles, dCandles, coinId, hasLower);
     if(wCandles && dCandles) processTF(0, wCandles, dCandles, coinId, hasLower);
-    // Build lower-TF data for each TF level
-    const lowerFor4H = {};
-    if(h1Entry?.c) lowerFor4H['1H'] = h1Entry.c;
-    if(m15Entry?.c) lowerFor4H['15m'] = m15Entry.c;
-    const lowerFor1H = {};
-    if(m15Entry?.c) lowerFor1H['15m'] = m15Entry.c;
-
-    if(h4Entry?.c && dCandles) processTF(2, h4Entry.c, dCandles, coinId, Object.keys(lowerFor4H).length ? lowerFor4H : null);
-    if(h1Entry?.c && dCandles) processTF(3, h1Entry.c, dCandles, coinId, Object.keys(lowerFor1H).length ? lowerFor1H : null);
+    if(h4Entry?.c && dCandles) processTF(2, h4Entry.c, dCandles, coinId);
+    if(h1Entry?.c && dCandles) processTF(3, h1Entry.c, dCandles, coinId);
     if(m15Entry?.c && dCandles) processTF(4, m15Entry.c, dCandles, coinId);
 
     // ── v4.9: MULTI-TF CONFLUENCE DETECTION ──────────────────────────────
@@ -3614,13 +3620,9 @@ async function runCoin(coinId){
     if(wCandles && dCandles) s.allLevels = collectLevels(wCandles, dCandles, s.price, s.candles15m, h4Candles, h1Candles);
     else if(dCandles)        s.allLevels = collectLevels(dCandles, dCandles, s.price, s.candles15m, h4Candles, h1Candles);
 
-    // HTF Story — now uses freshly computed levels
-    let nm;
-    if(h4Entry?.c && h1Entry?.c)      nm = nextMove(h4Entry.c, h1Entry.c);
-    else if(h4Entry?.c)               nm = nextMove(h4Entry.c, h4Entry.c);
-    else if(dCandles)                  nm = nextMove(dCandles, dCandles);
+    // HTF Story — uses freshly computed levels + htfDir (already set above)
+    // nm was already computed before processTF; reuse it for rendering
     if(nm){
-      s.htfDir = nm.dir;
       const story = buildStory(s.allLevels, h4Entry?.c || [], h1Entry?.c || [], s.price);
       nm.story = story;
       s.lastStory = { dir: nm.dir, reason: nm.reason, story, storyDir: story?.storyDir || 'UNCLEAR' };
