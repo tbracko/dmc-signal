@@ -4198,12 +4198,30 @@ const HL = {
         const emoji = reason === 'tp_hit' ? '✅' : reason === 'sl_hit' ? '🛑' : '📊';
         const label = reason === 'tp_hit' ? 'TP HIT' : reason === 'sl_hit' ? 'SL HIT' : 'CLOSED';
         console.log(`HL FILL HISTORY ${label}: ${side} ${coin} | Exit: $${fmt(avgExitPx)} | P&L: $${totalPnl.toFixed(2)}`);
+
+        // v5.0 FIX: Bridge fill history → signal log so STATS tab gets updated
+        // Find the most recent open signal log entry for this coin+side and mark it
+        const logEntries = loadLog();
+        const matchIdx = logEntries.findIndex(e =>
+          e.status === 'open' && e.coin === coinId && e.sig === side
+        );
+        if (matchIdx >= 0) {
+          const newStatus = reason === 'tp_hit' ? 'hit' : 'stopped';
+          logEntries[matchIdx].status = newStatus;
+          logEntries[matchIdx].exitPrice = avgExitPx;
+          logEntries[matchIdx].pnl = totalPnl;
+          logEntries[matchIdx].exitNote = `${emoji} HL fill: ${label} at $${fmt(avgExitPx)} | P&L: $${totalPnl.toFixed(2)}`;
+          saveLog(logEntries);
+          console.log(`Signal log updated: ${coinId} ${side} → ${newStatus}`);
+        }
       }
 
       if (newCount > 0) {
         saveClosedTrades(closed);
         console.log(`HL fill history: found ${newCount} new closed trades`);
         showToast(`Found ${newCount} closed trade(s) from fill history`, '', false);
+        renderLog();
+        renderStats();
       }
     } catch (e) {
       console.warn('HL checkFillHistory error:', e);
