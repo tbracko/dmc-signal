@@ -42,10 +42,10 @@ if(!TG_TOKEN || !TG_CHATID){
 
 // -- COINS (BTC, HYPE, SPX + GOLD via Hyperliquid HIP-3) ---------------------
 const COINS = {
-  bitcoin:     { id:'bitcoin',     label:'BTC',    apiSym:'BTCUSDT',      asset:'BTC',        exchange:'binance',     minRR: 1.0, feeEst: 0.05 },
-  hyperliquid: { id:'hyperliquid', label:'HYPE',   apiSym:'HYPEUSDT',     asset:'HYPE',       exchange:'bybit',       minRR: 1.0, feeEst: 0.05 },
-  sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',   asset:'xyz:SP500', exchange:'hyperliquid', minRR: 1.5, feeEst: 0.05 },
-  gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',    asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.5, feeEst: 0.05 },
+  bitcoin:     { id:'bitcoin',     label:'BTC',    apiSym:'BTCUSDT',      asset:'BTC',        exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.007, maxNotional: 0 },
+  hyperliquid: { id:'hyperliquid', label:'HYPE',   apiSym:'HYPEUSDT',     asset:'HYPE',       exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, maxNotional: 0 },
+  sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',   asset:'xyz:SP500', exchange:'hyperliquid', minRR: 1.5, feeEst: 0.10, minStopPct: 0.005, maxNotional: 500, isHIP3: true },
+  gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',    asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.5, feeEst: 0.10, minStopPct: 0.005, maxNotional: 500, isHIP3: true },
 };
 
 const TFS = [
@@ -537,12 +537,14 @@ function findNextLevel(levels, currentPrice, direction){
   return { price: direction === 'long' ? currentPrice*1.025 : currentPrice*0.975, source:'ATR est.' };
 }
 // v4.9: ATR-aware -- enforces minimum 1.0 ATR distance to avoid noise wicks
-function findStopLevel(levels, trapPrice, direction, atrVal){
+// v5.0: Per-coin minStopPct override (BTC 0.7%, others 0.5%)
+function findStopLevel(levels, trapPrice, direction, atrVal, coinMinStopPct){
   const qualityLevels = levels.filter(l => l.score >= 10);
   const pool   = qualityLevels.length >= 2 ? qualityLevels : levels;
   const sorted = [...pool].sort((a,b)=>a.price-b.price);
-  // ATR-based minimum distance: at least 1.0 ATR from trap, floor 0.5%
-  const minDist = atrVal ? Math.max(atrVal * 1.0, trapPrice * 0.005) : trapPrice * 0.005;
+  // ATR-based minimum distance: at least 1.0 ATR from trap, floor = per-coin minStopPct (default 0.5%)
+  const stopFloor = coinMinStopPct || 0.005;
+  const minDist = atrVal ? Math.max(atrVal * 1.0, trapPrice * stopFloor) : trapPrice * stopFloor;
   // Max stop distance: 4% from trap -- prevents absurdly wide stops
   const maxStopDist = trapPrice * 0.04;
   if(direction === 'short'){
@@ -559,11 +561,14 @@ function findStopLevel(levels, trapPrice, direction, atrVal){
     return Math.min(fallback, trapPrice - minDist);
   }
 }
-function calcRR(entry, target, trapLevel, stopLevel){
+// v5.0: Fee-adjusted R:R -- subtracts round-trip fees from reward and adds to risk
+function calcRR(entry, target, trapLevel, stopLevel, feeEst){
   const stopRef = stopLevel || trapLevel;
-  const risk    = Math.abs(entry - stopRef) * 1.05;
-  const reward  = Math.abs(entry - target);
-  if(risk < 1) return null;
+  const feePct = feeEst || 0.05; // basis points as % (0.05 = 5bps)
+  const roundTripFee = entry * (feePct / 100) * 2; // entry + exit fees
+  const risk    = Math.abs(entry - stopRef) * 1.05 + roundTripFee;
+  const reward  = Math.abs(entry - target) - roundTripFee;
+  if(risk < 1 || reward <= 0) return null;
   const rr = reward / risk;
   // Cap R:R at 2.5 -- beyond this, targets are unrealistically far
   return Math.min(rr, 2.5).toFixed(1);
@@ -763,8 +768,11 @@ function hasLTFAlignment(direction, lowerCandles) {
 }
 
 // -- DMS SIGNAL ENGINE (v4.9 -- confirmed follow-through + momentum + HTF + LTF align) -
-function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
+// v5.0: Added coinMinStopPct + feeEst for per-coin SL floor and fee-adjusted R:R
+function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR, coinMinStopPct, feeEst){
   coinMinRR = coinMinRR || 1.0;
+  coinMinStopPct = coinMinStopPct || 0.005;
+  feeEst = feeEst || 0.05;
   const n = c.length;
   const minCandles = (tf==='1W'||tf==='1D') ? 10 : 20;
   if(n < minCandles) return { sig:'NEUTRAL', type:'NONE', reason:'Insufficient data' };
@@ -802,8 +810,8 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
       const htfBlocks = (isRes && htfDir==='UP') || (!isRes && htfDir==='DOWN');
       if(!htfBlocks){
         const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
-        const stop = findStopLevel(levels, blindCandidate.price, isRes?'short':'long', a);
-        const rr   = calcRR(cur.c, tgt.price, blindCandidate.price, stop);
+        const stop = findStopLevel(levels, blindCandidate.price, isRes?'short':'long', a, coinMinStopPct);
+        const rr   = calcRR(cur.c, tgt.price, blindCandidate.price, stop, feeEst);
         if(rr && parseFloat(rr) >= coinMinRR){
           const dist = ((blindCandidate.price - cur.c)/cur.c*100).toFixed(2);
           const htfNote = htfDir!=='UNCLEAR' ? ` . HTF ${htfDir} aligns` : '';
@@ -813,8 +821,7 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
           if(rejection.confirmed){
             // v4.9: LTF alignment -- 1W/1D signals must not conflict with lower-TF momentum
             // Only applies to HTF signals (1W/1D) -- 4H/1H left untouched to avoid over-filtering
-            // v4.9: LTF alignment -- signals must not conflict with lower-TF momentum
-            if(lowerCandles){
+            if((tf === '1W' || tf === '1D') && lowerCandles){
               const ltfCheck = hasLTFAlignment(blindSig, lowerCandles);
               if(!ltfCheck.aligned){
                 const waitReason = ltfCheck.reason;
@@ -848,8 +855,8 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
         const rejection = hasRejection(c, atLevel.price, confSig, a);
         if(rejection.confirmed){
           const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
-          const stop = findStopLevel(levels, atLevel.price, isRes?'short':'long', a);
-          const rr   = calcRR(cur.c, tgt.price, atLevel.price, stop);
+          const stop = findStopLevel(levels, atLevel.price, isRes?'short':'long', a, coinMinStopPct);
+          const rr   = calcRR(cur.c, tgt.price, atLevel.price, stop, feeEst);
           if(rr && parseFloat(rr) >= coinMinRR){
             const dist = ((atLevel.price - cur.c)/cur.c*100).toFixed(2);
             return {
@@ -867,8 +874,8 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
           const bounce = hasStrongBodyBounce(c, atLevel.price, confSig, a);
           if(bounce.confirmed){
             const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
-            const stop = findStopLevel(levels, atLevel.price, isRes?'short':'long', a);
-            const rr   = calcRR(cur.c, tgt.price, atLevel.price, stop);
+            const stop = findStopLevel(levels, atLevel.price, isRes?'short':'long', a, coinMinStopPct);
+            const rr   = calcRR(cur.c, tgt.price, atLevel.price, stop, feeEst);
             if(rr && parseFloat(rr) >= coinMinRR){
               const dist = ((atLevel.price - cur.c)/cur.c*100).toFixed(2);
               return {
@@ -908,7 +915,7 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
 
           const tgt  = findNextLevel(levels, cur.c, 'short');
           const stop = lv.price + a * 0.3;
-          const rr   = calcRR(cur.c, tgt.price, lv.price, stop);
+          const rr   = calcRR(cur.c, tgt.price, lv.price, stop, feeEst);
           if(!rr || parseFloat(rr) < coinMinRR) continue;
 
           const breakDist = (distFromLevel * 100).toFixed(2);
@@ -936,7 +943,7 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
 
           const tgt  = findNextLevel(levels, cur.c, 'long');
           const stop = lv.price - a * 0.3;
-          const rr   = calcRR(cur.c, tgt.price, lv.price, stop);
+          const rr   = calcRR(cur.c, tgt.price, lv.price, stop, feeEst);
           if(!rr || parseFloat(rr) < coinMinRR) continue;
 
           const breakDist = (distFromLevel * 100).toFixed(2);
@@ -979,8 +986,8 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
       if(priceRallied || levelReclaimed || currentAbove || !confirmFollows) continue;
       if(htfBlockShort) continue;
       const tgt  = findNextLevel(levels, confirm.c, 'short');
-      const stop = findStopLevel(levels, lv.price, 'short', a);
-      const rr   = calcRR(confirm.c, tgt.price, lv.price, stop);
+      const stop = findStopLevel(levels, lv.price, 'short', a, coinMinStopPct);
+      const rr   = calcRR(confirm.c, tgt.price, lv.price, stop, feeEst);
       if(rr && parseFloat(rr) < MIN_RR) continue;
       const dist = ((lv.price - confirm.c)/confirm.c*100).toFixed(2);
       return { sig:'SHORT', type:'FAIL_GAIN', level:lv.price, target:tgt.price, rr, stopPrice:stop, strength:lv.strength, score:lv.score, reason:`${lv.source} $${fmt(lv.price)} . ${dist}% above . ${lb===1?'just now':lb+' bars ago'}${rr?` . R:R ${rr}`:''} -> $${fmt(tgt.price)}` };
@@ -1005,8 +1012,8 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
       if(priceDropped || levelReclaimed || currentBelow || !confirmFollows) continue;
       if(htfBlockLong) continue;
       const tgt  = findNextLevel(levels, confirm.c, 'long');
-      const stop = findStopLevel(levels, lv.price, 'long', a);
-      const rr   = calcRR(confirm.c, tgt.price, lv.price, stop);
+      const stop = findStopLevel(levels, lv.price, 'long', a, coinMinStopPct);
+      const rr   = calcRR(confirm.c, tgt.price, lv.price, stop, feeEst);
       if(rr && parseFloat(rr) < MIN_RR) continue;
       const dist = ((confirm.c - lv.price)/confirm.c*100).toFixed(2);
       return { sig:'LONG', type:'FAIL_LOSE', level:lv.price, target:tgt.price, rr, stopPrice:stop, strength:lv.strength, score:lv.score, reason:`${lv.source} $${fmt(lv.price)} . ${dist}% below . ${lb===1?'just now':lb+' bars ago'}${rr?` . R:R ${rr}`:''} -> $${fmt(tgt.price)}` };
@@ -1068,6 +1075,16 @@ const HL = {
   _lastEquitySync: 0,
   tradesToday: 0,
   lastTradeDay: '',
+
+  // v5.0: Post-loss cooldown -- tracks last SL time per coin (ms timestamp)
+  lastSlTime: {},   // coinId -> timestamp of last SL hit
+  COOLDOWN_MS: parseInt(process.env.COOLDOWN_MS || '600000'), // 10 min default (2x 15m candle)
+
+  // v5.0: Daily P&L limit tracking
+  dailyPnl: 0,
+  dailyPnlDate: '',
+  DAILY_LOSS_LIMIT: parseFloat(process.env.DAILY_LOSS_LIMIT || '-10'),  // pause after -$10
+  DAILY_LOSS_REDUCE: 0.5, // reduce size to 50% after hitting limit
 
   // -- MSGPACK encoder (matches app exactly) --
   msgpack(obj) {
@@ -1390,7 +1407,20 @@ const HL = {
         const emoji = reason === 'tp_hit' ? '✅' : reason === 'sl_hit' ? '🛑' : '📊';
         const label = reason === 'tp_hit' ? 'TP HIT' : reason === 'sl_hit' ? 'SL HIT' : 'CLOSED';
         console.log(`HL POSITION CLOSED: ${label} ${old.side} ${old.asset} | P&L: $${pnl.toFixed(2)}`);
-        await sendTelegram(`${emoji} <b>${label}: ${old.side} ${old.asset}</b>\nEntry: $${fmt(old.entry)}\nExit: $${fmt(exitPx)}\nP&L: <b>$${pnl.toFixed(2)}</b>`);
+
+        // v5.0: Record SL cooldown timestamp for this coin
+        if (reason === 'sl_hit') {
+          this.lastSlTime[coinId] = Date.now();
+          console.log(`HL COOLDOWN: ${coinId} on cooldown for ${this.COOLDOWN_MS/1000}s after SL hit`);
+        }
+
+        // v5.0: Track daily P&L
+        const pnlDay = new Date().toDateString();
+        if (pnlDay !== this.dailyPnlDate) { this.dailyPnl = 0; this.dailyPnlDate = pnlDay; }
+        this.dailyPnl += pnl;
+        const dailyStr = this.dailyPnl >= 0 ? `+$${this.dailyPnl.toFixed(2)}` : `-$${Math.abs(this.dailyPnl).toFixed(2)}`;
+
+        await sendTelegram(`${emoji} <b>${label}: ${old.side} ${old.asset}</b>\nEntry: $${fmt(old.entry)}\nExit: $${fmt(exitPx)}\nP&L: <b>$${pnl.toFixed(2)}</b>\nDaily P&L: ${dailyStr}`);
       }
 
       this.saveActiveTrades();
@@ -1509,7 +1539,8 @@ const HL = {
 
   // -- Execute full trade: market entry + SL + TP --
   async executeTrade(coinId, signal, confidence) {
-    const asset = COINS[coinId]?.asset;
+    const coin = COINS[coinId];
+    const asset = coin?.asset;
     if (!asset || !this.enabled || !this.wallet) return null;
 
     // Daily trade limit
@@ -1519,6 +1550,18 @@ const HL = {
       console.warn('HL: daily trade limit reached (' + MAX_TRADES_DAY + ')');
       return null;
     }
+
+    // v5.0: Post-loss cooldown check (#3)
+    const lastSl = this.lastSlTime[coinId];
+    if (lastSl && (Date.now() - lastSl) < this.COOLDOWN_MS) {
+      const remaining = Math.round((this.COOLDOWN_MS - (Date.now() - lastSl)) / 1000);
+      console.warn(`HL: ${coinId} on post-loss cooldown (${remaining}s remaining), skipping`);
+      return null;
+    }
+
+    // v5.0: Daily P&L limit check (#8)
+    const pnlDay = new Date().toDateString();
+    if (pnlDay !== this.dailyPnlDate) { this.dailyPnl = 0; this.dailyPnlDate = pnlDay; }
 
     const { sig, level, stopPrice, rr, type } = signal;
     let { target } = signal;
@@ -1544,27 +1587,74 @@ const HL = {
 
     // Position sizing
     const accountSize = this.cachedEquity > 0 ? this.cachedEquity : 100;
-    const riskAmount = accountSize * RISK_PCT / 100;
-    const slDistance = Math.abs(currentPrice - stopPrice);
-    if (slDistance < currentPrice * 0.003) { console.warn('HL: SL too tight'); return null; }
+    let riskPct = RISK_PCT;
 
-    const size = riskAmount / slDistance;
+    // v5.0: Reduce position size by 50% if daily loss limit breached (#8)
+    if (this.dailyPnl <= this.DAILY_LOSS_LIMIT) {
+      riskPct = RISK_PCT * this.DAILY_LOSS_REDUCE;
+      console.warn(`HL: daily P&L $${this.dailyPnl.toFixed(2)} <= limit $${this.DAILY_LOSS_LIMIT} -- reducing risk to ${riskPct}%`);
+    }
+
+    const riskAmount = accountSize * riskPct / 100;
+    const slDistance = Math.abs(currentPrice - stopPrice);
+    // v5.0: Use per-coin minStopPct instead of hard 0.3%
+    const minStopDist = currentPrice * (coin.minStopPct || 0.005);
+    if (slDistance < minStopDist) { console.warn('HL: SL too tight (' + (slDistance/currentPrice*100).toFixed(3) + '% < ' + ((coin.minStopPct||0.005)*100).toFixed(1) + '%)'); return null; }
+
+    let size = riskAmount / slDistance;
     const szDec = this.szDecimals[asset] || 3;
+
+    // v5.0: Cap max notional for HIP-3 assets (#4)
+    const maxNotional = coin.maxNotional || 0;
+    if (maxNotional > 0) {
+      const notional = size * currentPrice;
+      if (notional > maxNotional) {
+        const oldSize = size;
+        size = maxNotional / currentPrice;
+        console.log(`HL: capped ${asset} notional $${notional.toFixed(0)} -> $${maxNotional} (size ${oldSize.toFixed(szDec)} -> ${size.toFixed(szDec)})`);
+      }
+    }
+
     const minSize = Math.pow(10, -szDec);
     if (size < minSize) { console.warn('HL: size too small:', size); return null; }
 
-    // Entry: IOC limit with 1% slippage
-    const slip = currentPrice * 0.01;
-    const entryPx = isBuy ? currentPrice + slip : currentPrice - slip;
+    // v5.0: HIP-3 assets use GTC limit at best bid/ask instead of IOC taker (#1)
+    const isHIP3 = coin.isHIP3 || false;
+    let entryPx, entryOrderType;
+    if (isHIP3) {
+      // Place limit at 0.05% through the spread for quick fill without taker fee
+      const limitSlip = currentPrice * 0.0005;
+      entryPx = isBuy ? currentPrice + limitSlip : currentPrice - limitSlip;
+      entryOrderType = { limit: { tif: 'Gtc' } };
+      console.log(`HL: ${asset} using GTC limit order @ ${entryPx.toFixed(1)} (HIP-3 fee optimization)`);
+    } else {
+      // Standard: IOC limit with 1% slippage (taker)
+      const slip = currentPrice * 0.01;
+      entryPx = isBuy ? currentPrice + slip : currentPrice - slip;
+      entryOrderType = { limit: { tif: 'Ioc' } };
+    }
 
     try {
-      // 1. Market entry
-      const entryRes = await this.placeOrder(asset, isBuy, size, entryPx, { limit: { tif: 'Ioc' } });
+      // 1. Entry order (IOC for standard, GTC limit for HIP-3)
+      const entryRes = await this.placeOrder(asset, isBuy, size, entryPx, entryOrderType);
       if (!entryRes) { console.error('HL entry returned null'); return null; }
       if (entryRes.status === 'err') { console.error('HL entry failed:', entryRes.response); return null; }
-      if (entryRes.filled === false || (!entryRes.filled && !entryRes.totalSz)) { console.error('HL entry not filled'); return null; }
+      // For GTC orders, resting is OK (will fill shortly); for IOC, must be filled immediately
+      if (!isHIP3 && (entryRes.filled === false || (!entryRes.filled && !entryRes.totalSz))) { console.error('HL entry not filled'); return null; }
+      // For HIP-3 GTC: if resting, wait 5s then check if filled
+      if (isHIP3 && entryRes.resting && !entryRes.filled) {
+        console.log('HL: HIP-3 GTC order resting, waiting 5s for fill...');
+        await new Promise(r => setTimeout(r, 5000));
+        // Check position to see if filled
+        await this.syncPositions();
+        if (!this.activeTrades[coinId]) {
+          console.warn('HL: HIP-3 GTC order not filled after 5s, cancelling');
+          try { await this.cancelOrder(asset, entryRes.oid); } catch(e){}
+          return null;
+        }
+      }
 
-      // 2. Stop Loss
+      // 2. Stop Loss (full position)
       const slPx = isBuy ? stopPrice * 0.98 : stopPrice * 1.02;
       const slRes = await this.placeOrder(asset, !isBuy, size, slPx,
         { trigger: { isMarket: true, triggerPx: stopPrice, tpsl: 'sl' } }, true);
@@ -1573,14 +1663,25 @@ const HL = {
         await sendTelegram(`⚠️ <b>SL FAILED for ${sig} ${asset}</b>\nTrade open WITHOUT stop loss -- place manually!`);
       }
 
-      // 3. Take Profit
+      // 3. v5.0: PARTIAL TP -- close 50% at TP1, let remainder ride with trailing stop (#6)
+      // This was the only profitable pattern observed (HYPE trade on Apr 6)
       if (target) {
-        const tpPx = isBuy ? target * 1.02 : target * 0.98;
-        const tpRes = await this.placeOrder(asset, !isBuy, size, tpPx,
-          { trigger: { isMarket: true, triggerPx: target, tpsl: 'tp' } }, true);
-        if (!tpRes || tpRes.status === 'err') {
-          console.error('HL TP placement failed:', tpRes ? tpRes.response : 'null');
-          await sendTelegram(`⚠️ <b>TP FAILED for ${sig} ${asset}</b>\nTrade open without take profit`);
+        const tpSize = parseFloat((size * 0.5).toFixed(szDec)); // 50% of position
+        if (tpSize >= Math.pow(10, -szDec)) {
+          const tpPx = isBuy ? target * 1.02 : target * 0.98;
+          const tpRes = await this.placeOrder(asset, !isBuy, tpSize, tpPx,
+            { trigger: { isMarket: true, triggerPx: target, tpsl: 'tp' } }, true);
+          if (!tpRes || tpRes.status === 'err') {
+            console.error('HL TP placement failed:', tpRes ? tpRes.response : 'null');
+            await sendTelegram(`⚠️ <b>TP FAILED for ${sig} ${asset}</b>\nTrade open without take profit`);
+          } else {
+            console.log(`HL: Partial TP placed: ${tpSize} of ${size.toFixed(szDec)} @ $${fmt(target)} (50%)`);
+          }
+        } else {
+          // Size too small to split -- place full TP
+          const tpPx = isBuy ? target * 1.02 : target * 0.98;
+          await this.placeOrder(asset, !isBuy, size, tpPx,
+            { trigger: { isMarket: true, triggerPx: target, tpsl: 'tp' } }, true);
         }
       }
 
@@ -1591,7 +1692,9 @@ const HL = {
         sl: stopPrice, tp: target,
         initialSl: stopPrice,
         bestPrice: actualEntry,
-        trailState: 'initial'
+        trailState: 'initial',
+        partialTp: true,   // v5.0: partial TP is now default
+        originalSize: size  // v5.0: track original size for trailing logic
       };
       this.saveActiveTrades();
       this.tradesToday++;
@@ -1697,7 +1800,12 @@ const HL = {
         delete this.activeTrades[coinId];
         this.saveActiveTrades();
 
-        console.log(`HL CLOSED ${trade.side} ${trade.asset}: P&L $${pnl.toFixed(2)}`);
+        // v5.0: Track daily P&L on close
+        const cpDay = new Date().toDateString();
+        if (cpDay !== this.dailyPnlDate) { this.dailyPnl = 0; this.dailyPnlDate = cpDay; }
+        this.dailyPnl += pnl;
+
+        console.log(`HL CLOSED ${trade.side} ${trade.asset}: P&L $${pnl.toFixed(2)} | Daily: $${this.dailyPnl.toFixed(2)}`);
         await sendTelegram(`🔄 <b>REVERSED: ${trade.side} ${trade.asset}</b>\nExit: $${fmt(exitPrice)}\nP&L: <b>$${pnl.toFixed(2)}</b>`);
         return { exitPrice, pnl };
       }
@@ -1893,6 +2001,29 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
     return;
   }
 
+  // v5.0: Ranging market detector for SP500 (#7)
+  // If last 3 closed trades on this coin alternated direction (L-S-L or S-L-S), market is ranging
+  if (coinId === 'sp500' || coinId === 'gold') {
+    const closed = loadClosedTrades();
+    const recentCoinTrades = closed.filter(t => {
+      const cId = { 'xyz:SP500':'sp500', 'xyz:GOLD':'gold', BTC:'bitcoin', HYPE:'hyperliquid' }[t.coin] || t.coin;
+      return cId === coinId;
+    }).slice(0, 3);
+    if (recentCoinTrades.length >= 3) {
+      const dirs = recentCoinTrades.map(t => t.side);
+      const isWhipsaw = (dirs[0] !== dirs[1] && dirs[1] !== dirs[2]);
+      if (isWhipsaw) {
+        // Check if all 3 happened within last 24 hours
+        const oldestTs = new Date(recentCoinTrades[2].ts).getTime();
+        if (Date.now() - oldestTs < 86400000) {
+          console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: ranging market detected (${dirs.join('->')} in 24h) -- whipsaw protection`);
+          await sendTelegram(`⚠️ <b>RANGING MARKET: ${sym}</b>\nLast 3 trades alternated direction (${dirs.join(' → ')})\nSkipping ${d.sig} signal until clear trend`);
+          return;
+        }
+      }
+    }
+  }
+
   const effectiveWithTrend = withTrend && !storyConflicts;
   const minConf = effectiveWithTrend ? Math.max(MIN_CONFIDENCE - 15, 25) : storyConflicts ? Math.min(MIN_CONFIDENCE + 15, 80) : MIN_CONFIDENCE;
   const trendLabel = effectiveWithTrend ? 'WITH-TREND' : storyConflicts ? 'COUNTER-STORY' : 'NEUTRAL-TREND';
@@ -2032,18 +2163,11 @@ async function scanCoin(coinId){
     if (h1C) lowerTFCandles['1H'] = h1C;
     const hasLower = Object.keys(lowerTFCandles).length > 0 ? lowerTFCandles : null;
 
-    // Build lower-TF data for each TF level
-    const lowerFor4H = {};
-    if (h1C) lowerFor4H['1H'] = h1C;
-    if (m15C) lowerFor4H['15m'] = m15C;
-    const lowerFor1H = {};
-    if (m15C) lowerFor1H['15m'] = m15C;
-
     const tfsToRun = [
       wC  && dC  ? { i:0, c:wC,   dC, lower:hasLower } : null,
       dC         ? { i:1, c:dC,   dC, lower:hasLower } : null,
-      h4C && dC  ? { i:2, c:h4C,  dC, lower:Object.keys(lowerFor4H).length ? lowerFor4H : null } : null,
-      h1C && dC  ? { i:3, c:h1C,  dC, lower:Object.keys(lowerFor1H).length ? lowerFor1H : null } : null,
+      h4C && dC  ? { i:2, c:h4C,  dC, lower:null } : null,
+      h1C && dC  ? { i:3, c:h1C,  dC, lower:null } : null,
       m15C && dC ? { i:4, c:m15C, dC, lower:null } : null,
     ].filter(Boolean);
 
@@ -2061,7 +2185,9 @@ async function scanCoin(coinId){
       // v4.9 fix: pass as plain object (String objects break === comparison)
       const htfCarrier = { dir: htfDir || 'UNCLEAR', __asiaLevels: asiaLevels };
       const coinMinRR = COINS[coinId] ? COINS[coinId].minRR : 1.0;
-      const d = dms(c, a, dc, tf.l, htfCarrier, lower, coinMinRR);
+      const coinMinStopPct = COINS[coinId] ? COINS[coinId].minStopPct : 0.005;
+      const coinFeeEst = COINS[coinId] ? COINS[coinId].feeEst : 0.05;
+      const d = dms(c, a, dc, tf.l, htfCarrier, lower, coinMinRR, coinMinStopPct, coinFeeEst);
       allResults[tf.l] = d;
 
       // Log ALL non-NONE signals for diagnostics
