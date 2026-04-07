@@ -604,6 +604,9 @@ const HL_INFO = 'https://api.hyperliquid.xyz/info';
 const HL_INTERVALS = { '1W':'1w', '1D':'1d', '4H':'4h', '1H':'1h', '15m':'15m' };
 let activeCoin = 'bitcoin'; // currently viewed coin
 
+// v5.0 FIX #6: Single source of truth for symbol-to-coinId mapping (was duplicated 8+ times)
+const SYM_TO_COIN_ID = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:SP500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
+
 // Per-coin state — keyed by coin id
 const coinState = {
   bitcoin:  { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
@@ -1704,12 +1707,17 @@ function findNextLevel(levels, currentPrice, direction){
 // ── RR RATIO ──────────────────────────────────────────────
 // Chris Hunter: "Put your stop behind the NEXT level behind the entry"
 // stopLevel = the level beyond which the trade thesis is broken
-function calcRR(entry, target, trapLevel, stopLevel){
+function calcRR(entry, target, trapLevel, stopLevel, feeEst){
   // If stopLevel provided (next level behind), use it; else fallback to trap + buffer
   const stopRef = stopLevel || trapLevel;
-  const risk    = Math.abs(entry - stopRef) * 1.05;
-  const reward  = Math.abs(entry - target);
-  if(risk < 1) return null;
+  // v5.0 FIX #4: Fee-adjusted R:R with correct asymmetric exit fee
+  const feePct = feeEst || 0.05; // basis points as % (0.05 = 5bps)
+  const entryFee = entry * (feePct / 100);
+  const exitFee  = target * (feePct / 100);
+  const roundTripFee = entryFee + exitFee;
+  const risk    = Math.abs(entry - stopRef) * 1.05 + roundTripFee;
+  const reward  = Math.abs(entry - target) - roundTripFee;
+  if(risk < 1 || reward <= 0) return null;
   const rr = reward / risk;
   // Cap R:R at 2.5 — beyond this, targets are unrealistically far
   return Math.min(rr, 2.5).toFixed(1);
@@ -2155,7 +2163,8 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
           if(aboveCount < 2) continue; // wasn't really acting as support recently
 
           const breakSig = 'SHORT';
-          const htfBlocks = htfDir === 'UP';
+          // v5.0 FIX #7: Also block breakdowns when HTF is UNCLEAR
+          const htfBlocks = htfDir === 'UP' || htfDir === 'UNCLEAR';
           if(htfBlocks) continue;
 
           const tgt  = findNextLevel(levels, cur.c, 'short');
@@ -2187,7 +2196,8 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
           if(belowCount < 2) continue;
 
           const breakSig = 'LONG';
-          const htfBlocks = htfDir === 'DOWN';
+          // v5.0 FIX #7: Also block breakouts when HTF is UNCLEAR
+          const htfBlocks = htfDir === 'DOWN' || htfDir === 'UNCLEAR';
           if(htfBlocks) continue;
 
           const tgt  = findNextLevel(levels, cur.c, 'long');
@@ -2817,9 +2827,13 @@ function isDedupSuppressed(coinId, tf, type, level){
   const key = `${coinId}:${tf}:${type}:${Math.round(level)}`;
   const window = type === 'BLIND_ENTRY' ? 28800000 : 14400000; // 8h / 4h
   const now = Date.now();
-  // Prune stale entries while we're here
+  // v5.0 FIX #3: Prune based on each entry's actual window, not a fixed 8h
+  // Old code used 28800000 for all prune checks, meaning 4h entries lingered for 8h
   let changed = false;
-  for(const k of Object.keys(d)){ if(now - d[k] > 28800000){ delete d[k]; changed=true; } }
+  for(const k of Object.keys(d)){
+    const entryWindow = k.includes(':BLIND_ENTRY:') ? 28800000 : 14400000;
+    if(now - d[k] > entryWindow){ delete d[k]; changed=true; }
+  }
   if(changed) saveDedup(d);
   return d[key] && (now - d[key]) < window;
 }
@@ -3529,9 +3543,9 @@ async function runCoin(coinId){
     // v4.9: Reset cross-TF conflict tracker for this scan cycle
     s._firedDir = null;
 
-    // v4.9 FIX: Compute htfDir + storyDir BEFORE processing TFs
-    // (was computed AFTER, causing signals to use stale htfDir from previous cycle)
-    // This matches bot.js order where htfDir is computed first.
+    // v5.0 FIX #1: Reset htfDir BEFORE computation so stale values don't persist
+    // when nextMove() returns falsy (e.g. insufficient candle data)
+    s.htfDir = 'UNCLEAR';
     let nm;
     if(h4Entry?.c && h1Entry?.c)      nm = nextMove(h4Entry.c, h1Entry.c);
     else if(h4Entry?.c)               nm = nextMove(h4Entry.c, h4Entry.c);
@@ -3698,12 +3712,15 @@ function connectWS(coinId){
         runCoin(coinId).catch(e=>console.warn('BG refresh',coinId,e));
       }
     }
-    // ── Trailing stop check: throttled to every 30s, any coin's price update triggers it ──
+    // v5.0 FIX #10: Per-coin trailing stop throttle (was global, delaying other coins)
     const now = Date.now();
-    if(HL.enabled && HL.wallet && Object.keys(HL.activeTrades).length > 0 &&
-       (!HL._lastTrailCheck || now - HL._lastTrailCheck > 30000)){
-      HL._lastTrailCheck = now;
-      HL.trailStops().catch(e => console.warn('trailStops error:', e));
+    if(HL.enabled && HL.wallet && HL.activeTrades[coinId]){
+      if(!HL._lastTrailCheck) HL._lastTrailCheck = {};
+      const lastCheck = HL._lastTrailCheck[coinId] || 0;
+      if(now - lastCheck > 30000){
+        HL._lastTrailCheck[coinId] = now;
+        HL.trailStops().catch(e => console.warn('trailStops error:', e));
+      }
     }
     // ── Equity auto-sync: refresh every 5 minutes ──
     if(HL.wallet && (!HL._lastEquitySync || now - HL._lastEquitySync > 5 * 60 * 1000)){
@@ -3758,9 +3775,20 @@ function connectWS(coinId){
         }catch(e){console.warn('WS parse',e);}
       };
     }
+    // v5.0 FIX #9: Exponential backoff for WS reconnection (5s, 10s, 20s, 40s, cap 60s)
+    if(!connectWS._backoff) connectWS._backoff = {};
+    // Wrap existing onopen to reset backoff on successful connect
+    const _origOnOpen = ws.onopen;
+    ws.onopen=function(evt){
+      connectWS._backoff[coinId] = 5000; // reset on success
+      if(_origOnOpen) _origOnOpen.call(ws, evt);
+    };
     ws.onclose=function(){
-      console.log('WS closed for',coinId,'— reconnecting in 5s');
-      setTimeout(()=>connectWS(coinId),5000);
+      const prev = connectWS._backoff[coinId] || 5000;
+      const delay = Math.min(prev, 60000);
+      console.log(`WS closed for ${coinId} — reconnecting in ${delay/1000}s`);
+      connectWS._backoff[coinId] = Math.min(delay * 2, 60000);
+      setTimeout(()=>connectWS(coinId), delay);
     };
     ws.onerror=function(){ws.close();};
   }catch(e){console.warn('WS error',coinId,e);}
@@ -3960,7 +3988,7 @@ const HL = {
         const d = await r.json();
         if (d.assetPositions) positions.push(...d.assetPositions);
       }
-      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SPX: 'sp500', 'S&P500': 'sp500', 'xyz:SP500': 'sp500', GOLD: 'gold', 'xyz:GOLD': 'gold' };
+      const symToId = SYM_TO_COIN_ID;
 
       // Build SL/TP map from trigger orders: { "BTC": { sl: price, tp: price } }
       const trigMap = {};
@@ -4087,7 +4115,7 @@ const HL = {
       // We look for fills we haven't already recorded in closedTrades
       const closed = loadClosedTrades();
       const recorded = new Set(closed.map(c => c.ts)); // existing timestamps
-      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', SPX: 'sp500', 'S&P500': 'sp500', 'xyz:SP500': 'sp500', GOLD: 'gold', 'xyz:GOLD': 'gold' };
+      const symToId = SYM_TO_COIN_ID;
 
       // Group consecutive fills by coin+dir to find close events
       // HL marks closing fills with closedPnl !== "0" or closedPnl field
@@ -4352,7 +4380,9 @@ const HL = {
     if (!stopPrice) { console.warn('HL: no stop price, skipping'); return null; }
 
     const isBuy = sig === 'LONG';
-    const currentPrice = coinState[coinId].price;
+    // v5.0 FIX #5: Use freshest available price (WS should be recent, but guard against stale)
+    const currentPrice = coinState[coinId]?.price;
+    if (!currentPrice) { console.warn('HL: no price for', coinId); return null; }
 
     // Dynamic R:R cap: with-trend trades get more room (4:1), counter-trend capped tighter (2.5:1)
     const htfDir = coinState[coinId].htfDir || 'UNCLEAR';
@@ -4390,6 +4420,12 @@ const HL = {
       // 1. Market entry
       const entryRes = await this.placeOrder(asset, isBuy, size, entryPx, { limit: { tif: 'Ioc' } });
       if (entryRes.status === 'err') { console.error('HL entry failed:', entryRes.response); return null; }
+      // v5.0 FIX #8: Explicitly reject resting entries (IOC should never rest, but handle API edge cases)
+      if (entryRes.resting) {
+        console.error('HL entry resting instead of filling — cancelling dangling order');
+        try { await this.cancelOrder(asset, entryRes.oid); } catch(e) { console.warn('cancel resting entry failed:', e); }
+        return null;
+      }
       if (entryRes.filled === false || (!entryRes.filled && !entryRes.totalSz)) { console.error('HL entry not filled'); return null; }
 
       // 2. Stop Loss (trigger, reduce only)
@@ -4484,8 +4520,37 @@ const HL = {
   // Moves SL to breakeven at 1:1 R, then trails at 1.5:1 distance
   async trailStops() {
     if (!this.wallet || !this.enabled) return;
+    // v5.0 FIX #2: Fetch live positions to verify trades still open before modifying orders
+    let livePositions;
+    try {
+      const queryAddr = (this.masterAddress || this.address).toLowerCase();
+      const [mainRes, ...hip3Res] = await Promise.all([
+        fetch(this.API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr }) }),
+        ...this.HIP3_DEXES.map(dex =>
+          fetch(this.API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr, dex }) }))
+      ]);
+      const mainData = await mainRes.json();
+      livePositions = [...(mainData.assetPositions || [])];
+      for (const r of hip3Res) { const d = await r.json(); livePositions.push(...(d.assetPositions || [])); }
+    } catch (e) { console.warn('trailStops: position fetch failed, skipping cycle:', e.message); return; }
+
     for (const [coinId, trade] of Object.entries(this.activeTrades)) {
       if (!trade || !trade.entry || !trade.sl) continue;
+
+      // v5.0 FIX #2: Verify position still exists on-exchange
+      const stillOpen = livePositions.find(p =>
+        (p.position?.coin || p.coin) === trade.asset &&
+        parseFloat(p.position?.szi || p.szi || '0') !== 0
+      );
+      if (!stillOpen) {
+        console.log(`HL TRAIL: ${trade.asset} position closed on-exchange, removing from activeTrades`);
+        delete this.activeTrades[coinId];
+        this.saveActiveTrades();
+        continue;
+      }
+
       const s = coinState[coinId];
       if (!s || s.price <= 0) continue;
       const px = s.price;
@@ -4709,7 +4774,7 @@ async function renderTrades(){
       const leverage = pos.leverage ? pos.leverage.value : '—';
 
       // Look up SL/TP from activeTrades
-      const symToId = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:SP500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
+      const symToId = SYM_TO_COIN_ID;
       const cid = symToId[coin];
       const at = cid ? HL.activeTrades[cid] : null;
       const sl = at ? at.sl : null;
@@ -4794,7 +4859,7 @@ async function closeTrade(coin, szi, entryPx, pct){
   const isFullClose = (closeSize >= fullSize - minSize * 0.5);
 
   // Look up current price from coinState
-  const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:SP500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
+  const coinIdMap = SYM_TO_COIN_ID;
   const cid = coinIdMap[coin];
   const px = cid ? coinState[cid].price : 0;
   const slip = px * 0.01; // 1% slippage for IOC close to ensure fill
@@ -4847,11 +4912,11 @@ async function closeTrade(coin, szi, entryPx, pct){
 
     // If full close, clear from HL.activeTrades
     if(isFullClose){
-      const coinIdMap2 = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:SP500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
+      const coinIdMap2 = SYM_TO_COIN_ID;
       if(coinIdMap2[coin]) { delete HL.activeTrades[coinIdMap2[coin]]; HL.saveActiveTrades(); }
     } else {
       // Partial close: update activeTrade size if tracked
-      const coinIdMap2 = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:SP500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
+      const coinIdMap2 = SYM_TO_COIN_ID;
       const cid2 = coinIdMap2[coin];
       if(cid2 && HL.activeTrades[cid2]){
         HL.activeTrades[cid2].size = remaining;
@@ -4883,7 +4948,7 @@ function prefillTrade(coin, sig, sl, tp){
     // Auto-calculate suggested size from risk settings
     const accountSize = parseFloat(localStorage.getItem('account_size') || '100');
     const riskPct = parseFloat(localStorage.getItem('risk_pct') || '1');
-    const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:SP500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
+    const coinIdMap = SYM_TO_COIN_ID;
     const hlAsset = { BTC:'BTC', HYPE:'HYPE', SPX:'xyz:SP500', GOLD:'xyz:GOLD' };
     const cid = coinIdMap[coin];
     const px = cid ? coinState[cid].price : 0;
@@ -4923,7 +4988,7 @@ async function manualOpenTrade(){
   btn.disabled = true;
 
   const isBuy = side === 'LONG';
-  const coinIdMap = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:SP500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
+  const coinIdMap = SYM_TO_COIN_ID;
   const cid = coinIdMap[coin];
   const px = cid ? coinState[cid].price : 0;
   if(!px){ btn.textContent = 'OPEN TRADE'; btn.disabled = false; showToast('No price data for ' + coin); return; }
