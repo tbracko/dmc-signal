@@ -565,7 +565,10 @@ function findStopLevel(levels, trapPrice, direction, atrVal, coinMinStopPct){
 function calcRR(entry, target, trapLevel, stopLevel, feeEst){
   const stopRef = stopLevel || trapLevel;
   const feePct = feeEst || 0.05; // basis points as % (0.05 = 5bps)
-  const roundTripFee = entry * (feePct / 100) * 2; // entry + exit fees
+  // v5.0 FIX #4: Use actual exit price for exit fee (not entry for both legs)
+  const entryFee = entry * (feePct / 100);
+  const exitFee  = target * (feePct / 100);
+  const roundTripFee = entryFee + exitFee;
   const risk    = Math.abs(entry - stopRef) * 1.05 + roundTripFee;
   const reward  = Math.abs(entry - target) - roundTripFee;
   if(risk < 1 || reward <= 0) return null;
@@ -911,7 +914,8 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR, coinMinStopPc
             if(bk && bk.c >= lv.price - a * 0.1) aboveCount++;
           }
           if(aboveCount < 2) continue;
-          if(htfDir === 'UP') continue; // counter-trend block
+          // v5.0 FIX #7: Also block breakdowns when HTF is UNCLEAR (data gap / startup)
+          if(htfDir === 'UP' || htfDir === 'UNCLEAR') continue;
 
           const tgt  = findNextLevel(levels, cur.c, 'short');
           const stop = lv.price + a * 0.3;
@@ -939,7 +943,8 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR, coinMinStopPc
             if(bk && bk.c <= lv.price + a * 0.1) belowCount++;
           }
           if(belowCount < 2) continue;
-          if(htfDir === 'DOWN') continue;
+          // v5.0 FIX #7: Also block breakouts when HTF is UNCLEAR (data gap / startup)
+          if(htfDir === 'DOWN' || htfDir === 'UNCLEAR') continue;
 
           const tgt  = findNextLevel(levels, cur.c, 'long');
           const stop = lv.price - a * 0.3;
@@ -1568,7 +1573,16 @@ const HL = {
     if (!stopPrice) { console.warn('HL: no stop price, skipping'); return null; }
 
     const isBuy = sig === 'LONG';
-    const currentPrice = coinState[coinId]?.price;
+    // v5.0 FIX #5: Fetch fresh price instead of using potentially stale coinState
+    // coinState price could be 30-60s old from last scan cycle
+    let currentPrice;
+    try {
+      const freshData = await getPrice(coinId);
+      currentPrice = freshData?.price || coinState[coinId]?.price;
+    } catch (e) {
+      currentPrice = coinState[coinId]?.price;
+      console.warn('HL: fresh price fetch failed, using cached:', e.message);
+    }
     if (!currentPrice) { console.warn('HL: no price for', coinId); return null; }
 
     // Dynamic R:R cap
@@ -1639,6 +1653,12 @@ const HL = {
       const entryRes = await this.placeOrder(asset, isBuy, size, entryPx, entryOrderType);
       if (!entryRes) { console.error('HL entry returned null'); return null; }
       if (entryRes.status === 'err') { console.error('HL entry failed:', entryRes.response); return null; }
+      // v5.0 FIX #8: For IOC, explicitly reject resting orders (shouldn't happen, but handle edge cases)
+      if (!isHIP3 && entryRes.resting) {
+        console.error('HL entry resting instead of filling (IOC) — cancelling');
+        try { await this.cancelOrder(asset, entryRes.oid); } catch(e){}
+        return null;
+      }
       // For GTC orders, resting is OK (will fill shortly); for IOC, must be filled immediately
       if (!isHIP3 && (entryRes.filled === false || (!entryRes.filled && !entryRes.totalSz))) { console.error('HL entry not filled'); return null; }
       // For HIP-3 GTC: if resting, wait 5s then check if filled
@@ -1714,8 +1734,37 @@ const HL = {
   // -- Trailing stop logic --
   async trailStops() {
     if (!this.wallet || !this.enabled) return;
+    // v5.0 FIX #2: Fetch live positions once to verify trades still open
+    let livePositions;
+    try {
+      const queryAddr = (this.masterAddress || this.address).toLowerCase();
+      const [mainRes, ...hip3Res] = await Promise.all([
+        fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr }) }),
+        ...this.HIP3_DEXES.map(dex =>
+          fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr, dex }) }))
+      ]);
+      const mainData = await mainRes.json();
+      livePositions = [...(mainData.assetPositions || [])];
+      for (const r of hip3Res) { const d = await r.json(); livePositions.push(...(d.assetPositions || [])); }
+    } catch (e) { console.warn('trailStops: position fetch failed, skipping cycle:', e.message); return; }
+
     for (const [coinId, trade] of Object.entries(this.activeTrades)) {
       if (!trade || !trade.entry || !trade.sl) continue;
+
+      // v5.0 FIX #2: Verify position still exists on-exchange
+      const stillOpen = livePositions.find(p =>
+        (p.position?.coin || p.coin) === trade.asset &&
+        parseFloat(p.position?.szi || p.szi || '0') !== 0
+      );
+      if (!stillOpen) {
+        console.log(`HL TRAIL: ${trade.asset} position closed on-exchange, removing from activeTrades`);
+        delete this.activeTrades[coinId];
+        this.saveActiveTrades();
+        continue;
+      }
+
       const px = coinState[coinId]?.price;
       if (!px || px <= 0) continue;
       const isLong = trade.side === 'LONG';
@@ -2084,9 +2133,12 @@ async function scanCoin(coinId){
     if (!coinState[coinId]) coinState[coinId] = {};
     coinState[coinId].price = price;
 
+    // v5.0 FIX #1: Reset htfDir before computation so stale values don't persist
+    // when nextMove() returns falsy (e.g. insufficient candle data)
+    coinState[coinId].htfDir = 'UNCLEAR';
     let htfDir = 'UNCLEAR';
-    if(h4C && h1C) htfDir = nextMove(h4C, h1C).dir;
-    else if(h4C)   htfDir = nextMove(h4C, h4C).dir;
+    if(h4C && h1C) { const nm = nextMove(h4C, h1C); if(nm) htfDir = nm.dir; }
+    else if(h4C)   { const nm = nextMove(h4C, h4C); if(nm) htfDir = nm.dir; }
     coinState[coinId].htfDir = htfDir;
 
     // v4.9: Compute storyDir for auto-trade filtering (mirrors HTML buildStory)
