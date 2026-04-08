@@ -1,7 +1,19 @@
-// DMS Signal Bot v4.9 -- AUTO-TRADE edition
+// DMS Signal Bot v5.0 -- AUTO-TRADE edition
 // Mirrors the DMS algorithm from index.html exactly -- same levels, same scoring, same signals
 // Now also executes trades on Hyperliquid with TP/SL/trailing stops
 // Node 18+ required (uses built-in fetch)
+//
+// v5.0 changelog:
+//   - Partial TP (50% at TP1, remainder trails)
+//   - GTC limit orders for HIP-3 assets (fee optimization)
+//   - maxNotional caps for SP500/GOLD ($500) with double-check safety net
+//   - Post-loss cooldown per coin (configurable, default 10min)
+//   - Daily loss circuit breaker (halves position size)
+//   - Fee-adjusted R:R with per-coin feeEst (GOLD 12bps for builder fees)
+//   - Ranging market detector (whipsaw protection)
+//   - SP500 US-session-only filter (13:00-21:00 UTC)
+//   - Fresh price fetch in executeTrade (stale price fix)
+//   - Per-coin minStopPct floors (BTC 0.7%, others 0.5%)
 
 const fs    = require('fs');
 const path  = require('path');
@@ -45,7 +57,7 @@ const COINS = {
   bitcoin:     { id:'bitcoin',     label:'BTC',    apiSym:'BTCUSDT',      asset:'BTC',        exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.007, maxNotional: 0 },
   hyperliquid: { id:'hyperliquid', label:'HYPE',   apiSym:'HYPEUSDT',     asset:'HYPE',       exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, maxNotional: 0 },
   sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',   asset:'xyz:SP500', exchange:'hyperliquid', minRR: 1.5, feeEst: 0.10, minStopPct: 0.005, maxNotional: 500, isHIP3: true },
-  gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',    asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.5, feeEst: 0.10, minStopPct: 0.005, maxNotional: 500, isHIP3: true },
+  gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',    asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.5, feeEst: 0.12, minStopPct: 0.005, maxNotional: 500, isHIP3: true },  // v5.0: feeEst 0.10->0.12 (builder fees ~10bps; 0.15 was too aggressive)
 };
 
 const TFS = [
@@ -1619,13 +1631,26 @@ const HL = {
     const szDec = this.szDecimals[asset] || 3;
 
     // v5.0: Cap max notional for HIP-3 assets (#4)
+    // v5.0.1: Added verbose logging + hard enforcement to catch bypass bugs
     const maxNotional = coin.maxNotional || 0;
+    console.log(`HL: ${asset} sizing: raw size=${size.toFixed(szDec)} notional=$${(size*currentPrice).toFixed(0)} maxNotional=${maxNotional} coinId=${coinId}`);
     if (maxNotional > 0) {
       const notional = size * currentPrice;
       if (notional > maxNotional) {
         const oldSize = size;
         size = maxNotional / currentPrice;
-        console.log(`HL: capped ${asset} notional $${notional.toFixed(0)} -> $${maxNotional} (size ${oldSize.toFixed(szDec)} -> ${size.toFixed(szDec)})`);
+        console.log(`HL: CAPPED ${asset} notional $${notional.toFixed(0)} -> $${maxNotional} (size ${oldSize.toFixed(szDec)} -> ${size.toFixed(szDec)})`);
+      }
+    }
+
+    // v5.0.1: Safety-net double-check — hard block if notional still exceeds 1.1x cap after rounding
+    // This catches any edge case where the cap above was bypassed
+    if (maxNotional > 0) {
+      const finalNotional = parseFloat(size.toFixed(szDec)) * currentPrice;
+      if (finalNotional > maxNotional * 1.1) {
+        console.error(`HL: HARD BLOCK ${asset} — notional $${finalNotional.toFixed(0)} exceeds ${maxNotional}*1.1 after rounding! This should not happen.`);
+        await sendTelegram(`🚨 <b>HARD BLOCK: ${asset}</b>\nNotional $${finalNotional.toFixed(0)} exceeds cap $${maxNotional} after rounding.\nTrade rejected. Check maxNotional logic.`);
+        return null;
       }
     }
 
@@ -2050,6 +2075,21 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
     return;
   }
 
+  // v5.0.1: SP500 US-session-only filter
+  // SP500 entries outside US market hours (13:00-21:00 UTC / 9am-5pm ET) consistently lose
+  // Shorts are allowed overnight since downside moves tend to be sharper
+  if (coinId === 'sp500') {
+    const utcHour = new Date().getUTCHours();
+    const inUSSession = utcHour >= 13 && utcHour < 21;
+    if (!inUSSession && d.sig === 'LONG') {
+      console.log(`HL auto-trade BLOCKED ${sym} LONG: outside US session (${utcHour}:00 UTC, allowed 13:00-21:00) -- session filter`);
+      return;
+    }
+    if (!inUSSession) {
+      console.log(`HL: ${sym} SHORT allowed outside US session (${utcHour}:00 UTC) -- shorts exempt from session filter`);
+    }
+  }
+
   // v5.0: Ranging market detector for SP500 (#7)
   // If last 3 closed trades on this coin alternated direction (L-S-L or S-L-S), market is ranging
   if (coinId === 'sp500' || coinId === 'gold') {
@@ -2299,7 +2339,33 @@ async function scanCoin(coinId){
         await sendTelegram(msg);
         console.log(`MULTI-TF ${sig} ${coinLabel} [${tfList}] at $${fmt(level)} -- ${matches.length} TFs confirm`);
         // Auto-trade with high conviction override (skip if already in position)
+        // v5.0.1 FIX: Apply session filter + ranging detector here too (was bypassing maybeAutoTrade)
         if(HL.enabled && HL.wallet && bestStop && !HL.activeTrades[coinId]){
+          // Session filter for SP500 — block longs outside US hours
+          if (coinId === 'sp500' && sig === 'LONG') {
+            const utcHr = new Date().getUTCHours();
+            if (utcHr < 13 || utcHr >= 21) {
+              console.log(`HL MULTI-TF BLOCKED ${COINS[coinId].label} LONG: outside US session (${utcHr}:00 UTC) -- session filter`);
+              break;
+            }
+          }
+          // Ranging market detector for SP500/GOLD
+          if (coinId === 'sp500' || coinId === 'gold') {
+            const closed = loadClosedTrades();
+            const recentCoinTrades = closed.filter(t => {
+              const cId = { 'xyz:SP500':'sp500', 'xyz:GOLD':'gold', BTC:'bitcoin', HYPE:'hyperliquid' }[t.coin] || t.coin;
+              return cId === coinId;
+            }).slice(0, 3);
+            if (recentCoinTrades.length >= 3) {
+              const dirs = recentCoinTrades.map(t => t.side);
+              const isWhipsaw = (dirs[0] !== dirs[1] && dirs[1] !== dirs[2]);
+              const oldestTs = new Date(recentCoinTrades[2].ts).getTime();
+              if (isWhipsaw && Date.now() - oldestTs < 86400000) {
+                console.log(`HL MULTI-TF BLOCKED ${COINS[coinId].label} ${sig}: ranging market (${dirs.join('->')} in 24h)`);
+                break;
+              }
+            }
+          }
           const tradeSignal = { sig, level, target: bestTarget, rr: bestRR, stopPrice: bestStop, type: 'BLIND_ENTRY', tf: tfList };
           await HL.executeTrade(coinId, tradeSignal, 80);
           await HL.syncPositions();
