@@ -1118,6 +1118,12 @@ const HL = {
   consecutiveLosses: {},  // coinId -> count of consecutive losses
   MAX_CONSEC_LOSSES: parseInt(process.env.MAX_CONSEC_LOSSES || '3'), // pause after N consecutive losses
 
+  // v5.1: Trailing-stop failure tracking (prevents 1000-alert spam)
+  trailFailCount: {},     // coinId -> consecutive failure count
+  lastTrailFailAlert: {}, // coinId -> ms timestamp of last alert sent
+  TRAIL_ALERT_THROTTLE_MS: 1800000, // 30 min between failure alerts
+  MAX_TRAIL_FAILURES: 3,  // after N failures, disable trailing for this trade
+
   // -- MSGPACK encoder (matches app exactly) --
   msgpack(obj) {
     const buf = [];
@@ -1446,6 +1452,10 @@ const HL = {
           console.log(`HL COOLDOWN: ${coinId} on cooldown for ${this.COOLDOWN_MS/1000}s after SL hit`);
         }
 
+        // v5.1: Reset trail-failure tracking on position close (new trade starts clean)
+        this.trailFailCount[coinId] = 0;
+        delete this.lastTrailFailAlert[coinId];
+
         // v5.1: Track consecutive losses and last winning direction per coin
         if (pnl > 0) {
           this.consecutiveLosses[coinId] = 0;
@@ -1543,13 +1553,18 @@ const HL = {
 
   // -- Fetch open orders (main + HIP-3 dexes) --
   async fetchOpenOrders() {
+    // v5.1 FIX: Use frontendOpenOrders instead of openOrders.
+    // The standard openOrders endpoint does NOT return the orderType field, so
+    // trigger orders (Stop Market / TP) are indistinguishable from limit orders.
+    // frontendOpenOrders returns orderType + isTrigger + triggerPx fields,
+    // which cancelTriggerOrders needs to filter correctly.
     const queryAddr = (this.masterAddress || this.address).toLowerCase();
     const requests = [
       fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'openOrders', user: queryAddr }) }),
+        body: JSON.stringify({ type: 'frontendOpenOrders', user: queryAddr }) }),
       ...this.HIP3_DEXES.map(dex =>
         fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'openOrders', user: queryAddr, dex }) }))
+          body: JSON.stringify({ type: 'frontendOpenOrders', user: queryAddr, dex }) }))
     ];
     const responses = await Promise.all(requests);
     const allOrders = [];
@@ -1576,11 +1591,28 @@ const HL = {
   },
 
   // -- Cancel all trigger orders for an asset --
+  // v5.1 FIX: Use isTrigger flag from frontendOpenOrders (standard openOrders lacks orderType)
   async cancelTriggerOrders(asset) {
     try {
       const orders = await this.fetchOpenOrders();
-      const triggers = orders.filter(o => o.coin === asset && o.orderType && o.orderType !== 'Limit');
-      for (const o of triggers) await this.cancelOrder(asset, o.oid);
+      // A trigger order has isTrigger === true OR orderType containing "Stop"/"Take"
+      // (some HL responses only set one of these, so check both for safety)
+      const triggers = orders.filter(o => {
+        if (o.coin !== asset) return false;
+        if (o.isTrigger === true) return true;
+        if (o.orderType && /Stop|Take|Trigger/i.test(o.orderType)) return true;
+        return false;
+      });
+      if (triggers.length > 0) {
+        console.log(`HL cancelTriggerOrders: ${asset} found ${triggers.length} trigger order(s) to cancel`);
+      }
+      for (const o of triggers) {
+        try {
+          await this.cancelOrder(asset, o.oid);
+        } catch (e) {
+          console.warn(`cancelTriggerOrders: failed to cancel oid ${o.oid}:`, e.message);
+        }
+      }
       return triggers.length;
     } catch (e) { console.warn('cancelTriggerOrders error:', e.message); return 0; }
   },
@@ -1878,16 +1910,40 @@ const HL = {
       }
 
       if (newSl !== null && newSl !== trade.sl) {
+        // v5.1: Skip if trailing is disabled for this trade due to prior failures
+        if (trade.trailDisabled) continue;
+
         try {
-          await this.cancelTriggerOrders(trade.asset);
+          const cancelled = await this.cancelTriggerOrders(trade.asset);
           const slPx = isLong ? newSl * 0.98 : newSl * 1.02;
           const trailSlRes = await this.placeOrder(trade.asset, !isLong, trade.size, slPx,
             { trigger: { isMarket: true, triggerPx: newSl, tpsl: 'sl' } }, true);
           if (!trailSlRes || trailSlRes.status === 'err') {
-            console.error('HL trail SL placement failed:', trailSlRes ? trailSlRes.response : 'null');
-            await sendTelegram(`⚠️ <b>TRAIL SL FAILED: ${trade.asset}</b>\nOld SL still active -- check manually!`);
+            const errDetail = trailSlRes ? JSON.stringify(trailSlRes.response).slice(0, 200) : 'null';
+            console.error(`HL trail SL placement failed for ${trade.asset} (cancelled ${cancelled} triggers):`, errDetail);
+
+            // v5.1: Track consecutive trail failures per coin
+            this.trailFailCount[coinId] = (this.trailFailCount[coinId] || 0) + 1;
+            const failCount = this.trailFailCount[coinId];
+
+            // v5.1: Throttle Telegram alerts to max 1 per 30 min per coin
+            const lastAlert = this.lastTrailFailAlert[coinId] || 0;
+            if (Date.now() - lastAlert >= this.TRAIL_ALERT_THROTTLE_MS) {
+              this.lastTrailFailAlert[coinId] = Date.now();
+              await sendTelegram(`⚠️ <b>TRAIL SL FAILED: ${trade.asset}</b>\nFail #${failCount}. Error: ${errDetail.slice(0, 100)}\nCancelled ${cancelled} existing triggers.`);
+            }
+
+            // v5.1: After MAX_TRAIL_FAILURES, disable trailing for this trade entirely
+            if (failCount >= this.MAX_TRAIL_FAILURES) {
+              trade.trailDisabled = true;
+              this.saveActiveTrades();
+              console.warn(`HL trail SL: disabling trailing for ${trade.asset} after ${failCount} failures`);
+              await sendTelegram(`⏸ <b>TRAILING DISABLED: ${trade.asset}</b>\n${failCount} consecutive failures. Current SL kept. Manual review needed.`);
+            }
             continue;
           }
+          // v5.1: Success -- reset failure counter
+          this.trailFailCount[coinId] = 0;
           // Re-place TP
           if (trade.tp) {
             const tpPx = isLong ? trade.tp * 1.02 : trade.tp * 0.98;
