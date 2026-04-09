@@ -96,8 +96,13 @@ function isDedupSuppressed(coinId, tf, type, level){
   const key = `${coinId}:${tf}:${type}:${Math.round(level)}`;
   const win = type === 'BLIND_ENTRY' ? 28800000 : 14400000;
   const now = Date.now();
+  // v5.0 FIX #3: Prune based on each entry's actual window, not a fixed 8h
+  // Old code used 28800000 for all prune checks, meaning 4h entries lingered in the file for 8h
   let changed = false;
-  for(const k of Object.keys(d)){ if(now - d[k] > 28800000){ delete d[k]; changed=true; } }
+  for(const k of Object.keys(d)){
+    const entryWindow = k.includes(':BLIND_ENTRY:') ? 28800000 : 14400000;
+    if(now - d[k] > entryWindow){ delete d[k]; changed=true; }
+  }
   if(changed) saveDedup(d);
   return !!(d[key] && (now - d[key]) < win);
 }
@@ -1103,6 +1108,16 @@ const HL = {
   DAILY_LOSS_LIMIT: parseFloat(process.env.DAILY_LOSS_LIMIT || '-10'),  // pause after -$10
   DAILY_LOSS_REDUCE: 0.5, // reduce size to 50% after hitting limit
 
+  // v5.1: Counter-trend blocking -- remembers last profitable trade direction per coin
+  lastWinDir: {},    // coinId -> 'LONG' or 'SHORT'
+  lastWinTime: {},   // coinId -> ms timestamp of the profitable close
+  COUNTER_TREND_WINDOW: 86400000,  // 24h window to boost counter-trend confidence
+  COUNTER_TREND_CONF_BOOST: 25,    // +25% confidence needed for counter-trend after recent win
+
+  // v5.1: Per-asset rolling loss circuit breaker
+  consecutiveLosses: {},  // coinId -> count of consecutive losses
+  MAX_CONSEC_LOSSES: parseInt(process.env.MAX_CONSEC_LOSSES || '3'), // pause after N consecutive losses
+
   // -- MSGPACK encoder (matches app exactly) --
   msgpack(obj) {
     const buf = [];
@@ -1431,6 +1446,22 @@ const HL = {
           console.log(`HL COOLDOWN: ${coinId} on cooldown for ${this.COOLDOWN_MS/1000}s after SL hit`);
         }
 
+        // v5.1: Track consecutive losses and last winning direction per coin
+        if (pnl > 0) {
+          this.consecutiveLosses[coinId] = 0;
+          this.lastWinDir[coinId] = old.side;   // 'LONG' or 'SHORT'
+          this.lastWinTime[coinId] = Date.now();
+          console.log(`HL WIN TRACKER: ${coinId} last win direction=${old.side}, consecutive losses reset to 0`);
+        } else if (pnl < 0) {
+          this.consecutiveLosses[coinId] = (this.consecutiveLosses[coinId] || 0) + 1;
+          console.log(`HL LOSS TRACKER: ${coinId} consecutive losses=${this.consecutiveLosses[coinId]}/${this.MAX_CONSEC_LOSSES}`);
+          if (this.consecutiveLosses[coinId] >= this.MAX_CONSEC_LOSSES) {
+            console.warn(`HL CIRCUIT BREAKER: ${coinId} paused -- ${this.consecutiveLosses[coinId]} consecutive losses`);
+            const cbCoin = COINS[coinId];
+            await sendTelegram(`⏸ <b>${cbCoin?.label || coinId} CIRCUIT BREAKER</b>\n${this.consecutiveLosses[coinId]} consecutive losses -- auto-trading paused for this asset.`);
+          }
+        }
+
         // v5.0: Track daily P&L
         const pnlDay = new Date().toDateString();
         if (pnlDay !== this.dailyPnlDate) { this.dailyPnl = 0; this.dailyPnlDate = pnlDay; }
@@ -1574,6 +1605,30 @@ const HL = {
       const remaining = Math.round((this.COOLDOWN_MS - (Date.now() - lastSl)) / 1000);
       console.warn(`HL: ${coinId} on post-loss cooldown (${remaining}s remaining), skipping`);
       return null;
+    }
+
+    // v5.1: Per-asset rolling loss circuit breaker
+    const consecLosses = this.consecutiveLosses[coinId] || 0;
+    if (consecLosses >= this.MAX_CONSEC_LOSSES) {
+      console.warn(`HL CIRCUIT BREAKER: ${coinId} blocked -- ${consecLosses} consecutive losses (max ${this.MAX_CONSEC_LOSSES}). Manual review needed.`);
+      await sendTelegram(`⏸ <b>${coin.label} PAUSED</b>\n${consecLosses} consecutive losses -- trading paused until a manual reset or profitable close.`);
+      return null;
+    }
+
+    // v5.1: Counter-trend blocking after recent profitable trade
+    // If the last profitable trade on this coin was in the opposite direction within 24h,
+    // require higher confidence to enter (prevents flipping against a validated trend)
+    const recentWinDir = this.lastWinDir[coinId];
+    const recentWinTime = this.lastWinTime[coinId];
+    if (recentWinDir && recentWinTime && (Date.now() - recentWinTime) < this.COUNTER_TREND_WINDOW) {
+      if (signal.sig !== recentWinDir) {
+        const requiredConf = MIN_CONFIDENCE + this.COUNTER_TREND_CONF_BOOST;
+        if (confidence < requiredConf) {
+          console.warn(`HL COUNTER-TREND BLOCK: ${coinId} -- last win was ${recentWinDir} ${((Date.now()-recentWinTime)/3600000).toFixed(1)}h ago, ${signal.sig} needs conf ${requiredConf}% (has ${confidence}%)`);
+          return null;
+        }
+        console.log(`HL: ${coinId} counter-trend ${signal.sig} allowed -- conf ${confidence}% >= ${requiredConf}% (last win ${recentWinDir})`);
+      }
     }
 
     // v5.0: Daily P&L limit check (#8)
@@ -1879,7 +1934,16 @@ const HL = {
         if (cpDay !== this.dailyPnlDate) { this.dailyPnl = 0; this.dailyPnlDate = cpDay; }
         this.dailyPnl += pnl;
 
-        console.log(`HL CLOSED ${trade.side} ${trade.asset}: P&L $${pnl.toFixed(2)} | Daily: $${this.dailyPnl.toFixed(2)}`);
+        // v5.1: Track consecutive losses and last winning direction
+        if (pnl > 0) {
+          this.consecutiveLosses[coinId] = 0;
+          this.lastWinDir[coinId] = trade.side;
+          this.lastWinTime[coinId] = Date.now();
+        } else if (pnl < 0) {
+          this.consecutiveLosses[coinId] = (this.consecutiveLosses[coinId] || 0) + 1;
+        }
+
+        console.log(`HL CLOSED ${trade.side} ${trade.asset}: P&L $${pnl.toFixed(2)} | Daily: $${this.dailyPnl.toFixed(2)} | ConsecLosses: ${this.consecutiveLosses[coinId]||0}`);
         await sendTelegram(`🔄 <b>REVERSED: ${trade.side} ${trade.asset}</b>\nExit: $${fmt(exitPrice)}\nP&L: <b>$${pnl.toFixed(2)}</b>`);
         return { exitPrice, pnl };
       }
