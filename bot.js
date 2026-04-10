@@ -1071,13 +1071,12 @@ function nextMove(h4C, h1C){
   const h1Bullish = h1n.bh > h1p.bh && h1n.bl > h1p.bl;
   const bearScore = bear4 + (h4FailedHigh?2:0) + (bear1>=5?1:0) + (h1Bearish?1:0);
   const bullScore = bull4 + (h4FailedLow?2:0)  + (bull1>=5?1:0) + (h1Bullish?1:0);
-  const threshold = 2;
-  if(bullScore>=threshold && bullScore>bearScore) return { dir:'UP' };
-  if(bearScore>=threshold && bearScore>bullScore) return { dir:'DOWN' };
+  // v5.1: Raised threshold from 2→3, require gap>1, removed single-candle tiebreaker (synced w/ app)
+  const threshold = 3;
+  if(bullScore>=threshold && bullScore>bearScore+1) return { dir:'UP' };
+  if(bearScore>=threshold && bearScore>bullScore+1) return { dir:'DOWN' };
   if(h4FailedHigh && h1Bearish) return { dir:'DOWN' };
   if(h4FailedLow  && h1Bullish) return { dir:'UP' };
-  if(h4n.bh>h4p.bh && h4n.bl>h4p.bl) return { dir:'UP' };
-  if(h4n.bh<h4p.bh && h4n.bl<h4p.bl) return { dir:'DOWN' };
   return { dir:'UNCLEAR' };
 }
 
@@ -1100,7 +1099,7 @@ const HL = {
 
   // v5.0: Post-loss cooldown -- tracks last SL time per coin (ms timestamp)
   lastSlTime: {},   // coinId -> timestamp of last SL hit
-  COOLDOWN_MS: parseInt(process.env.COOLDOWN_MS || '600000'), // 10 min default (2x 15m candle)
+  COOLDOWN_MS: parseInt(process.env.COOLDOWN_MS || '7200000'), // v5.1: 2h default (was 10m — too short to prevent re-entry on same failed signal)
 
   // v5.0: Daily P&L limit tracking
   dailyPnl: 0,
@@ -1899,10 +1898,13 @@ const HL = {
         await sendTelegram(`🔄 <b>SL -> BREAKEVEN: ${trade.asset}</b>\nEntry: $${fmt(trade.entry)}\n1:1 R reached`);
       } else if (trade.trailState === 'breakeven' && rMultiple >= 1.5) {
         trade.trailState = 'trailing';
-        newSl = isLong ? trade.bestPrice - risk * 1.5 : trade.bestPrice + risk * 1.5;
-        console.log(`HL TRAIL ${trade.asset}: trailing SL to $${fmt(newSl)} (1.5R trail started)`);
+        // v5.1: Wider trail for HIP-3 assets (2.5× risk) vs standard (2.0× risk) — was 1.5× for all
+        const trailMult = COINS[coinId]?.isHIP3 ? 2.5 : 2.0;
+        newSl = isLong ? trade.bestPrice - risk * trailMult : trade.bestPrice + risk * trailMult;
+        console.log(`HL TRAIL ${trade.asset}: trailing SL to $${fmt(newSl)} (${trailMult}R trail started)`);
       } else if (trade.trailState === 'trailing') {
-        const trailSl = isLong ? trade.bestPrice - risk * 1.5 : trade.bestPrice + risk * 1.5;
+        const trailMult = COINS[coinId]?.isHIP3 ? 2.5 : 2.0;
+        const trailSl = isLong ? trade.bestPrice - risk * trailMult : trade.bestPrice + risk * trailMult;
         if ((isLong && trailSl > trade.sl) || (!isLong && trailSl < trade.sl)) {
           newSl = trailSl;
           console.log(`HL TRAIL ${trade.asset}: updated trailing SL to $${fmt(newSl)}`);
@@ -2163,8 +2165,10 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
   const s = coinState[coinId];
   if (!s) return;
 
-  // Compute confidence (same formula as app)
+  // v5.1: Confidence uses totalWeight denominator — prevents single-TF signals from scoring 100%
+  // A 15m-only signal now gets 1/15=7% instead of 1/1=100% (synced w/ app)
   let wL = 0, wS = 0, aW = 0;
+  const totalW = TFS.reduce((s, t) => s + t.w, 0); // always 15
   TFS.forEach(t => {
     const r = allResults[t.l];
     if (!r) return;
@@ -2172,7 +2176,7 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
     if (r.sig === 'LONG') wL += t.w;
     if (r.sig === 'SHORT') wS += t.w;
   });
-  const conf = aW > 0 ? Math.round(Math.max(wL, wS) / aW * 100) : 0;
+  const conf = totalW > 0 ? Math.round(Math.max(wL, wS) / totalW * 100) : 0;
   const majorSig = wL > wS ? 'LONG' : wS > wL ? 'SHORT' : null;
   const sym = COINS[coinId].label;
 
@@ -2210,9 +2214,19 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
     }
   }
 
-  // v5.0: Ranging market detector for SP500 (#7)
+  // v5.1: GOLD session filter (synced w/ app)
+  if (coinId === 'gold') {
+    const utcHour = new Date().getUTCHours();
+    const inGoldSession = utcHour >= 13 && utcHour < 20;
+    if (!inGoldSession && d.sig === 'LONG') {
+      console.log(`HL auto-trade BLOCKED ${sym} LONG: outside gold session (${utcHour}:00 UTC, allowed 13:00-20:00) -- session filter`);
+      return;
+    }
+  }
+
+  // v5.1: Ranging market detector — now applies to ALL coins (was SP500/GOLD only)
   // If last 3 closed trades on this coin alternated direction (L-S-L or S-L-S), market is ranging
-  if (coinId === 'sp500' || coinId === 'gold') {
+  {
     const closed = loadClosedTrades();
     const recentCoinTrades = closed.filter(t => {
       const cId = { 'xyz:SP500':'sp500', 'xyz:GOLD':'gold', BTC:'bitcoin', HYPE:'hyperliquid' }[t.coin] || t.coin;
@@ -2469,8 +2483,16 @@ async function scanCoin(coinId){
               break;
             }
           }
-          // Ranging market detector for SP500/GOLD
-          if (coinId === 'sp500' || coinId === 'gold') {
+          // v5.1: Session filter for GOLD — block longs outside London PM + NY overlap
+          if (coinId === 'gold' && sig === 'LONG') {
+            const utcHr = new Date().getUTCHours();
+            if (utcHr < 13 || utcHr >= 20) {
+              console.log(`HL MULTI-TF BLOCKED ${COINS[coinId].label} LONG: outside gold session (${utcHr}:00 UTC) -- session filter`);
+              break;
+            }
+          }
+          // v5.1: Ranging market detector — all coins (was SP500/GOLD only, synced w/ maybeAutoTrade)
+          {
             const closed = loadClosedTrades();
             const recentCoinTrades = closed.filter(t => {
               const cId = { 'xyz:SP500':'sp500', 'xyz:GOLD':'gold', BTC:'bitcoin', HYPE:'hyperliquid' }[t.coin] || t.coin;
