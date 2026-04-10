@@ -595,10 +595,10 @@ const TFS=[{l:'1W',iv:'W',w:5},{l:'1D',iv:'D',w:4},{l:'4H',iv:'240',w:3},{l:'1H'
 // ── MULTI-COIN STATE ──────────────────────────────────────
 // Each coin runs its own independent engine loop
 const COINS = {
-  bitcoin:     { id:'bitcoin',     label:'BTC/USD',  sym:'BINANCE:BTCUSDT', shortLabel:'BTC',  apiSym:'BTCUSDT',  exchange:'binance',     minRR: 1.0, feeEst: 0.05 },
-  hyperliquid: { id:'hyperliquid', label:'HYPE/USD', sym:'BYBIT:HYPEUSDT',  shortLabel:'HYPE', apiSym:'HYPEUSDT', exchange:'bybit',       minRR: 1.0, feeEst: 0.05 },
-  sp500:       { id:'sp500',       label:'S&P500',   sym:'OANDA:SPX500USD', shortLabel:'SPX',  apiSym:'xyz:SP500', exchange:'hyperliquid', minRR: 1.5, feeEst: 0.10 },  // v5.0: 0.05->0.10 (HIP-3 taker fees)
-  gold:        { id:'gold',        label:'GOLD/USD', sym:'OANDA:XAUUSD',    shortLabel:'GOLD', apiSym:'xyz:GOLD', exchange:'hyperliquid', minRR: 1.5, feeEst: 0.12 },  // v5.0: 0.05->0.12 for builder fees
+  bitcoin:     { id:'bitcoin',     label:'BTC/USD',  sym:'BINANCE:BTCUSDT', shortLabel:'BTC',  apiSym:'BTCUSDT',  exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.007, isHIP3: false },
+  hyperliquid: { id:'hyperliquid', label:'HYPE/USD', sym:'BYBIT:HYPEUSDT',  shortLabel:'HYPE', apiSym:'HYPEUSDT', exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, isHIP3: false },
+  sp500:       { id:'sp500',       label:'S&P500',   sym:'OANDA:SPX500USD', shortLabel:'SPX',  apiSym:'xyz:SP500', exchange:'hyperliquid', minRR: 1.5, feeEst: 0.10, minStopPct: 0.005, maxNotional: 500, isHIP3: true },  // v5.0: 0.05->0.10 (HIP-3 taker fees)
+  gold:        { id:'gold',        label:'GOLD/USD', sym:'OANDA:XAUUSD',    shortLabel:'GOLD', apiSym:'xyz:GOLD', exchange:'hyperliquid', minRR: 1.5, feeEst: 0.12, minStopPct: 0.005, maxNotional: 500, isHIP3: true },  // v5.0: 0.05->0.12 for builder fees
 };
 const HL_INFO = 'https://api.hyperliquid.xyz/info';
 const HL_INTERVALS = { '1W':'1w', '1D':'1d', '4H':'4h', '1H':'1h', '15m':'15m' };
@@ -1727,13 +1727,14 @@ function calcRR(entry, target, trapLevel, stopLevel, feeEst){
 // For SHORT: next level ABOVE the trap resistance (where shorts are wrong)
 // For LONG:  next level BELOW the trap support (where longs are wrong)
 // v4.9: ATR-aware — enforces minimum 1.0 ATR distance to avoid noise wicks
-function findStopLevel(levels, trapPrice, direction, atrVal){
+function findStopLevel(levels, trapPrice, direction, atrVal, coinMinStopPct){
   // Use levels with score >= 10 for stop placement
   const qualityLevels = levels.filter(l => l.score >= 10);
   const pool = qualityLevels.length >= 2 ? qualityLevels : levels;
   const sorted = [...pool].sort((a,b)=>a.price-b.price);
-  // ATR-based minimum distance: at least 1.0 ATR from trap, floor 0.5%
-  const minDist = atrVal ? Math.max(atrVal * 1.0, trapPrice * 0.005) : trapPrice * 0.005;
+  // ATR-based minimum distance: at least 1.0 ATR from trap, floor uses per-coin minStopPct (synced w/ bot.js)
+  const stopFloor = coinMinStopPct || 0.005;
+  const minDist = atrVal ? Math.max(atrVal * 1.0, trapPrice * stopFloor) : trapPrice * stopFloor;
   // Max stop distance: 4% from trap — prevents absurdly wide stops
   const maxStopDist = trapPrice * 0.04;
   if(direction==='short'){
@@ -1933,8 +1934,10 @@ function hasLTFAlignment(direction, lowerCandles) {
 // ── DMS ENGINE (v4.9 — confirmed follow-through + momentum + HTF + LTF align) ─
 // 1W/1D/4H/1H: require rejection candle + follow-through to fire entries.
 // 15m: existing trap logic (FAIL_GAIN/FAIL_LOSE) is unchanged.
-function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
+function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR, coinMinStopPct, feeEst){
   coinMinRR = coinMinRR || 1.0;
+  coinMinStopPct = coinMinStopPct || 0.005;
+  feeEst = feeEst || 0.05;
   const n = c.length;
   const minCandles = (tf==='1W'||tf==='1D') ? 10 : 20;
   if(n < minCandles) return {sig:'NEUTRAL',type:'NONE',reason:'Insufficient data ('+n+' candles)'};
@@ -2009,8 +2012,8 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
       const htfBlocks = (isRes && htfDir==='UP') || (!isRes && htfDir==='DOWN');
       if(!htfBlocks){
         const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
-        const stop = findStopLevel(levels, blindCandidate.price, isRes?'short':'long', a);
-        const rr   = calcRR(cur.c, tgt.price, blindCandidate.price, stop);
+        const stop = findStopLevel(levels, blindCandidate.price, isRes?'short':'long', a, coinMinStopPct);
+        const rr   = calcRR(cur.c, tgt.price, blindCandidate.price, stop, feeEst);
         // Require minimum R:R (coin-specific: GOLD needs 2.0+ due to ~0.9% fees)
         if(!rr || parseFloat(rr) < coinMinRR) {
           // Fall through to AT_LEVEL instead of firing a bad-RR blind entry
@@ -2090,8 +2093,8 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
         const rejection = hasRejection(c, atLevel.price, confSig, a);
         if(rejection.confirmed){
           const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
-          const stop = findStopLevel(levels, atLevel.price, isRes?'short':'long', a);
-          const rr   = calcRR(cur.c, tgt.price, atLevel.price, stop);
+          const stop = findStopLevel(levels, atLevel.price, isRes?'short':'long', a, coinMinStopPct);
+          const rr   = calcRR(cur.c, tgt.price, atLevel.price, stop, feeEst);
           if(rr && parseFloat(rr) >= coinMinRR){
             return {
               sig:confSig, type:'BLIND_ENTRY',
@@ -2109,8 +2112,8 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
           const bounce = hasStrongBodyBounce(c, atLevel.price, confSig, a);
           if(bounce.confirmed){
             const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
-            const stop = findStopLevel(levels, atLevel.price, isRes?'short':'long', a);
-            const rr   = calcRR(cur.c, tgt.price, atLevel.price, stop);
+            const stop = findStopLevel(levels, atLevel.price, isRes?'short':'long', a, coinMinStopPct);
+            const rr   = calcRR(cur.c, tgt.price, atLevel.price, stop, feeEst);
             if(rr && parseFloat(rr) >= coinMinRR){
               return {
                 sig:confSig, type:'BLIND_ENTRY',
@@ -2169,7 +2172,7 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
 
           const tgt  = findNextLevel(levels, cur.c, 'short');
           const stop = lv.price + a * 0.3; // SL above the broken level
-          const rr   = calcRR(cur.c, tgt.price, lv.price, stop);
+          const rr   = calcRR(cur.c, tgt.price, lv.price, stop, feeEst);
           if(!rr || parseFloat(rr) < coinMinRR) continue;
 
           const breakDist = (distFromLevel * 100).toFixed(2);
@@ -2202,7 +2205,7 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
 
           const tgt  = findNextLevel(levels, cur.c, 'long');
           const stop = lv.price - a * 0.3;
-          const rr   = calcRR(cur.c, tgt.price, lv.price, stop);
+          const rr   = calcRR(cur.c, tgt.price, lv.price, stop, feeEst);
           if(!rr || parseFloat(rr) < coinMinRR) continue;
 
           const breakDist = (distFromLevel * 100).toFixed(2);
@@ -2276,8 +2279,8 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
       if(htfBlockShort) continue;
 
       const tgt  = findNextLevel(levels, confirm.c, 'short');
-      const stop = findStopLevel(levels, lv.price, 'short', a);
-      const rr   = calcRR(confirm.c, tgt.price, lv.price, stop);
+      const stop = findStopLevel(levels, lv.price, 'short', a, coinMinStopPct);
+      const rr   = calcRR(confirm.c, tgt.price, lv.price, stop, feeEst);
       if(rr && parseFloat(rr) < 1.0) continue; // Skip low R:R setups -- min 1.0 on 15m (widened for ATR stops)
       const dist = ((lv.price - confirm.c)/confirm.c*100).toFixed(2);
       return {
@@ -2316,8 +2319,8 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR){
       if(htfBlockLong) continue;
 
       const tgt  = findNextLevel(levels, confirm.c, 'long');
-      const stop = findStopLevel(levels, lv.price, 'long', a);
-      const rr   = calcRR(confirm.c, tgt.price, lv.price, stop);
+      const stop = findStopLevel(levels, lv.price, 'long', a, coinMinStopPct);
+      const rr   = calcRR(confirm.c, tgt.price, lv.price, stop, feeEst);
       if(rr && parseFloat(rr) < 1.0) continue; // Skip low R:R setups -- min 1.0 on 15m (widened for ATR stops)
       const dist = ((confirm.c - lv.price)/confirm.c*100).toFixed(2);
       return {
@@ -2589,22 +2592,17 @@ function nextMove(h4C, h1C){
   const bearScore = bear4 + (h4FailedHigh?2:0) + (bear1>=5?1:0) + (h1Bearish?1:0);
   const bullScore = bull4 + (h4FailedLow?2:0)  + (bull1>=5?1:0) + (h1Bullish?1:0);
 
-  // Lower threshold to 2 — easier to get a directional read
-  // Chris Hunter reads the story from 1H/4H quite quickly; UNCLEAR should be rare
-  const threshold = 2;
-  if(bullScore >= threshold && bullScore > bearScore)
-    return {dir:'UP',   reason:`4H gaining (${bull4}/5 bars up) · 1H confirming (${bull1}/7 bullish)`};
-  if(bearScore >= threshold && bearScore > bullScore)
-    return {dir:'DOWN', reason:`4H failing (${bear4}/5 bars down) · 1H confirming (${bear1}/7 bearish)`};
+  // v5.1: Raised threshold from 2→3 and require gap>1 to prevent marginal/noisy reads
+  // Removed single-candle tiebreaker that declared trend from 1 bar (synced w/ bot.js)
+  const threshold = 3;
+  if(bullScore >= threshold && bullScore > bearScore + 1)
+    return {dir:'UP',   reason:`4H gaining (${bull4}/5 bars up) · 1H confirming (${bull1}/7 bullish) [score ${bullScore}>${bearScore}]`};
+  if(bearScore >= threshold && bearScore > bullScore + 1)
+    return {dir:'DOWN', reason:`4H failing (${bear4}/5 bars down) · 1H confirming (${bear1}/7 bearish) [score ${bearScore}>${bullScore}]`};
   if(h4FailedHigh && h1Bearish)
     return {dir:'DOWN', reason:`4H failed to gain last high · 1H trending down`};
   if(h4FailedLow && h1Bullish)
     return {dir:'UP',   reason:`4H failed to lose last low · 1H trending up`};
-  // Tiebreaker: use the most recent 4H candle direction
-  if(h4n.bh > h4p.bh && h4n.bl > h4p.bl)
-    return {dir:'UP',   reason:`Slight 4H bias UP (last candle higher body) — use caution`};
-  if(h4n.bh < h4p.bh && h4n.bl < h4p.bl)
-    return {dir:'DOWN', reason:`Slight 4H bias DOWN (last candle lower body) — use caution`};
   return {dir:'UNCLEAR',reason:'No clear 4H/1H direction — both sides contested'};
 }
 
@@ -2664,9 +2662,10 @@ function renderTop(t){
 
 function renderHero(){
   let wL=0,wS=0,activeW=0;
+  const totalW=TFS.reduce((s,t)=>s+t.w,0); // v5.1: use total weight as denominator (synced w/ bot.js)
   TFS.forEach(tf=>{const r=results[tf.l];if(!r)return;if(r.type!=='NONE')activeW+=tf.w;if(r.sig==='LONG')wL+=tf.w;if(r.sig==='SHORT')wS+=tf.w;});
   const loaded=Object.keys(results).length,diff=wL-wS;
-  const pct=activeW>0?Math.round(Math.max(wL,wS)/activeW*100):0;
+  const pct=totalW>0?Math.round(Math.max(wL,wS)/totalW*100):0;
   const label=pct>=75?'HIGH':pct>=50?'MED':'LOW';
   // v4.9: Don't show directional hero below 30% confidence — prevents
   // misleading LONG/SHORT display when only one low-weight TF has a signal
@@ -3376,8 +3375,11 @@ function processTF(i, candles, dCandles, coinId, lowerCandles){
   const a = atr(candles);
   // Pass htfDir + asiaLevels as plain object (v4.9 fix: String objects break === comparison)
   const htfCarrier = { dir: s.htfDir || 'UNCLEAR', __asiaLevels: s.asiaLevels || [] };
-  const coinMinRR = COINS[coinId] ? COINS[coinId].minRR : 1.0;
-  const d = dms(candles, a, dCandles, tf.l, htfCarrier, lowerCandles || null, coinMinRR);
+  const coinCfg = COINS[coinId] || {};
+  const coinMinRR = coinCfg.minRR || 1.0;
+  const coinMinStopPct = coinCfg.minStopPct || 0.005;
+  const coinFeeEst = coinCfg.feeEst || 0.05;
+  const d = dms(candles, a, dCandles, tf.l, htfCarrier, lowerCandles || null, coinMinRR, coinMinStopPct, coinFeeEst);
   s.results[tf.l] = d;
   // Alerts fire for all coins regardless of active view
   if(d.type!=='NONE' && d.type!=='AT_LEVEL'){
@@ -3396,10 +3398,11 @@ function processTF(i, candles, dCandles, coinId, lowerCandles){
       addLog(d.sig, tf.l, d.reason, d.type, d.level, d.target, d.rr, d.stopPrice, coinId);
       // ── AUTO-TRADE: trigger Hyperliquid execution if enabled ──
       if(HL.enabled && HL.wallet && d.sig !== 'NEUTRAL' && d.stopPrice){
-        // Compute overall coin confidence (same formula as renderHero)
+        // Compute overall coin confidence (v5.1: totalWeight denominator — synced w/ bot.js & renderHero)
         let wL=0, wS=0, aW=0;
+        const totalW=TFS.reduce((sum,t)=>sum+t.w,0);
         TFS.forEach(t=>{ const r=s.results[t.l]; if(!r)return; if(r.type!=='NONE')aW+=t.w; if(r.sig==='LONG')wL+=t.w; if(r.sig==='SHORT')wS+=t.w; });
-        const conf = aW>0 ? Math.round(Math.max(wL,wS)/aW*100) : 0;
+        const conf = totalW>0 ? Math.round(Math.max(wL,wS)/totalW*100) : 0;
         const baseMinConf = parseInt(localStorage.getItem('hl_min_conf') || '50');
         const majorSig = wL > wS ? 'LONG' : wS > wL ? 'SHORT' : null;
         const SYM = { bitcoin:'BTC', hyperliquid:'HYPE', sp500:'SPX', gold:'GOLD' };
@@ -3418,6 +3421,12 @@ function processTF(i, candles, dCandles, coinId, lowerCandles){
         } else if(storyConflicts && htfDir === 'UNCLEAR'){
           // Scenario A: HTF unclear but story says opposite — block
           console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: story ${storyDir} conflicts, HTF unclear — counter-structure`);
+        // v5.1: SP500 US-session-only filter (synced w/ bot.js)
+        } else if(coinId === 'sp500' && d.sig === 'LONG' && !(new Date().getUTCHours() >= 13 && new Date().getUTCHours() < 21)){
+          console.log(`HL auto-trade BLOCKED ${sym} LONG: outside US session (${new Date().getUTCHours()}:00 UTC)`);
+        // v5.1: GOLD session filter (synced w/ bot.js)
+        } else if(coinId === 'gold' && d.sig === 'LONG' && !(new Date().getUTCHours() >= 13 && new Date().getUTCHours() < 20)){
+          console.log(`HL auto-trade BLOCKED ${sym} LONG: outside gold session (${new Date().getUTCHours()}:00 UTC)`);
         } else {
         // Scenario B: story conflicts but HTF agrees — remove with-trend bonus
         // Scenario C: both agree — keep with-trend bonus
@@ -4422,40 +4431,91 @@ const HL = {
     const riskPct = parseFloat(localStorage.getItem('risk_pct') || '1');
     const riskAmount = accountSize * riskPct / 100;
     const slDistance = Math.abs(currentPrice - stopPrice);
-    if (slDistance < currentPrice * 0.003) { console.warn('HL: SL too tight'); return null; }
+    // v5.1: Use per-coin minStopPct (synced w/ bot.js)
+    const coinCfg = COINS[coinId] || {};
+    const minStopDist = currentPrice * (coinCfg.minStopPct || 0.005);
+    if (slDistance < minStopDist) { console.warn(`HL: SL too tight (${(slDistance/currentPrice*100).toFixed(3)}% < ${((coinCfg.minStopPct||0.005)*100).toFixed(1)}%)`); return null; }
 
-    const size = riskAmount / slDistance;
+    let size = riskAmount / slDistance;
     const resolvedAsset = this.resolveAsset(asset);
     const szDec = this.szDecimals[resolvedAsset] || 3;
     const minSize = Math.pow(10, -szDec);
     if (size < minSize) { console.warn('HL: size too small:', size); return null; }
 
-    // Entry: IOC limit with 1% slippage to ensure fill
-    const slip = currentPrice * 0.01;
-    const entryPx = isBuy ? currentPrice + slip : currentPrice - slip;
+    // v5.1: maxNotional cap for HIP-3 assets (synced w/ bot.js)
+    const maxNotional = coinCfg.maxNotional || 0;
+    if (maxNotional > 0) {
+      const notional = size * currentPrice;
+      if (notional > maxNotional) {
+        size = maxNotional / currentPrice;
+        console.log(`HL: ${asset} capped to maxNotional $${maxNotional} (was $${notional.toFixed(0)})`);
+      }
+    }
+
+    // v5.1: HIP-3 assets use GTC limit at 0.05% through spread, standard uses IOC with 1% slippage (synced w/ bot.js)
+    const isHIP3 = coinCfg.isHIP3 || false;
+    let entryPx, entryOrderType;
+    if (isHIP3) {
+      const limitSlip = currentPrice * 0.0005;
+      entryPx = isBuy ? currentPrice + limitSlip : currentPrice - limitSlip;
+      entryOrderType = { limit: { tif: 'Gtc' } };
+      console.log(`HL: ${asset} using GTC limit order @ ${entryPx.toFixed(1)} (HIP-3 fee optimization)`);
+    } else {
+      const slip = currentPrice * 0.01;
+      entryPx = isBuy ? currentPrice + slip : currentPrice - slip;
+      entryOrderType = { limit: { tif: 'Ioc' } };
+    }
 
     try {
-      // 1. Market entry
-      const entryRes = await this.placeOrder(asset, isBuy, size, entryPx, { limit: { tif: 'Ioc' } });
+      // 1. Entry order (IOC for standard, GTC limit for HIP-3)
+      const entryRes = await this.placeOrder(asset, isBuy, size, entryPx, entryOrderType);
       if (entryRes.status === 'err') { console.error('HL entry failed:', entryRes.response); return null; }
-      // v5.0 FIX #8: Explicitly reject resting entries (IOC should never rest, but handle API edge cases)
-      if (entryRes.resting) {
-        console.error('HL entry resting instead of filling — cancelling dangling order');
+      // v5.0 FIX #8: For IOC, explicitly reject resting orders
+      if (!isHIP3 && entryRes.resting) {
+        console.error('HL entry resting instead of filling (IOC) — cancelling');
         try { await this.cancelOrder(asset, entryRes.oid); } catch(e) { console.warn('cancel resting entry failed:', e); }
         return null;
       }
-      if (entryRes.filled === false || (!entryRes.filled && !entryRes.totalSz)) { console.error('HL entry not filled'); return null; }
+      if (!isHIP3 && (entryRes.filled === false || (!entryRes.filled && !entryRes.totalSz))) { console.error('HL entry not filled'); return null; }
+      // For HIP-3 GTC: if resting, wait 5s then check if filled
+      if (isHIP3 && entryRes.resting && !entryRes.filled) {
+        console.log('HL: HIP-3 GTC order resting, waiting 5s for fill...');
+        await new Promise(r => setTimeout(r, 5000));
+        await this.syncPositions();
+        if (!this.activeTrades[coinId]) {
+          console.warn('HL: HIP-3 GTC order not filled after 5s, cancelling');
+          try { await this.cancelOrder(asset, entryRes.oid); } catch(e){}
+          return null;
+        }
+      }
 
-      // 2. Stop Loss (trigger, reduce only)
-      const slPx = isBuy ? stopPrice * 0.98 : stopPrice * 1.02; // 2% protection beyond stop
-      await this.placeOrder(asset, !isBuy, size, slPx,
+      // 2. Stop Loss (full position, trigger market)
+      const slPx = isBuy ? stopPrice * 0.98 : stopPrice * 1.02;
+      const slRes = await this.placeOrder(asset, !isBuy, size, slPx,
         { trigger: { isMarket: true, triggerPx: stopPrice, tpsl: 'sl' } }, true);
+      if (!slRes || slRes.status === 'err') {
+        console.error('HL SL placement failed:', slRes ? slRes.response : 'null');
+        showToast(`SL FAILED for ${sig} ${asset} — place manually!`, '', true);
+      }
 
-      // 3. Take Profit (if target exists)
+      // 3. v5.1: Partial TP — close 50% at TP1, let remainder ride with trailing stop (synced w/ bot.js)
       if (target) {
-        const tpPx = isBuy ? target * 1.02 : target * 0.98;
-        await this.placeOrder(asset, !isBuy, size, tpPx,
-          { trigger: { isMarket: true, triggerPx: target, tpsl: 'tp' } }, true);
+        const tpSize = parseFloat((size * 0.5).toFixed(szDec));
+        if (tpSize >= minSize) {
+          const tpPx = isBuy ? target * 1.02 : target * 0.98;
+          const tpRes = await this.placeOrder(asset, !isBuy, tpSize, tpPx,
+            { trigger: { isMarket: true, triggerPx: target, tpsl: 'tp' } }, true);
+          if (!tpRes || tpRes.status === 'err') {
+            console.error('HL TP placement failed:', tpRes ? tpRes.response : 'null');
+          } else {
+            console.log(`HL: Partial TP placed: ${tpSize} of ${size.toFixed(szDec)} @ $${fmt(target)} (50%)`);
+          }
+        } else {
+          // Size too small to split — place full TP
+          const tpPx = isBuy ? target * 1.02 : target * 0.98;
+          await this.placeOrder(asset, !isBuy, size, tpPx,
+            { trigger: { isMarket: true, triggerPx: target, tpsl: 'tp' } }, true);
+        }
       }
 
       // Track active trade with trailing stop state
@@ -4592,13 +4652,17 @@ const HL = {
         console.log(`HL TRAIL ${trade.asset}: moved SL to BREAKEVEN $${fmt(newSl)} (1:1 R hit)`);
         showToast(`SL → BREAKEVEN: ${trade.asset}`, `Entry: $${fmt(trade.entry)}`, false);
       } else if (trade.trailState === 'breakeven' && rMultiple >= 1.5) {
-        // Start trailing: SL = bestPrice - 1.0*risk (tighter trail locks in more profit)
+        // v5.1: Wider trail for HIP-3 (2.5× risk) vs standard (2.0× risk) — was 1.5× for all (synced w/ bot.js)
         trade.trailState = 'trailing';
-        newSl = isLong ? trade.bestPrice - risk * 1.5 : trade.bestPrice + risk * 1.5;
-        console.log(`HL TRAIL ${trade.asset}: trailing SL to $${fmt(newSl)} (1.5R trail)`);
+        const coinCfg = COINS[coinId] || {};
+        const trailMult = coinCfg.isHIP3 ? 2.5 : 2.0;
+        newSl = isLong ? trade.bestPrice - risk * trailMult : trade.bestPrice + risk * trailMult;
+        console.log(`HL TRAIL ${trade.asset}: trailing SL to $${fmt(newSl)} (${trailMult}R trail)`);
       } else if (trade.trailState === 'trailing') {
         // Continue trailing: only move SL forward, never back
-        const trailSl = isLong ? trade.bestPrice - risk * 1.5 : trade.bestPrice + risk * 1.5;
+        const coinCfg = COINS[coinId] || {};
+        const trailMult = coinCfg.isHIP3 ? 2.5 : 2.0;
+        const trailSl = isLong ? trade.bestPrice - risk * trailMult : trade.bestPrice + risk * trailMult;
         if ((isLong && trailSl > trade.sl) || (!isLong && trailSl < trade.sl)) {
           newSl = trailSl;
           console.log(`HL TRAIL ${trade.asset}: updated trailing SL to $${fmt(newSl)}`);
