@@ -4498,23 +4498,53 @@ const HL = {
         showToast(`SL FAILED for ${sig} ${asset} — place manually!`, '', true);
       }
 
-      // 3. v5.1: Partial TP — close 50% at TP1, let remainder ride with trailing stop (synced w/ bot.js)
+      // 3. v5.2: 3-STAGE PARTIAL TP LADDER (was 2-stage 50/50 in v5.1) — synced w/ bot.js
+      // TP1: 34% at 1.0R, TP2: 33% at 1.8R, TP3: remaining 33% trails via trailStops()
+      // v5.2: HIP-3 assets use limit trigger (isMarket:false) for TP to avoid taker fees
+      // SL remains isMarket:true for guaranteed fills — TP can afford to miss occasionally
       if (target) {
-        const tpSize = parseFloat((size * 0.5).toFixed(szDec));
-        if (tpSize >= minSize) {
-          const tpPx = isBuy ? target * 1.02 : target * 0.98;
-          const tpRes = await this.placeOrder(asset, !isBuy, tpSize, tpPx,
-            { trigger: { isMarket: true, triggerPx: target, tpsl: 'tp' } }, true);
-          if (!tpRes || tpRes.status === 'err') {
-            console.error('HL TP placement failed:', tpRes ? tpRes.response : 'null');
+        const riskDist = Math.abs(currentPrice - stopPrice);
+        const tp1Price = isBuy ? currentPrice + riskDist * 1.0 : currentPrice - riskDist * 1.0;  // 1R
+        const tp2Price = isBuy ? currentPrice + riskDist * 1.8 : currentPrice - riskDist * 1.8;  // 1.8R
+        // TP3 = remaining 33% handled by trailStops() — no order placed
+
+        const tp1Size = parseFloat((size * 0.34).toFixed(szDec));
+        const tp2Size = parseFloat((size * 0.33).toFixed(szDec));
+        // Remaining ~33% trails
+
+        // v5.2: HIP-3 TP uses limit trigger to avoid taker/builder fees (saves ~8 bps on GOLD)
+        // Standard assets still use market trigger for reliable fills on thinner books
+        const tpTriggerType = isHIP3 ? false : true;  // isMarket: false = limit trigger
+        const tpSlippage = isHIP3 ? 0.002 : 0.02;     // 0.2% cushion for HIP-3, 2% for standard
+
+        if (tp1Size >= minSize) {
+          const tp1Px = isBuy ? tp1Price * (1 + tpSlippage) : tp1Price * (1 - tpSlippage);
+          const tp1Res = await this.placeOrder(asset, !isBuy, tp1Size, tp1Px,
+            { trigger: { isMarket: tpTriggerType, triggerPx: tp1Price, tpsl: 'tp' } }, true);
+          if (!tp1Res || tp1Res.status === 'err') {
+            console.error('HL TP1 placement failed:', tp1Res ? tp1Res.response : 'null');
           } else {
-            console.log(`HL: Partial TP placed: ${tpSize} of ${size.toFixed(szDec)} @ $${fmt(target)} (50%)`);
+            console.log(`HL: TP1 placed: ${tp1Size} of ${size.toFixed(szDec)} @ $${fmt(tp1Price)} (34% at 1.0R)${isHIP3 ? ' [limit trigger]' : ''}`);
           }
-        } else {
-          // Size too small to split — place full TP
-          const tpPx = isBuy ? target * 1.02 : target * 0.98;
+        }
+
+        if (tp2Size >= minSize) {
+          const tp2Px = isBuy ? tp2Price * (1 + tpSlippage) : tp2Price * (1 - tpSlippage);
+          const tp2Res = await this.placeOrder(asset, !isBuy, tp2Size, tp2Px,
+            { trigger: { isMarket: tpTriggerType, triggerPx: tp2Price, tpsl: 'tp' } }, true);
+          if (!tp2Res || tp2Res.status === 'err') {
+            console.error('HL TP2 placement failed:', tp2Res ? tp2Res.response : 'null');
+          } else {
+            console.log(`HL: TP2 placed: ${tp2Size} of ${size.toFixed(szDec)} @ $${fmt(tp2Price)} (33% at 1.8R)${isHIP3 ? ' [limit trigger]' : ''}`);
+          }
+        }
+
+        if (tp1Size < minSize && tp2Size < minSize) {
+          // Size too small to split into 3 — place single full TP at target with fee-optimized trigger
+          const tpPx = isBuy ? target * (1 + tpSlippage) : target * (1 - tpSlippage);
           await this.placeOrder(asset, !isBuy, size, tpPx,
-            { trigger: { isMarket: true, triggerPx: target, tpsl: 'tp' } }, true);
+            { trigger: { isMarket: tpTriggerType, triggerPx: target, tpsl: 'tp' } }, true);
+          console.log(`HL: Full TP placed (size too small to split): ${size.toFixed(szDec)} @ $${fmt(target)}${isHIP3 ? ' [limit trigger]' : ''}`);
         }
       }
 
@@ -4525,7 +4555,8 @@ const HL = {
         sl: stopPrice, tp: target,
         initialSl: stopPrice,
         bestPrice: actualEntry, // tracks best price seen for trailing
-        trailState: 'initial'  // initial → breakeven → trailing
+        trailState: 'initial', // initial → breakeven → trailing
+        tpStage: 3             // v5.2: 3-stage TP ladder (34% TP1 at 1R, 33% TP2 at 1.8R, 33% trail)
       };
       this.saveActiveTrades();
       this.tradesToday++;
