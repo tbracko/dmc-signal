@@ -14,6 +14,11 @@
 //   - SP500 US-session-only filter (13:00-21:00 UTC)
 //   - Fresh price fetch in executeTrade (stale price fix)
 //   - Per-coin minStopPct floors (BTC 0.7%, others 0.5%)
+//
+// v5.2 changelog:
+//   - 3-stage partial TP ladder: 34% at 1.0R, 33% at 1.8R, 33% trail (was 50/50 2-stage)
+//   - HIP-3 TP orders use limit trigger (isMarket:false) to avoid taker fees (~8 bps saved on GOLD)
+//   - SL remains market trigger (isMarket:true) for guaranteed fills
 
 const fs    = require('fs');
 const path  = require('path');
@@ -1794,25 +1799,55 @@ const HL = {
         await sendTelegram(`⚠️ <b>SL FAILED for ${sig} ${asset}</b>\nTrade open WITHOUT stop loss -- place manually!`);
       }
 
-      // 3. v5.0: PARTIAL TP -- close 50% at TP1, let remainder ride with trailing stop (#6)
-      // This was the only profitable pattern observed (HYPE trade on Apr 6)
+      // 3. v5.2: 3-STAGE PARTIAL TP LADDER (was 2-stage 50/50 in v5.0)
+      // TP1: 34% at 1.0R, TP2: 33% at 1.8R, TP3: remaining 33% trails via trailStops()
+      // v5.2: HIP-3 assets use limit trigger (isMarket:false) for TP to avoid taker fees
+      // SL remains isMarket:true for guaranteed fills — TP can afford to miss occasionally
       if (target) {
-        const tpSize = parseFloat((size * 0.5).toFixed(szDec)); // 50% of position
-        if (tpSize >= Math.pow(10, -szDec)) {
-          const tpPx = isBuy ? target * 1.02 : target * 0.98;
-          const tpRes = await this.placeOrder(asset, !isBuy, tpSize, tpPx,
-            { trigger: { isMarket: true, triggerPx: target, tpsl: 'tp' } }, true);
-          if (!tpRes || tpRes.status === 'err') {
-            console.error('HL TP placement failed:', tpRes ? tpRes.response : 'null');
-            await sendTelegram(`⚠️ <b>TP FAILED for ${sig} ${asset}</b>\nTrade open without take profit`);
+        const riskDist = Math.abs(currentPrice - stopPrice);
+        const tp1Price = isBuy ? currentPrice + riskDist * 1.0 : currentPrice - riskDist * 1.0;  // 1R
+        const tp2Price = isBuy ? currentPrice + riskDist * 1.8 : currentPrice - riskDist * 1.8;  // 1.8R
+        // TP3 = remaining 33% handled by trailStops() — no order placed
+
+        const tp1Size = parseFloat((size * 0.34).toFixed(szDec));
+        const tp2Size = parseFloat((size * 0.33).toFixed(szDec));
+        // Remaining ~33% trails
+
+        // v5.2: HIP-3 TP uses limit trigger to avoid taker/builder fees (saves ~8 bps on GOLD)
+        // Standard assets still use market trigger for reliable fills on thinner books
+        const tpTriggerType = isHIP3 ? false : true;  // isMarket: false = limit trigger
+        const tpSlippage = isHIP3 ? 0.002 : 0.02;     // 0.2% cushion for HIP-3, 2% for standard
+
+        if (tp1Size >= Math.pow(10, -szDec)) {
+          const tp1Px = isBuy ? tp1Price * (1 + tpSlippage) : tp1Price * (1 - tpSlippage);
+          const tp1Res = await this.placeOrder(asset, !isBuy, tp1Size, tp1Px,
+            { trigger: { isMarket: tpTriggerType, triggerPx: tp1Price, tpsl: 'tp' } }, true);
+          if (!tp1Res || tp1Res.status === 'err') {
+            console.error('HL TP1 placement failed:', tp1Res ? tp1Res.response : 'null');
+            await sendTelegram(`⚠️ <b>TP1 FAILED for ${sig} ${asset}</b>\nTrade open without TP1`);
           } else {
-            console.log(`HL: Partial TP placed: ${tpSize} of ${size.toFixed(szDec)} @ $${fmt(target)} (50%)`);
+            console.log(`HL: TP1 placed: ${tp1Size} of ${size.toFixed(szDec)} @ $${fmt(tp1Price)} (34% at 1.0R)${isHIP3 ? ' [limit trigger]' : ''}`);
           }
-        } else {
-          // Size too small to split -- place full TP
-          const tpPx = isBuy ? target * 1.02 : target * 0.98;
+        }
+
+        if (tp2Size >= Math.pow(10, -szDec)) {
+          const tp2Px = isBuy ? tp2Price * (1 + tpSlippage) : tp2Price * (1 - tpSlippage);
+          const tp2Res = await this.placeOrder(asset, !isBuy, tp2Size, tp2Px,
+            { trigger: { isMarket: tpTriggerType, triggerPx: tp2Price, tpsl: 'tp' } }, true);
+          if (!tp2Res || tp2Res.status === 'err') {
+            console.error('HL TP2 placement failed:', tp2Res ? tp2Res.response : 'null');
+            await sendTelegram(`⚠️ <b>TP2 FAILED for ${sig} ${asset}</b>\nTrade open without TP2`);
+          } else {
+            console.log(`HL: TP2 placed: ${tp2Size} of ${size.toFixed(szDec)} @ $${fmt(tp2Price)} (33% at 1.8R)${isHIP3 ? ' [limit trigger]' : ''}`);
+          }
+        }
+
+        if (tp1Size < Math.pow(10, -szDec) && tp2Size < Math.pow(10, -szDec)) {
+          // Size too small to split into 3 — place single full TP at target with fee-optimized trigger
+          const tpPx = isBuy ? target * (1 + tpSlippage) : target * (1 - tpSlippage);
           await this.placeOrder(asset, !isBuy, size, tpPx,
-            { trigger: { isMarket: true, triggerPx: target, tpsl: 'tp' } }, true);
+            { trigger: { isMarket: tpTriggerType, triggerPx: target, tpsl: 'tp' } }, true);
+          console.log(`HL: Full TP placed (size too small to split): ${size.toFixed(szDec)} @ $${fmt(target)}${isHIP3 ? ' [limit trigger]' : ''}`);
         }
       }
 
@@ -1825,6 +1860,7 @@ const HL = {
         bestPrice: actualEntry,
         trailState: 'initial',
         partialTp: true,   // v5.0: partial TP is now default
+        tpStage: 3,        // v5.2: 3-stage TP ladder (34% TP1 at 1R, 33% TP2 at 1.8R, 33% trail)
         originalSize: size  // v5.0: track original size for trailing logic
       };
       this.saveActiveTrades();
