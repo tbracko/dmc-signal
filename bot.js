@@ -19,6 +19,18 @@
 //   - 3-stage partial TP ladder: 34% at 1.0R, 33% at 1.8R, 33% trail (was 50/50 2-stage)
 //   - HIP-3 TP orders use limit trigger (isMarket:false) to avoid taker fees (~8 bps saved on GOLD)
 //   - SL remains market trigger (isMarket:true) for guaranteed fills
+//
+// v5.3 changelog (2026-04-13):
+//   - Regime-aware directional blocking: when 1W + 1D agree on direction, blocks counter-regime
+//     trades with <80% confidence. Replaces the proposed blanket HYPE short block — allows
+//     high-conviction counter-regime trades while blocking low-conviction ones.
+//   - Combined notional exposure limit: caps total open notional at 8× equity across all positions.
+//     Prevents correlated reversal blow-ups (Apr 12 had 7.3× — below cap, but close).
+//   - Dynamic trailing stop: after TP2 fills, trail multiplier widens by +1.0R (HIP-3: 2.5→3.5,
+//     standard: 2.0→3.0) to let runners ride on strong trend days.
+//   - TP1 breakeven safeguard: when TP1 fills (position drops to <67% of original), SL is
+//     immediately moved to breakeven. Prevents the Apr 12 HYPE scenario where TP1 earned +$1.03
+//     but the trailing half lost -$2.30 because SL was still below entry.
 
 const fs    = require('fs');
 const path  = require('path');
@@ -1667,6 +1679,25 @@ const HL = {
       }
     }
 
+    // v5.3: Combined notional exposure limit
+    // Prevents total account blow-up on correlated reversals (e.g. all shorts hit SL together)
+    // Apr 12 had $1,060 combined notional on $145 equity (7.3×) — cap at 8× to allow similar trades
+    {
+      const maxTotalNotional = (this.cachedEquity > 0 ? this.cachedEquity : 100) * 8;
+      let totalOpenNotional = 0;
+      for (const [cId, t] of Object.entries(this.activeTrades)) {
+        const px = coinState[cId]?.price || t.entry || 0;
+        totalOpenNotional += Math.abs(t.size * px);
+      }
+      // Estimate new trade notional from risk sizing (rough upper bound: maxNotional or equity * riskPct / minStopPct)
+      const estimatedNewNotional = coin.maxNotional > 0 ? coin.maxNotional : (this.cachedEquity || 100) * 2;
+      if (totalOpenNotional + estimatedNewNotional > maxTotalNotional) {
+        console.warn(`HL EXPOSURE CAP: ${coinId} blocked — open notional $${totalOpenNotional.toFixed(0)} + est. $${estimatedNewNotional.toFixed(0)} > max $${maxTotalNotional.toFixed(0)} (8× equity) (v5.3)`);
+        await sendTelegram(`🛡 <b>EXPOSURE CAP: ${coin.label}</b>\nOpen notional: $${totalOpenNotional.toFixed(0)}\nMax allowed: $${maxTotalNotional.toFixed(0)} (8× equity)\nTrade skipped.`);
+        return null;
+      }
+    }
+
     // v5.0: Daily P&L limit check (#8)
     const pnlDay = new Date().toDateString();
     if (pnlDay !== this.dailyPnlDate) { this.dailyPnl = 0; this.dailyPnlDate = pnlDay; }
@@ -1861,7 +1892,9 @@ const HL = {
         trailState: 'initial',
         partialTp: true,   // v5.0: partial TP is now default
         tpStage: 3,        // v5.2: 3-stage TP ladder (34% TP1 at 1R, 33% TP2 at 1.8R, 33% trail)
-        originalSize: size  // v5.0: track original size for trailing logic
+        originalSize: size, // v5.0: track original size for trailing logic
+        tp1Detected: false, // v5.3: tracks whether TP1 has filled (forces breakeven SL)
+        tp2Hit: false       // v5.3: tracks whether TP2 has filled (triggers wider trail)
       };
       this.saveActiveTrades();
       this.tradesToday++;
@@ -1912,6 +1945,36 @@ const HL = {
         continue;
       }
 
+      // v5.3: Detect TP fills by comparing live position size to original
+      const liveSize = Math.abs(parseFloat(stillOpen.position?.szi || stillOpen.szi || '0'));
+
+      // v5.3: When TP1 fills (size drops below 67% of original), force SL to at least breakeven
+      // This prevents the scenario from Apr 12 HYPE: TP1 earned +$1.03 but remainder SL lost -$2.30
+      // because the trail stop was still below entry price when the remaining position got stopped out
+      if (!trade.tp1Detected && trade.originalSize && liveSize > 0 && liveSize <= trade.originalSize * 0.67) {
+        trade.tp1Detected = true;
+        const isLong = trade.side === 'LONG';
+        const slShouldBeAtLeastBreakeven = isLong
+          ? (!trade.sl || trade.sl < trade.entry)
+          : (!trade.sl || trade.sl > trade.entry);
+        if (slShouldBeAtLeastBreakeven && trade.trailState === 'initial') {
+          trade.trailState = 'breakeven';
+          console.log(`HL TRAIL ${trade.asset}: TP1 detected — forcing SL to breakeven $${fmt(trade.entry)} (v5.3 safeguard)`);
+          // The newSl will be set below in the breakeven/trailing logic
+        }
+      }
+
+      // v5.3: Detect TP2 fill — if remaining size is ≤ 40% of original, only trail portion remains
+      if (!trade.tp2Hit && trade.originalSize && liveSize > 0 && liveSize <= trade.originalSize * 0.40) {
+        trade.tp2Hit = true;
+        console.log(`HL TRAIL ${trade.asset}: TP2 detected — live size ${liveSize.toFixed(4)} ≤ 40% of original ${trade.originalSize.toFixed(4)} (v5.3)`);
+        await sendTelegram(`✅ <b>TP2 HIT: ${trade.asset}</b>\nRemaining ${liveSize.toFixed(4)} units trailing with widened stop`);
+      }
+      // Also update trade.size to live size (TP partials reduce it)
+      if (liveSize > 0 && liveSize !== trade.size) {
+        trade.size = liveSize;
+      }
+
       const px = coinState[coinId]?.price;
       if (!px || px <= 0) continue;
       const isLong = trade.side === 'LONG';
@@ -1934,12 +1997,15 @@ const HL = {
         await sendTelegram(`🔄 <b>SL -> BREAKEVEN: ${trade.asset}</b>\nEntry: $${fmt(trade.entry)}\n1:1 R reached`);
       } else if (trade.trailState === 'breakeven' && rMultiple >= 1.5) {
         trade.trailState = 'trailing';
-        // v5.1: Wider trail for HIP-3 assets (2.5× risk) vs standard (2.0× risk) — was 1.5× for all
-        const trailMult = COINS[coinId]?.isHIP3 ? 2.5 : 2.0;
+        // v5.3: Dynamic trail multiplier — widens after TP2 to let runners ride on strong trend days
+        // Base: HIP-3 2.5×, standard 2.0×. After TP2: HIP-3 3.5×, standard 3.0×
+        const baseMult = COINS[coinId]?.isHIP3 ? 2.5 : 2.0;
+        const trailMult = trade.tp2Hit ? baseMult + 1.0 : baseMult;
         newSl = isLong ? trade.bestPrice - risk * trailMult : trade.bestPrice + risk * trailMult;
-        console.log(`HL TRAIL ${trade.asset}: trailing SL to $${fmt(newSl)} (${trailMult}R trail started)`);
+        console.log(`HL TRAIL ${trade.asset}: trailing SL to $${fmt(newSl)} (${trailMult}R trail started${trade.tp2Hit ? ', widened post-TP2' : ''}) (v5.3)`);
       } else if (trade.trailState === 'trailing') {
-        const trailMult = COINS[coinId]?.isHIP3 ? 2.5 : 2.0;
+        const baseMult = COINS[coinId]?.isHIP3 ? 2.5 : 2.0;
+        const trailMult = trade.tp2Hit ? baseMult + 1.0 : baseMult;
         const trailSl = isLong ? trade.bestPrice - risk * trailMult : trade.bestPrice + risk * trailMult;
         if ((isLong && trailSl > trade.sl) || (!isLong && trailSl < trade.sl)) {
           newSl = trailSl;
@@ -2279,6 +2345,28 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
           await sendTelegram(`⚠️ <b>RANGING MARKET: ${sym}</b>\nLast 3 trades alternated direction (${dirs.join(' → ')})\nSkipping ${d.sig} signal until clear trend`);
           return;
         }
+      }
+    }
+  }
+
+  // v5.3: Regime-aware directional blocking
+  // When 1W + 1D both agree on direction, block the opposite direction unless confidence >= 80%
+  // This prevents low-conviction counter-regime trades (e.g. shorting HYPE in a sustained uptrend)
+  // while still allowing high-conviction setups (Apr 12 HYPE short worked because it had multi-TF support)
+  {
+    const weeklyResult = allResults['1W'];
+    const dailyResult = allResults['1D'];
+    const weeklyDir = weeklyResult?.sig;  // 'LONG' = bullish regime, 'SHORT' = bearish regime
+    const dailyDir = dailyResult?.sig;
+    if (weeklyDir && dailyDir && weeklyDir === dailyDir && weeklyDir !== 'NEUTRAL') {
+      const regimeDir = weeklyDir;  // 'LONG' or 'SHORT'
+      if (d.sig !== regimeDir && conf < 80) {
+        console.log(`HL REGIME BLOCK: ${sym} ${d.sig} blocked — 1W+1D both ${regimeDir}, conf ${conf}% < 80% (v5.3)`);
+        await sendTelegram(`🛡 <b>REGIME BLOCK: ${sym} ${d.sig}</b>\n1W + 1D both ${regimeDir === 'LONG' ? 'bullish' : 'bearish'}\nConf ${conf}% < 80% threshold\nSignal-only, no trade.`);
+        return;
+      }
+      if (d.sig !== regimeDir) {
+        console.log(`HL: ${sym} ${d.sig} ALLOWED despite regime ${regimeDir} — conf ${conf}% >= 80% (v5.3)`);
       }
     }
   }
