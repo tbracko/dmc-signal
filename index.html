@@ -3427,6 +3427,26 @@ function processTF(i, candles, dCandles, coinId, lowerCandles){
         // v5.1: GOLD session filter (synced w/ bot.js)
         } else if(coinId === 'gold' && d.sig === 'LONG' && !(new Date().getUTCHours() >= 13 && new Date().getUTCHours() < 20)){
           console.log(`HL auto-trade BLOCKED ${sym} LONG: outside gold session (${new Date().getUTCHours()}:00 UTC)`);
+        // v5.3: Regime-aware directional blocking (synced w/ bot.js)
+        // When 1W + 1D both agree on direction, block counter-regime trades with <80% confidence
+        } else if((() => {
+          const weeklyResult = s.results['1W'];
+          const dailyResult = s.results['1D'];
+          const weeklyDir = weeklyResult?.sig;
+          const dailyDir = dailyResult?.sig;
+          if (weeklyDir && dailyDir && weeklyDir === dailyDir && weeklyDir !== 'NEUTRAL') {
+            if (d.sig !== weeklyDir && conf < 80) {
+              console.log(`HL REGIME BLOCK: ${sym} ${d.sig} blocked — 1W+1D both ${weeklyDir}, conf ${conf}% < 80% (v5.3)`);
+              showToast(`REGIME BLOCK: ${sym} ${d.sig}`, `1W+1D ${weeklyDir === 'LONG' ? 'bullish' : 'bearish'}, conf ${conf}% < 80%`, true);
+              return true;
+            }
+            if (d.sig !== weeklyDir) {
+              console.log(`HL: ${sym} ${d.sig} ALLOWED despite regime ${weeklyDir} — conf ${conf}% >= 80% (v5.3)`);
+            }
+          }
+          return false;
+        })()){
+          // blocked by regime filter above
         } else {
         // Scenario B: story conflicts but HTF agrees — remove with-trend bonus
         // Scenario C: both agree — keep with-trend bonus
@@ -4425,6 +4445,25 @@ const HL = {
       }
     }
 
+    // v5.3: Combined notional exposure limit (synced w/ bot.js)
+    // Prevents total account blow-up on correlated reversals
+    {
+      const eqForCap = (this.cachedEquity > 0) ? this.cachedEquity : parseFloat(localStorage.getItem('account_size') || '100');
+      const maxTotalNotional = eqForCap * 8;
+      let totalOpenNotional = 0;
+      for (const [cId, t] of Object.entries(this.activeTrades)) {
+        const px = coinState[cId]?.price || t.entry || 0;
+        totalOpenNotional += Math.abs(t.size * px);
+      }
+      const coinCfgEst = COINS[coinId] || {};
+      const estimatedNewNotional = coinCfgEst.maxNotional > 0 ? coinCfgEst.maxNotional : eqForCap * 2;
+      if (totalOpenNotional + estimatedNewNotional > maxTotalNotional) {
+        console.warn(`HL EXPOSURE CAP: ${coinId} blocked — open $${totalOpenNotional.toFixed(0)} + est. $${estimatedNewNotional.toFixed(0)} > max $${maxTotalNotional.toFixed(0)} (8× equity) (v5.3)`);
+        showToast(`EXPOSURE CAP: ${coinId}`, `Open $${totalOpenNotional.toFixed(0)} > $${maxTotalNotional.toFixed(0)}`, true);
+        return null;
+      }
+    }
+
     // Position sizing: risk-based — use live equity if available, fallback to manual setting
     const manualSize = parseFloat(localStorage.getItem('account_size') || '100');
     const accountSize = (this.cachedEquity > 0) ? this.cachedEquity : manualSize;
@@ -4556,7 +4595,10 @@ const HL = {
         initialSl: stopPrice,
         bestPrice: actualEntry, // tracks best price seen for trailing
         trailState: 'initial', // initial → breakeven → trailing
-        tpStage: 3             // v5.2: 3-stage TP ladder (34% TP1 at 1R, 33% TP2 at 1.8R, 33% trail)
+        tpStage: 3,            // v5.2: 3-stage TP ladder (34% TP1 at 1R, 33% TP2 at 1.8R, 33% trail)
+        originalSize: size,    // v5.3: track original size for TP fill detection
+        tp1Detected: false,    // v5.3: tracks whether TP1 has filled (forces breakeven SL)
+        tp2Hit: false          // v5.3: tracks whether TP2 has filled (triggers wider trail)
       };
       this.saveActiveTrades();
       this.tradesToday++;
@@ -4660,6 +4702,34 @@ const HL = {
         continue;
       }
 
+      // v5.3: Detect TP fills by comparing live position size to original (synced w/ bot.js)
+      const liveSize = Math.abs(parseFloat(stillOpen.position?.szi || stillOpen.szi || '0'));
+
+      // v5.3: When TP1 fills (size drops below 67% of original), force SL to at least breakeven
+      if (!trade.tp1Detected && trade.originalSize && liveSize > 0 && liveSize <= trade.originalSize * 0.67) {
+        trade.tp1Detected = true;
+        const isLongTp = trade.side === 'LONG';
+        const slShouldBeAtLeastBreakeven = isLongTp
+          ? (!trade.sl || trade.sl < trade.entry)
+          : (!trade.sl || trade.sl > trade.entry);
+        if (slShouldBeAtLeastBreakeven && trade.trailState === 'initial') {
+          trade.trailState = 'breakeven';
+          console.log(`HL TRAIL ${trade.asset}: TP1 detected — forcing SL to breakeven $${fmt(trade.entry)} (v5.3 safeguard)`);
+          showToast(`TP1 → BREAKEVEN: ${trade.asset}`, `SL moved to entry $${fmt(trade.entry)}`, false);
+        }
+      }
+
+      // v5.3: Detect TP2 fill — if remaining size is ≤ 40% of original, only trail portion remains
+      if (!trade.tp2Hit && trade.originalSize && liveSize > 0 && liveSize <= trade.originalSize * 0.40) {
+        trade.tp2Hit = true;
+        console.log(`HL TRAIL ${trade.asset}: TP2 detected — live size ${liveSize.toFixed(4)} ≤ 40% of original ${trade.originalSize.toFixed(4)} (v5.3)`);
+        showToast(`TP2 HIT: ${trade.asset}`, `Trailing with widened stop`, false);
+      }
+      // Also update trade.size to live size (TP partials reduce it)
+      if (liveSize > 0 && liveSize !== trade.size) {
+        trade.size = liveSize;
+      }
+
       const s = coinState[coinId];
       if (!s || s.price <= 0) continue;
       const px = s.price;
@@ -4683,16 +4753,18 @@ const HL = {
         console.log(`HL TRAIL ${trade.asset}: moved SL to BREAKEVEN $${fmt(newSl)} (1:1 R hit)`);
         showToast(`SL → BREAKEVEN: ${trade.asset}`, `Entry: $${fmt(trade.entry)}`, false);
       } else if (trade.trailState === 'breakeven' && rMultiple >= 1.5) {
-        // v5.1: Wider trail for HIP-3 (2.5× risk) vs standard (2.0× risk) — was 1.5× for all (synced w/ bot.js)
+        // v5.3: Dynamic trail multiplier — widens after TP2 to let runners ride (synced w/ bot.js)
         trade.trailState = 'trailing';
         const coinCfg = COINS[coinId] || {};
-        const trailMult = coinCfg.isHIP3 ? 2.5 : 2.0;
+        const baseMult = coinCfg.isHIP3 ? 2.5 : 2.0;
+        const trailMult = trade.tp2Hit ? baseMult + 1.0 : baseMult;
         newSl = isLong ? trade.bestPrice - risk * trailMult : trade.bestPrice + risk * trailMult;
-        console.log(`HL TRAIL ${trade.asset}: trailing SL to $${fmt(newSl)} (${trailMult}R trail)`);
+        console.log(`HL TRAIL ${trade.asset}: trailing SL to $${fmt(newSl)} (${trailMult}R trail${trade.tp2Hit ? ', widened post-TP2' : ''}) (v5.3)`);
       } else if (trade.trailState === 'trailing') {
         // Continue trailing: only move SL forward, never back
         const coinCfg = COINS[coinId] || {};
-        const trailMult = coinCfg.isHIP3 ? 2.5 : 2.0;
+        const baseMult = coinCfg.isHIP3 ? 2.5 : 2.0;
+        const trailMult = trade.tp2Hit ? baseMult + 1.0 : baseMult;
         const trailSl = isLong ? trade.bestPrice - risk * trailMult : trade.bestPrice + risk * trailMult;
         if ((isLong && trailSl > trade.sl) || (!isLong && trailSl < trade.sl)) {
           newSl = trailSl;
