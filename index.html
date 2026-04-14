@@ -3138,8 +3138,9 @@ function renderStats(){
     .map(([k,v])=>{
       const t=v.w+v.l, r=(v.w/t*100).toFixed(0);
       const cls=+r>=60?'green':+r>=45?'yellow':'red';
-      const emoji = k==='ASIA'?'🌏':k==='LONDON'?'🇬🇧':k==='NY'?'🗽':'🌙';
-      return `<tr><td>${emoji} ${k}</td><td>${v.w}W / ${v.l}L</td><td class="${cls}">${r}%</td></tr>`;
+      const emoji = k==='ASIA'?'🌏':k==='LONDON'?'🇬🇧':k==='NY'?'🗽':k==='OTHER'?'🗽':'🌙';
+      const label = k==='OTHER' ? 'NEW YORK' : k;
+      return `<tr><td>${emoji} ${label}</td><td>${v.w}W / ${v.l}L</td><td class="${cls}">${r}%</td></tr>`;
     }).join('');
 
   // Streak dots
