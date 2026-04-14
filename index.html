@@ -480,7 +480,10 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <div class="page" id="page-stats">
   <div class="sh" style="display:flex;justify-content:space-between;align-items:center">
     <span>Performance Stats</span>
-    <span id="stats-auto-lbl" style="font-size:9px;color:#3d5068;letter-spacing:.06em">AUTO-CHECKING</span>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button onclick="rebuildFromHL()" id="rebuild-btn" style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:5px 10px;border-radius:6px;border:1px solid rgba(0,230,118,.3);background:rgba(0,230,118,.06);color:#00e676;cursor:pointer;letter-spacing:.04em">SYNC HL</button>
+      <span id="stats-auto-lbl" style="font-size:9px;color:#3d5068;letter-spacing:.06em">AUTO-CHECKING</span>
+    </div>
   </div>
   <div id="stats-content"><div class="empty">Loading stats...</div></div>
 </div>
@@ -3356,6 +3359,165 @@ function drawEquityCurve(){
       <div style="color:#5d7a99">Current DD</div>
       <div style="color:${currentDD>0?'#ff3d5a':'#00e676'};text-align:right">${currentDD>0?'-$'+currentDD.toFixed(2):'$0.00'}</div>
     </div>`;
+}
+
+// ── REBUILD EQUITY CURVE FROM HYPERLIQUID FILLS ──────────
+// Fetches ALL fills from HL API (main + HIP-3 dexes) from a configurable start date,
+// groups closing fills into round-trip trades, and replaces the closedTrades in localStorage.
+// This produces an equity curve that matches the verified daily reports.
+async function rebuildFromHL() {
+  const btn = document.getElementById('rebuild-btn');
+  if (!btn) return;
+  btn.textContent = 'SYNCING...';
+  btn.disabled = true;
+  btn.style.opacity = '0.5';
+
+  try {
+    const queryAddr = HL.wallet
+      ? (HL.masterAddress || HL.address).toLowerCase()
+      : null;
+    if (!queryAddr) {
+      showToast('Connect HL wallet first', '', true);
+      return;
+    }
+
+    // Fetch fills starting from April 1, 2026 (covers full bot history)
+    // Use a wide window to capture everything; API returns fills in time order
+    const startMs = new Date('2026-04-01T00:00:00Z').getTime();
+    const endMs = Date.now();
+    const API = HL.API || 'https://api.hyperliquid.xyz';
+
+    // Fetch from both main dex and HIP-3 dexes
+    const dexes = [null, ...(HL.HIP3_DEXES || ['xyz'])];
+    const allFills = [];
+    const seenTids = new Set(); // deduplicate fills that appear in both dex queries
+
+    for (const dex of dexes) {
+      // HL API limits to ~2000 fills per request; paginate by time
+      let curStart = startMs;
+      let page = 0;
+      while (curStart < endMs && page < 20) { // safety: max 20 pages
+        const body = { type: 'userFillsByTime', user: queryAddr, startTime: curStart, endTime: endMs };
+        if (dex) body.dex = dex;
+        const r = await fetch(API + '/info', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        if (!r.ok) break;
+        const fills = await r.json();
+        if (!Array.isArray(fills) || fills.length === 0) break;
+
+        for (const f of fills) {
+          if (!seenTids.has(f.tid)) {
+            seenTids.add(f.tid);
+            allFills.push(f);
+          }
+        }
+
+        // If we got fewer than 2000, we've fetched everything
+        if (fills.length < 2000) break;
+        // Otherwise, paginate forward from the last fill's time + 1ms
+        curStart = fills[fills.length - 1].time + 1;
+        page++;
+      }
+    }
+
+    if (allFills.length === 0) {
+      showToast('No fills found from Hyperliquid', '', true);
+      return;
+    }
+
+    // Sort all fills by time (oldest first)
+    allFills.sort((a, b) => a.time - b.time);
+    console.log(`HL Rebuild: ${allFills.length} total fills fetched`);
+
+    // Filter to closing fills only (closedPnl !== 0)
+    const closeFills = allFills.filter(f => parseFloat(f.closedPnl || '0') !== 0);
+    console.log(`HL Rebuild: ${closeFills.length} closing fills`);
+
+    if (closeFills.length === 0) {
+      showToast('No closed trades found', '', true);
+      return;
+    }
+
+    // Group closing fills into trade clusters (same coin, within 2 seconds)
+    const clusters = [];
+    for (const f of closeFills) {
+      const last = clusters.length ? clusters[clusters.length - 1] : null;
+      if (last && last.coin === f.coin && Math.abs(f.time - last.endTs) < 2000) {
+        last.fills.push(f);
+        last.endTs = f.time;
+      } else {
+        clusters.push({ coin: f.coin, fills: [f], startTs: f.time, endTs: f.time });
+      }
+    }
+
+    // Build closedTrades array from clusters
+    const newClosed = [];
+    for (const cl of clusters) {
+      let totalSize = 0, totalPnl = 0, weightedPx = 0, totalFee = 0;
+      let side = null;
+      for (const f of cl.fills) {
+        const sz = parseFloat(f.sz || '0');
+        const px = parseFloat(f.px || '0');
+        totalSize += sz;
+        weightedPx += sz * px;
+        totalPnl += parseFloat(f.closedPnl || '0');
+        totalFee += parseFloat(f.fee || '0');
+        if (!side) side = f.side === 'B' ? 'SHORT' : 'LONG';
+      }
+      const avgExitPx = totalSize > 0 ? weightedPx / totalSize : 0;
+
+      // Estimate entry from P&L
+      let entryPx = 0;
+      if (totalPnl !== 0 && totalSize > 0) {
+        if (side === 'LONG') entryPx = avgExitPx - totalPnl / totalSize;
+        else entryPx = avgExitPx + totalPnl / totalSize;
+      }
+
+      // Net PnL = closedPnl - fees
+      const netPnl = totalPnl - totalFee;
+
+      const reason = totalPnl > 0 ? 'tp_hit' : 'sl_hit';
+
+      newClosed.push({
+        coin: cl.coin, side, size: totalSize,
+        entry: entryPx, exit: avgExitPx, pnl: netPnl,
+        ts: new Date(cl.startTs).toISOString(), reason,
+        fee: totalFee, grossPnl: totalPnl
+      });
+    }
+
+    // Sort newest first (same order as the app expects)
+    newClosed.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+
+    // Replace localStorage — clear old closedTrades AND stale signal log
+    saveClosedTrades(newClosed);
+    // Clear signal log — old entries (149 simulated trades) don't match real HL fills
+    // The signal log will re-populate from new fills going forward
+    localStorage.removeItem(LOG_KEY);
+    console.log(`HL Rebuild: ${newClosed.length} round-trip trades saved, signal log cleared`);
+
+    // Calculate and show summary
+    const totalNet = newClosed.reduce((s, t) => s + t.pnl, 0);
+    const wins = newClosed.filter(t => t.pnl >= 0).length;
+    showToast(
+      `Rebuilt: ${newClosed.length} trades from HL`,
+      `Net P&L: ${totalNet >= 0 ? '+' : ''}$${totalNet.toFixed(2)} | ${wins}W/${newClosed.length - wins}L`,
+      totalNet < 0
+    );
+
+    // Refresh stats & equity curve
+    renderStats();
+
+  } catch (e) {
+    console.error('HL Rebuild error:', e);
+    showToast('Rebuild failed: ' + e.message, '', true);
+  } finally {
+    btn.textContent = 'SYNC HL';
+    btn.disabled = false;
+    btn.style.opacity = '1';
+  }
 }
 
 function setStatus(s,t){
