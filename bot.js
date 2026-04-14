@@ -71,8 +71,8 @@ if(!TG_TOKEN || !TG_CHATID){
 
 // -- COINS (BTC, HYPE, SPX + GOLD via Hyperliquid HIP-3) ---------------------
 const COINS = {
-  bitcoin:     { id:'bitcoin',     label:'BTC',    apiSym:'BTCUSDT',      asset:'BTC',        exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.007, maxNotional: 200 },  // v5.3: re-enabled (was 0), capped at $200 — regime filter + 8× notional cap provide protection
-  hyperliquid: { id:'hyperliquid', label:'HYPE',   apiSym:'HYPEUSDT',     asset:'HYPE',       exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, maxNotional: 200 },  // v5.3: re-enabled (was 0), capped at $200 — regime filter blocks low-conviction counter-trend
+  bitcoin:     { id:'bitcoin',     label:'BTC',    apiSym:'BTCUSDT',      asset:'BTC',        exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.007, maxNotional: 200, isHIP3: false },  // v5.3: re-enabled (was 0), capped at $200 — regime filter + 8× notional cap provide protection
+  hyperliquid: { id:'hyperliquid', label:'HYPE',   apiSym:'HYPEUSDT',     asset:'HYPE',       exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, maxNotional: 200, isHIP3: false },  // v5.3: re-enabled (was 0), capped at $200 — regime filter blocks low-conviction counter-trend
   sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',   asset:'xyz:SP500', exchange:'hyperliquid', minRR: 1.5, feeEst: 0.10, minStopPct: 0.005, maxNotional: 500, isHIP3: true },
   gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',    asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.5, feeEst: 0.12, minStopPct: 0.005, maxNotional: 500, isHIP3: true },  // v5.0: feeEst 0.10->0.12 (builder fees ~10bps; 0.15 was too aggressive)
 };
