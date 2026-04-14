@@ -3373,11 +3373,15 @@ async function rebuildFromHL() {
   btn.style.opacity = '0.5';
 
   try {
-    const queryAddr = HL.wallet
-      ? (HL.masterAddress || HL.address).toLowerCase()
-      : null;
+    // For fills we only need the public address — no wallet/signing required
+    const queryAddr = (
+      HL.masterAddress ||
+      HL.address ||
+      localStorage.getItem('hl_master_addr') ||
+      ''
+    ).trim().toLowerCase() || null;
     if (!queryAddr) {
-      showToast('Connect HL wallet first', '', true);
+      showToast('Set your HL address in Settings first', '', true);
       return;
     }
 
@@ -3491,12 +3495,31 @@ async function rebuildFromHL() {
     // Sort newest first (same order as the app expects)
     newClosed.sort((a, b) => new Date(b.ts) - new Date(a.ts));
 
-    // Replace localStorage — clear old closedTrades AND stale signal log
+    // Replace localStorage
     saveClosedTrades(newClosed);
-    // Clear signal log — old entries (149 simulated trades) don't match real HL fills
-    // The signal log will re-populate from new fills going forward
-    localStorage.removeItem(LOG_KEY);
-    console.log(`HL Rebuild: ${newClosed.length} round-trip trades saved, signal log cleared`);
+
+    // Rebuild signal log from closed trades so calcStats() works
+    // (the STATS tab reads from signal log for win/loss tables + from closedTrades for equity curve)
+    const symToId = SYM_TO_COIN_ID;
+    const newLog = newClosed.map(t => {
+      const coinId = symToId[t.coin] || t.coin;
+      const h = new Date(t.ts).getUTCHours();
+      return {
+        ts: t.ts,
+        coin: coinId,
+        sig: t.side,
+        status: t.pnl >= 0 ? 'hit' : 'stopped',
+        type: 'BLIND_ENTRY', // best guess — fills don't carry signal type
+        tf: '4H',            // best guess — fills don't carry timeframe
+        rr: null,
+        exitPrice: t.exit,
+        pnl: t.pnl,
+        exitNote: `HL fill: ${t.pnl >= 0 ? 'TP' : 'SL'} at $${t.exit.toFixed(2)} | P&L: ${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)}`
+      };
+    });
+    // Signal log expects newest first
+    saveLog(newLog);
+    console.log(`HL Rebuild: ${newClosed.length} trades saved, signal log rebuilt with ${newLog.length} entries`);
 
     // Calculate and show summary
     const totalNet = newClosed.reduce((s, t) => s + t.pnl, 0);
@@ -3507,8 +3530,9 @@ async function rebuildFromHL() {
       totalNet < 0
     );
 
-    // Refresh stats & equity curve
+    // Refresh stats, equity curve, and log tab
     renderStats();
+    if (typeof renderLog === 'function') renderLog();
 
   } catch (e) {
     console.error('HL Rebuild error:', e);
