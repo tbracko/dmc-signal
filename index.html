@@ -603,6 +603,25 @@ const COINS = {
   sp500:       { id:'sp500',       label:'S&P500',   sym:'OANDA:SPX500USD', shortLabel:'SPX',  apiSym:'xyz:SP500', exchange:'hyperliquid', minRR: 1.5, feeEst: 0.10, minStopPct: 0.005, maxNotional: 500, isHIP3: true },  // v5.0: 0.05->0.10 (HIP-3 taker fees)
   gold:        { id:'gold',        label:'GOLD/USD', sym:'OANDA:XAUUSD',    shortLabel:'GOLD', apiSym:'xyz:GOLD', exchange:'hyperliquid', minRR: 1.5, feeEst: 0.12, minStopPct: 0.005, maxNotional: 500, isHIP3: true },  // v5.0: 0.05->0.12 for builder fees
 };
+
+// v5.4: SP500 session-scaled maxNotional helper (synced w/ bot.js).
+// Returns { cap, tier }. cap=0 means "do not open this LONG".
+// Shorts fall through to the coin default cap regardless of session.
+function sp500EffectiveCap(sig, conf, results) {
+  const defaultCap = (COINS.sp500 && COINS.sp500.maxNotional) || 500;
+  if (sig !== 'LONG') return { cap: defaultCap, tier: 'SHORT/default' };
+  const utcHour = new Date().getUTCHours();
+  const inUSSession = utcHour >= 13 && utcHour < 21;
+  const wk = results && results['1W'] && results['1W'].sig;
+  const dy = results && results['1D'] && results['1D'].sig;
+  const regimeUp = wk === 'LONG' && dy === 'LONG';
+  const strongUp = regimeUp && (typeof conf === 'number' && conf >= 70);
+  if (strongUp && inUSSession)   return { cap: 750, tier: 'STRONG UP + US' };
+  if (regimeUp && inUSSession)   return { cap: 500, tier: 'UP + US' };
+  if (regimeUp && !inUSSession)  return { cap: 200, tier: 'UP + non-US' };
+  return { cap: 0, tier: `regime-not-UP (1W=${wk||'n/a'}, 1D=${dy||'n/a'}, US=${inUSSession})` };
+}
+
 const HL_INFO = 'https://api.hyperliquid.xyz/info';
 const HL_INTERVALS = { '1W':'1w', '1D':'1d', '4H':'4h', '1H':'1h', '15m':'15m' };
 let activeCoin = 'bitcoin'; // currently viewed coin
@@ -3608,9 +3627,21 @@ function processTF(i, candles, dCandles, coinId, lowerCandles){
         } else if(storyConflicts && htfDir === 'UNCLEAR'){
           // Scenario A: HTF unclear but story says opposite — block
           console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: story ${storyDir} conflicts, HTF unclear — counter-structure`);
-        // v5.1: SP500 US-session-only filter (synced w/ bot.js)
-        } else if(coinId === 'sp500' && d.sig === 'LONG' && !(new Date().getUTCHours() >= 13 && new Date().getUTCHours() < 21)){
-          console.log(`HL auto-trade BLOCKED ${sym} LONG: outside US session (${new Date().getUTCHours()}:00 UTC)`);
+        // v5.4: SP500 session-scaled sizing (synced w/ bot.js).
+        // Replaces the flat outside-US-session block with a tiered cap: STRONG UP+US $750,
+        // UP+US $500, UP+non-US $200, otherwise block. Stashes the chosen cap on coinState
+        // so executeTrade picks it up via the v5.4 override.
+        } else if(coinId === 'sp500' && d.sig === 'LONG' && (() => {
+          const { cap, tier } = sp500EffectiveCap('LONG', conf, s.results);
+          if (cap <= 0) {
+            console.log(`HL auto-trade BLOCKED ${sym} LONG: ${tier} -- v5.4 session-scaled sizing`);
+            return true; // block
+          }
+          coinState[coinId].effectiveMaxNotional = cap;
+          console.log(`HL: ${sym} LONG sizing tier '${tier}' -> maxNotional=$${cap} (conf ${conf}%) [v5.4]`);
+          return false; // allow
+        })()){
+          // blocked by v5.4 session-scaled sizing (cap = 0)
         // v5.1: GOLD session filter (synced w/ bot.js)
         } else if(coinId === 'gold' && d.sig === 'LONG' && !(new Date().getUTCHours() >= 13 && new Date().getUTCHours() < 20)){
           console.log(`HL auto-trade BLOCKED ${sym} LONG: outside gold session (${new Date().getUTCHours()}:00 UTC)`);
@@ -4593,6 +4624,21 @@ const HL = {
     const asset = SYM[coinId];
     if (!asset || !this.enabled || !this.wallet) return null;
 
+    // v5.4: Pick up session-scaled cap set by the caller (SP500 long tiering). Falls back to
+    // the static COINS[coinId].maxNotional. One-shot: cleared after read so it can't leak.
+    const _coinCfgForCap = COINS[coinId] || {};
+    let effectiveMaxNotional = _coinCfgForCap.maxNotional || 0;
+    const _scaledCap = coinState[coinId] && coinState[coinId].effectiveMaxNotional;
+    if (typeof _scaledCap === 'number' && _scaledCap > 0) {
+      effectiveMaxNotional = _scaledCap;
+      if (_scaledCap !== (_coinCfgForCap.maxNotional || 0)) {
+        console.log(`HL: ${asset} session-scaled cap $${_scaledCap} (default $${_coinCfgForCap.maxNotional || 0}) [v5.4]`);
+      }
+    }
+    if (coinState[coinId] && 'effectiveMaxNotional' in coinState[coinId]) {
+      delete coinState[coinId].effectiveMaxNotional;
+    }
+
     // Daily trade limit
     const today = new Date().toDateString();
     if (today !== this.lastTradeDay) { this.tradesToday = 0; this.lastTradeDay = today; }
@@ -4642,8 +4688,8 @@ const HL = {
         const px = coinState[cId]?.price || t.entry || 0;
         totalOpenNotional += Math.abs(t.size * px);
       }
-      const coinCfgEst = COINS[coinId] || {};
-      const estimatedNewNotional = coinCfgEst.maxNotional > 0 ? coinCfgEst.maxNotional : eqForCap * 2;
+      // v5.4: use session-scaled effectiveMaxNotional (set above) instead of the static coin cap
+      const estimatedNewNotional = effectiveMaxNotional > 0 ? effectiveMaxNotional : eqForCap * 2;
       if (totalOpenNotional + estimatedNewNotional > maxTotalNotional) {
         console.warn(`HL EXPOSURE CAP: ${coinId} blocked — open $${totalOpenNotional.toFixed(0)} + est. $${estimatedNewNotional.toFixed(0)} > max $${maxTotalNotional.toFixed(0)} (8× equity) (v5.3)`);
         showToast(`EXPOSURE CAP: ${coinId}`, `Open $${totalOpenNotional.toFixed(0)} > $${maxTotalNotional.toFixed(0)}`, true);
@@ -4669,7 +4715,8 @@ const HL = {
     if (size < minSize) { console.warn('HL: size too small:', size); return null; }
 
     // v5.1: maxNotional cap for HIP-3 assets (synced w/ bot.js)
-    const maxNotional = coinCfg.maxNotional || 0;
+    // v5.4: uses session-scaled effectiveMaxNotional for SP500 long tiering
+    const maxNotional = effectiveMaxNotional;
     if (maxNotional > 0) {
       const notional = size * currentPrice;
       if (notional > maxNotional) {
