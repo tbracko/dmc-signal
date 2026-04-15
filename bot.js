@@ -1,4 +1,4 @@
-// DMS Signal Bot v5.3 -- AUTO-TRADE edition
+// DMS Signal Bot v5.4 -- AUTO-TRADE edition
 // Mirrors the DMS algorithm from index.html exactly -- same levels, same scoring, same signals
 // Now also executes trades on Hyperliquid with TP/SL/trailing stops
 // Node 18+ required (uses built-in fetch)
@@ -31,6 +31,19 @@
 //   - TP1 breakeven safeguard: when TP1 fills (position drops to <67% of original), SL is
 //     immediately moved to breakeven. Prevents the Apr 12 HYPE scenario where TP1 earned +$1.03
 //     but the trailing half lost -$2.30 because SL was still below entry.
+//
+// v5.4 changelog (2026-04-15):
+//   - SP500 session-scaled maxNotional for LONG entries (reinforcing Apr 14 winning tactic).
+//     Replaces the flat $500 cap + hard out-of-session block with a tiered scheme:
+//       . STRONG UP (1W+1D both LONG AND conf >= 70%) + US session (13-21 UTC): $750
+//       . UP (1W+1D both LONG) + US session:                                    $500 (= previous)
+//       . UP + non-US session:                                                  $200 (NEW — was blocked)
+//       . Anything else + LONG:                                                 blocked
+//     Shorts unchanged (allowed any session, default $500 cap). GOLD and other assets unchanged.
+//     Rationale: Apr 14 report showed manual SP500 longs ($706 notional) captured edge the bot
+//     was missing (+$4.55 realized). Tiered cap lets the bot replicate that size in genuinely
+//     strong regimes while preserving safety otherwise. Implementation: sp500EffectiveCap() helper
+//     sets coinState[coinId].effectiveMaxNotional, which executeTrade reads in place of coin.maxNotional.
 
 const fs    = require('fs');
 const path  = require('path');
@@ -1639,6 +1652,21 @@ const HL = {
     const asset = coin?.asset;
     if (!asset || !this.enabled || !this.wallet) return null;
 
+    // v5.4: Pick up session-scaled cap set by the caller (e.g. sp500EffectiveCap in maybeAutoTrade).
+    // Falls back to the static coin.maxNotional. The override is one-shot — cleared after read so
+    // it cannot leak into a subsequent trade on the same coin.
+    let effectiveMaxNotional = coin.maxNotional || 0;
+    const _scaledCap = coinState[coinId] && coinState[coinId].effectiveMaxNotional;
+    if (typeof _scaledCap === 'number' && _scaledCap > 0) {
+      effectiveMaxNotional = _scaledCap;
+      if (_scaledCap !== (coin.maxNotional || 0)) {
+        console.log(`HL: ${asset} session-scaled cap $${_scaledCap} (default $${coin.maxNotional || 0}) [v5.4]`);
+      }
+    }
+    if (coinState[coinId] && 'effectiveMaxNotional' in coinState[coinId]) {
+      delete coinState[coinId].effectiveMaxNotional;
+    }
+
     // Daily trade limit
     const today = new Date().toDateString();
     if (today !== this.lastTradeDay) { this.tradesToday = 0; this.lastTradeDay = today; }
@@ -1690,7 +1718,8 @@ const HL = {
         totalOpenNotional += Math.abs(t.size * px);
       }
       // Estimate new trade notional from risk sizing (rough upper bound: maxNotional or equity * riskPct / minStopPct)
-      const estimatedNewNotional = coin.maxNotional > 0 ? coin.maxNotional : (this.cachedEquity || 100) * 2;
+      // v5.4: use effectiveMaxNotional (session-scaled for SP500 longs) instead of the static coin cap.
+      const estimatedNewNotional = effectiveMaxNotional > 0 ? effectiveMaxNotional : (this.cachedEquity || 100) * 2;
       if (totalOpenNotional + estimatedNewNotional > maxTotalNotional) {
         console.warn(`HL EXPOSURE CAP: ${coinId} blocked — open notional $${totalOpenNotional.toFixed(0)} + est. $${estimatedNewNotional.toFixed(0)} > max $${maxTotalNotional.toFixed(0)} (8× equity) (v5.3)`);
         await sendTelegram(`🛡 <b>EXPOSURE CAP: ${coin.label}</b>\nOpen notional: $${totalOpenNotional.toFixed(0)}\nMax allowed: $${maxTotalNotional.toFixed(0)} (8× equity)\nTrade skipped.`);
@@ -1754,7 +1783,8 @@ const HL = {
 
     // v5.0: Cap max notional for HIP-3 assets (#4)
     // v5.0.1: Added verbose logging + hard enforcement to catch bypass bugs
-    const maxNotional = coin.maxNotional || 0;
+    // v5.4: maxNotional = session-scaled effectiveMaxNotional (set above) to support SP500 long tiers.
+    const maxNotional = effectiveMaxNotional;
     console.log(`HL: ${asset} sizing: raw size=${size.toFixed(szDec)} notional=$${(size*currentPrice).toFixed(0)} maxNotional=${maxNotional} coinId=${coinId}`);
     if (maxNotional > 0) {
       const notional = size * currentPrice;
@@ -2260,6 +2290,29 @@ async function maybeAlert(sig, tf, type, level, target, rr, stopPrice, coinId, p
 }
 
 // -- AUTO-TRADE DECISION LOGIC (mirrors app's handleCandle auto-trade block) --
+// v5.4: SP500 session-scaled maxNotional helper.
+// Returns { cap, tier } where cap=0 means "do not trade this LONG".
+// Shorts return the coin default cap regardless of session (existing behavior preserved).
+// Tiers (LONG only):
+//   STRONG UP (1W+1D LONG AND conf >= 70%) + US session (13-21 UTC)  -> $750
+//   UP (1W+1D LONG)                        + US session              -> $500 (= previous flat cap)
+//   UP                                     + non-US session          -> $200 (NEW — was hard-blocked)
+//   anything else + LONG                                             -> 0  (block)
+function sp500EffectiveCap(sig, conf, allResults) {
+  const defaultCap = (COINS.sp500 && COINS.sp500.maxNotional) || 500;
+  if (sig !== 'LONG') return { cap: defaultCap, tier: 'SHORT/default' };
+  const utcHour = new Date().getUTCHours();
+  const inUSSession = utcHour >= 13 && utcHour < 21;
+  const wk = allResults && allResults['1W'] && allResults['1W'].sig;
+  const dy = allResults && allResults['1D'] && allResults['1D'].sig;
+  const regimeUp = wk === 'LONG' && dy === 'LONG';
+  const strongUp = regimeUp && (typeof conf === 'number' && conf >= 70);
+  if (strongUp && inUSSession)   return { cap: 750, tier: 'STRONG UP + US' };
+  if (regimeUp && inUSSession)   return { cap: 500, tier: 'UP + US' };
+  if (regimeUp && !inUSSession)  return { cap: 200, tier: 'UP + non-US' };
+  return { cap: 0, tier: `regime-not-UP (1W=${wk||'n/a'}, 1D=${dy||'n/a'}, US=${inUSSession})` };
+}
+
 async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
   if (!HL.enabled || !HL.wallet) return;
   const d = dmsResult;
@@ -2301,18 +2354,28 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
     return;
   }
 
-  // v5.0.1: SP500 US-session-only filter
-  // SP500 entries outside US market hours (13:00-21:00 UTC / 9am-5pm ET) consistently lose
-  // Shorts are allowed overnight since downside moves tend to be sharper
+  // v5.4: SP500 session-scaled sizing (replaces the v5.0.1 hard out-of-session block).
+  // Implements the Apr 14 winning-tactic recommendation. Shorts unchanged: always allowed,
+  // default $500 cap. Longs use sp500EffectiveCap() to pick a tier or block; the chosen cap
+  // is stashed on coinState so executeTrade picks it up via the v5.4 override path.
   if (coinId === 'sp500') {
     const utcHour = new Date().getUTCHours();
     const inUSSession = utcHour >= 13 && utcHour < 21;
-    if (!inUSSession && d.sig === 'LONG') {
-      console.log(`HL auto-trade BLOCKED ${sym} LONG: outside US session (${utcHour}:00 UTC, allowed 13:00-21:00) -- session filter`);
-      return;
-    }
-    if (!inUSSession) {
-      console.log(`HL: ${sym} SHORT allowed outside US session (${utcHour}:00 UTC) -- shorts exempt from session filter`);
+    if (d.sig === 'LONG') {
+      const { cap, tier } = sp500EffectiveCap('LONG', conf, allResults);
+      if (cap <= 0) {
+        console.log(`HL auto-trade BLOCKED ${sym} LONG: ${tier} -- v5.4 session-scaled sizing`);
+        return;
+      }
+      if (!coinState[coinId]) coinState[coinId] = {};
+      coinState[coinId].effectiveMaxNotional = cap;
+      console.log(`HL: ${sym} LONG sizing tier '${tier}' -> maxNotional=$${cap} (conf ${conf}%) [v5.4]`);
+    } else {
+      // SHORT: clear any stale override; behavior unchanged from v5.0.1 (shorts allowed any session)
+      if (coinState[coinId]) delete coinState[coinId].effectiveMaxNotional;
+      if (!inUSSession) {
+        console.log(`HL: ${sym} SHORT allowed outside US session (${utcHour}:00 UTC) -- shorts exempt from session filter`);
+      }
     }
   }
 
@@ -2599,13 +2662,18 @@ async function scanCoin(coinId){
         // Auto-trade with high conviction override (skip if already in position)
         // v5.0.1 FIX: Apply session filter + ranging detector here too (was bypassing maybeAutoTrade)
         if(HL.enabled && HL.wallet && bestStop && !HL.activeTrades[coinId]){
-          // Session filter for SP500 — block longs outside US hours
+          // v5.4: SP500 session-scaled sizing (replaces outside-US hard block in MULTI-TF path too).
+          // MULTI-TF confluence passes confidence=80 to executeTrade, so STRONG UP tier applies
+          // whenever regime is UP (2+ TFs agreeing already implies high conviction).
           if (coinId === 'sp500' && sig === 'LONG') {
-            const utcHr = new Date().getUTCHours();
-            if (utcHr < 13 || utcHr >= 21) {
-              console.log(`HL MULTI-TF BLOCKED ${COINS[coinId].label} LONG: outside US session (${utcHr}:00 UTC) -- session filter`);
+            const { cap, tier } = sp500EffectiveCap('LONG', 80, allResults);
+            if (cap <= 0) {
+              console.log(`HL MULTI-TF BLOCKED ${COINS[coinId].label} LONG: ${tier} -- v5.4 session-scaled sizing`);
               break;
             }
+            if (!coinState[coinId]) coinState[coinId] = {};
+            coinState[coinId].effectiveMaxNotional = cap;
+            console.log(`HL MULTI-TF: ${COINS[coinId].label} LONG sizing tier '${tier}' -> maxNotional=$${cap} [v5.4]`);
           }
           // v5.1: Session filter for GOLD — block longs outside London PM + NY overlap
           if (coinId === 'gold' && sig === 'LONG') {
