@@ -44,6 +44,26 @@
 //     was missing (+$4.55 realized). Tiered cap lets the bot replicate that size in genuinely
 //     strong regimes while preserving safety otherwise. Implementation: sp500EffectiveCap() helper
 //     sets coinState[coinId].effectiveMaxNotional, which executeTrade reads in place of coin.maxNotional.
+//
+// v5.5 changelog (2026-04-16):
+//   - Inherited-manual-position policy (INHERIT_MANUAL_POSITIONS env var).
+//     When syncPositions discovers a *new* position whose entry-notional exceeds the asset's
+//     maxNotional by > 1.05×, it is almost certainly a manual trade by Tomaž. Three modes:
+//       . 'ignore' (DEFAULT, safest): do NOT add to activeTrades. Bot will not place SL/TP or
+//         trail on the position. Tomaž manages it manually. A Telegram alert fires once per
+//         detection so the oversized position is visible.
+//       . 'trim': bot places a reduce-only market order to bring the position down to
+//         maxNotional size, THEN adds the trimmed position to activeTrades for normal
+//         management. Alert fires with the trim details. Use only after a period of stable
+//         'ignore' behavior.
+//       . 'manage': previous behavior — adopt the oversized position at full size. Not
+//         recommended; this is what caused -$3.19 on Apr 15 (bot's SL fired on a 2× position).
+//     Detection is notional-based: |szi|*entryPx > coin.maxNotional * 1.05. To avoid repeated
+//     alerts on the same position, a `manualInheritedSeen` set tracks positions we've already
+//     classified this session.
+//   - Bot/Manual P&L split: closed trades now carry a `source` field (`bot` | `manual` | `unknown`)
+//     inferred at close time from the *opening* fill's notional. Daily report generator
+//     (tools/daily-report.js) reads this and produces the split.
 
 const fs    = require('fs');
 const path  = require('path');
@@ -76,6 +96,13 @@ const RISK_PCT        = parseFloat(process.env.RISK_PCT || '1');      // % of ac
 const MIN_CONFIDENCE  = parseInt(process.env.MIN_CONFIDENCE || '50'); // base min confidence %
 const MAX_TRADES_DAY  = parseInt(process.env.MAX_TRADES_DAY || '10');
 const TRAIL_INTERVAL  = parseInt(process.env.TRAIL_INTERVAL || '30000'); // check trailing every 30s
+
+// v5.5: Inherited-manual-position policy — 'ignore' (default) / 'trim' / 'manage'
+const INHERIT_MANUAL_POSITIONS = (process.env.INHERIT_MANUAL_POSITIONS || 'ignore').toLowerCase();
+const MANUAL_NOTIONAL_MULT     = parseFloat(process.env.MANUAL_NOTIONAL_MULT || '1.05'); // tag as manual if notional > cap × this
+if (!['ignore','trim','manage'].includes(INHERIT_MANUAL_POSITIONS)) {
+  console.warn(`WARN: invalid INHERIT_MANUAL_POSITIONS=${INHERIT_MANUAL_POSITIONS}, defaulting to 'ignore'`);
+}
 
 if(!TG_TOKEN || !TG_CHATID){
   console.error('ERROR: TG_TOKEN and TG_CHATID must be set.');
@@ -1268,6 +1295,7 @@ const HL = {
       this.loadActiveTrades();
       console.log('HL loaded persisted trades:', Object.keys(this.activeTrades).length, '->', JSON.stringify(this.activeTrades));
       await this.syncPositions();
+      await this.processPendingTrims();   // v5.5: trim any oversized manual positions found at startup
       await this.syncEquity();
       console.log('HL ready:', this.address, '| Master:', this.masterAddress || 'not set', '| Auto:', this.enabled, '| Equity: $' + this.cachedEquity.toFixed(2), '| Assets:', Object.keys(this.assetMap).join(', '));
       return true;
@@ -1414,6 +1442,7 @@ const HL = {
       const oldTrades = { ...this.activeTrades };
       const nowOpen = new Set();
       this.activeTrades = {};
+      if (!this.manualInheritedSeen) this.manualInheritedSeen = {};
       for (const p of positions) {
         const pos = p.position;
         if (!pos || parseFloat(pos.szi) === 0) continue;
@@ -1424,7 +1453,65 @@ const HL = {
         const entry = parseFloat(pos.entryPx || '0');
         const trig = trigMap[pos.coin] || {};
         const prev = oldTrades[coinId];
-        if (prev && prev.side === (szi > 0 ? 'LONG' : 'SHORT') && prev.trailState) {
+
+        // v5.5: Inherited-manual-position detection.
+        // When a position appears that we weren't already tracking (no prev trailState for this
+        // side), classify as bot vs manual by comparing entry notional to the asset's maxNotional.
+        // If manual (notional > cap × MANUAL_NOTIONAL_MULT), apply INHERIT_MANUAL_POSITIONS policy.
+        const coinCfg = COINS[coinId];
+        const notional = Math.abs(szi) * entry;
+        const capBase = (coinCfg && coinCfg.maxNotional) || 0;
+        const isSameAsPrev = prev && prev.side === (szi > 0 ? 'LONG' : 'SHORT') && prev.trailState;
+        const isNewPosition = !isSameAsPrev;
+        const isManualInherited = isNewPosition && capBase > 0 && notional > capBase * MANUAL_NOTIONAL_MULT;
+        const seenKey = `${coinId}:${szi.toFixed(8)}:${entry.toFixed(4)}`;
+        const alreadyAlerted = !!this.manualInheritedSeen[seenKey];
+
+        if (isManualInherited) {
+          const side = szi > 0 ? 'LONG' : 'SHORT';
+          const ratio = (notional / capBase).toFixed(2);
+          if (INHERIT_MANUAL_POSITIONS === 'ignore') {
+            // Do NOT add to activeTrades; bot will not manage SL/TP/trail on this position.
+            if (!alreadyAlerted) {
+              console.log(`HL INHERIT IGNORE: ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — NOT managed by bot (manual trade)`);
+              sendTelegram(`⚠️ <b>MANUAL POSITION DETECTED: ${pos.coin} ${side}</b>\nSize: ${Math.abs(szi)}\nEntry: $${fmt(entry)}\nNotional: $${notional.toFixed(0)} (${ratio}× cap $${capBase})\nBot will NOT manage SL/TP on this position. Manage manually.`).catch(()=>{});
+              this.manualInheritedSeen[seenKey] = Date.now();
+            }
+            continue; // skip — don't add to activeTrades
+          } else if (INHERIT_MANUAL_POSITIONS === 'trim') {
+            // Queue a trim to get notional back under cap, then track the trimmed remainder.
+            if (!alreadyAlerted) {
+              console.log(`HL INHERIT TRIM: ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — scheduling reduce-only trim to $${capBase}`);
+              sendTelegram(`✂️ <b>TRIMMING MANUAL POSITION: ${pos.coin} ${side}</b>\nCurrent notional: $${notional.toFixed(0)} (${ratio}× cap)\nTarget: $${capBase}\nPlacing reduce-only order.`).catch(()=>{});
+              this.manualInheritedSeen[seenKey] = Date.now();
+              // Queue the trim — run async so we don't block sync
+              if (!this._pendingTrims) this._pendingTrims = [];
+              this._pendingTrims.push({ coinId, side, currentSize: Math.abs(szi), currentEntry: entry, targetNotional: capBase });
+            }
+            // Still track normally at full size for now; trim will reduce on next cycle
+            this.activeTrades[coinId] = {
+              asset: pos.coin,
+              side,
+              size: Math.abs(szi),
+              entry: entry,
+              sl: trig.sl || null,
+              tp: trig.tp || null,
+              initialSl: trig.sl || 0,
+              bestPrice: entry,
+              trailState: 'initial',
+              source: 'manual-trimming'
+            };
+            continue;
+          }
+          // 'manage' falls through to default behavior below (not recommended)
+          if (!alreadyAlerted) {
+            console.log(`HL INHERIT MANAGE: ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — managing at full size (not recommended)`);
+            sendTelegram(`⚠️ <b>MANAGING OVERSIZED POSITION: ${pos.coin} ${side}</b>\nNotional $${notional.toFixed(0)} (${ratio}× cap)\nBot will apply its default SL/TP. Consider setting INHERIT_MANUAL_POSITIONS=ignore.`).catch(()=>{});
+            this.manualInheritedSeen[seenKey] = Date.now();
+          }
+        }
+
+        if (isSameAsPrev) {
           this.activeTrades[coinId] = {
             ...prev,
             size: Math.abs(szi),
@@ -1442,7 +1529,8 @@ const HL = {
             tp: trig.tp || null,
             initialSl: trig.sl || 0,
             bestPrice: entry,
-            trailState: 'initial'
+            trailState: 'initial',
+            source: isManualInherited ? 'manual-managed' : 'bot'
           };
         }
       }
@@ -2141,6 +2229,56 @@ const HL = {
     } catch (e) {
       console.error('HL close error:', e.message);
       return null;
+    }
+  },
+
+  // v5.5: Process any pending trim orders queued by syncPositions when an oversized
+  // manual position was detected with INHERIT_MANUAL_POSITIONS='trim'. This places a
+  // reduce-only IOC market order to bring notional back under the asset's maxNotional.
+  async processPendingTrims() {
+    if (!this._pendingTrims || this._pendingTrims.length === 0) return;
+    const queue = this._pendingTrims;
+    this._pendingTrims = [];
+    for (const t of queue) {
+      try {
+        const coin = COINS[t.coinId];
+        if (!coin) continue;
+        const asset = coin.asset;
+        const szDec = this.szDecimals[asset] ?? 4;
+        const targetSize = t.targetNotional / t.currentEntry;
+        const excessSize = t.currentSize - targetSize;
+        if (excessSize <= 0) {
+          console.log(`HL TRIM SKIP: ${asset} already at or under cap`);
+          continue;
+        }
+        // Round down to szDecimals so we don't overshoot the trim
+        const sizeStep = Math.pow(10, -szDec);
+        const trimSize = Math.floor(excessSize / sizeStep) * sizeStep;
+        if (trimSize < sizeStep) {
+          console.log(`HL TRIM SKIP: ${asset} excess ${excessSize} below minimum size step ${sizeStep}`);
+          continue;
+        }
+        const px = coinState[t.coinId]?.price || t.currentEntry;
+        const isLong = t.side === 'LONG';
+        const slip = px * 0.005;
+        const trimPx = isLong ? px - slip : px + slip;
+        // reduce-only IOC opposite side of position
+        const isBuy = !isLong;
+        console.log(`HL TRIM EXEC: ${asset} ${t.side} — closing ${trimSize.toFixed(szDec)} of ${t.currentSize} at ~$${fmt(trimPx)} (reduce-only IOC)`);
+        const result = await this.placeOrder(asset, isBuy, trimSize, trimPx, { limit: { tif: 'Ioc' } }, true);
+        if (result && result.status !== 'err' && (result.filled || result.totalSz)) {
+          const avgPx = result.avgPx ? +result.avgPx : trimPx;
+          const newSize = t.currentSize - trimSize;
+          const newNotional = newSize * t.currentEntry;
+          console.log(`HL TRIM FILLED: ${asset} trimmed ${trimSize.toFixed(szDec)} at $${fmt(avgPx)} — remaining size ${newSize.toFixed(szDec)} notional $${newNotional.toFixed(0)}`);
+          await sendTelegram(`✅ <b>TRIM FILLED: ${asset} ${t.side}</b>\nTrimmed: ${trimSize.toFixed(szDec)} @ $${fmt(avgPx)}\nRemaining: ${newSize.toFixed(szDec)} (~$${newNotional.toFixed(0)})\nBot now managing at cap size.`);
+        } else {
+          console.warn(`HL TRIM FAIL: ${asset} order result:`, JSON.stringify(result));
+          await sendTelegram(`❌ <b>TRIM FAILED: ${asset} ${t.side}</b>\nReduce-only order rejected.\nPosition still oversized — manage manually or set INHERIT_MANUAL_POSITIONS=ignore.`);
+        }
+      } catch (e) {
+        console.error('HL processPendingTrims error:', e.message);
+      }
     }
   }
 };
@@ -2859,6 +2997,7 @@ async function main(){
     setInterval(async () => {
       try {
         await HL.syncPositions();
+        await HL.processPendingTrims();   // v5.5: execute any queued manual-position trims
         await HL.syncEquity();
         await syncFillHistory();
       } catch (e) { console.warn('Periodic sync error:', e.message); }
