@@ -1341,6 +1341,10 @@ const HL = {
     ]);
     const perpsData = await perpsRes.json();
     const spotData = await spotRes.json();
+    // v5.5 fix: true equity = spot USDC balance (HIP-3 quirk: perps accountValue includes
+    // unrealized P&L which inflates equity during winning streaks, leading to oversized entries).
+    // Spot clearinghouse USDC is the actual settled cash balance.
+    // Fallback: if spot has no USDC (e.g. all deployed to perps margin), use perps accountValue.
     const ms = perpsData.marginSummary || {};
     const perpsVal = parseFloat(ms.accountValue || '0');
     const cms = perpsData.crossMarginSummary || {};
@@ -1351,7 +1355,9 @@ const HL = {
         if (b.coin === 'USDC' || b.coin === 'USDT') spotVal += parseFloat(b.total || '0');
       }
     }
-    return Math.max(perpsVal, crossVal, spotVal);
+    // Primary: spot USDC (settled cash). Fallback: perps accountValue if spot is empty.
+    if (spotVal > 0) return spotVal;
+    return Math.max(perpsVal, crossVal);
   },
 
   async syncEquity() {
@@ -1555,7 +1561,8 @@ const HL = {
         const closed = loadClosedTrades();
         closed.unshift({
           coin: old.asset, side: old.side, size: old.size,
-          entry: old.entry, exit: exitPx, pnl, ts: new Date().toISOString(), reason
+          entry: old.entry, exit: exitPx, pnl, ts: new Date().toISOString(), reason,
+          source: old.source || 'bot'  // v5.5 fix: propagate source for bot/manual P&L split
         });
         saveClosedTrades(closed);
 
@@ -2201,7 +2208,8 @@ const HL = {
         closed.unshift({
           coin: trade.asset, side: trade.side, size: trade.size,
           entry: trade.entry, exit: exitPrice, pnl,
-          ts: new Date().toISOString(), reason: 'opposite_signal'
+          ts: new Date().toISOString(), reason: 'opposite_signal',
+          source: trade.source || 'bot'  // v5.5 fix: propagate source for bot/manual P&L split
         });
         saveClosedTrades(closed);
         delete this.activeTrades[coinId];
@@ -2371,12 +2379,28 @@ async function syncFillHistory() {
         entryPx = tradeSide === 'LONG' ? avgPx - pnl / totalSz : avgPx + pnl / totalSz;
       }
 
+      // v5.5 fix: detect manual trades on synced fills using notional vs cap * 1.05
+      let fillSource = 'unknown';
+      if (coinId && HL.activeTrades[coinId] && HL.activeTrades[coinId].source) {
+        fillSource = HL.activeTrades[coinId].source;  // inherit from active trade if still tracked
+      } else if (coinId) {
+        const coinCfg = COINS[coinId];
+        const entryNotional = totalSz * Math.abs(entryPx);
+        const capBase = (coinCfg && coinCfg.maxNotional) || 0;
+        if (capBase > 0 && entryNotional > capBase * MANUAL_NOTIONAL_MULT) {
+          fillSource = 'manual';
+        } else {
+          fillSource = 'bot';
+        }
+      }
+
       closed.unshift({
         coin: cl.coin, side: tradeSide, size: totalSz,
         entry: parseFloat(entryPx.toFixed(2)), exit: parseFloat(avgPx.toFixed(2)),
         pnl: parseFloat(pnl.toFixed(4)),
         ts: new Date(cl.startTs).toISOString(),
-        reason: 'synced_from_hl'
+        reason: 'synced_from_hl',
+        source: fillSource  // v5.5 fix: tag bot/manual for P&L split
       });
       existingTs.add(tsKey);
       added++;
