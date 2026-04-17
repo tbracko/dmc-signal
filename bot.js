@@ -112,8 +112,8 @@ if(!TG_TOKEN || !TG_CHATID){
 // -- COINS (BTC, HYPE, SPX + GOLD via Hyperliquid HIP-3) ---------------------
 const COINS = {
   bitcoin:     { id:'bitcoin',     label:'BTC',    apiSym:'BTCUSDT',      asset:'BTC',        exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.007, maxNotional: 200, isHIP3: false },  // v5.3: re-enabled (was 0), capped at $200 — regime filter + 8× notional cap provide protection
-  hyperliquid: { id:'hyperliquid', label:'HYPE',   apiSym:'HYPEUSDT',     asset:'HYPE',       exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, maxNotional: 200, isHIP3: false },  // v5.3: re-enabled (was 0), capped at $200 — regime filter blocks low-conviction counter-trend
-  sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',   asset:'xyz:SP500', exchange:'hyperliquid', minRR: 1.5, feeEst: 0.10, minStopPct: 0.005, maxNotional: 500, isHIP3: true },
+  hyperliquid: { id:'hyperliquid', label:'HYPE',   apiSym:'HYPEUSDT',     asset:'HYPE',       exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, maxNotional: 100, isHIP3: false },  // v5.5: halved $200→$100 after 3 consecutive SL hits (Apr 13/14/16 = -$12.08). Raise back to $200 after 3 consecutive wins at $100.
+  sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',   asset:'xyz:SP500', exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, maxNotional: 500, isHIP3: true },  // v5.5: minRR 1.5→1.2 — SP500 tail-carry wins on direction not R:R; 1.5 was filtering valid signals and forcing all entries to be manual
   gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',    asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.5, feeEst: 0.12, minStopPct: 0.005, maxNotional: 500, isHIP3: true },  // v5.0: feeEst 0.10->0.12 (builder fees ~10bps; 0.15 was too aggressive)
 };
 
@@ -2444,10 +2444,17 @@ function sp500EffectiveCap(sig, conf, allResults) {
   const wk = allResults && allResults['1W'] && allResults['1W'].sig;
   const dy = allResults && allResults['1D'] && allResults['1D'].sig;
   const regimeUp = wk === 'LONG' && dy === 'LONG';
+  const partialUp = (wk === 'LONG' || dy === 'LONG') && wk !== 'SHORT' && dy !== 'SHORT';  // v5.5: at least one LONG, neither SHORT
   const strongUp = regimeUp && (typeof conf === 'number' && conf >= 70);
-  if (strongUp && inUSSession)   return { cap: 750, tier: 'STRONG UP + US' };
-  if (regimeUp && inUSSession)   return { cap: 500, tier: 'UP + US' };
-  if (regimeUp && !inUSSession)  return { cap: 200, tier: 'UP + non-US' };
+  // v5.5: Relaxed regime check — "PARTIAL UP" (one of 1W/1D LONG, other NEUTRAL) now allowed
+  // at reduced caps. Previously required BOTH 1W+1D LONG which was too restrictive and caused
+  // all SP500 entries to be manual. The 4-day SP500 tail win streak (+$11.34) was entirely manual
+  // because the bot couldn't enter under the strict regime check.
+  if (strongUp && inUSSession)       return { cap: 750, tier: 'STRONG UP + US' };
+  if (regimeUp && inUSSession)       return { cap: 500, tier: 'UP + US' };
+  if (regimeUp && !inUSSession)      return { cap: 200, tier: 'UP + non-US' };
+  if (partialUp && inUSSession)      return { cap: 350, tier: 'PARTIAL UP + US (v5.5)' };    // NEW
+  if (partialUp && !inUSSession)     return { cap: 150, tier: 'PARTIAL UP + non-US (v5.5)' }; // NEW
   return { cap: 0, tier: `regime-not-UP (1W=${wk||'n/a'}, 1D=${dy||'n/a'}, US=${inUSSession})` };
 }
 
