@@ -599,8 +599,8 @@ const TFS=[{l:'1W',iv:'W',w:5},{l:'1D',iv:'D',w:4},{l:'4H',iv:'240',w:3},{l:'1H'
 // Each coin runs its own independent engine loop
 const COINS = {
   bitcoin:     { id:'bitcoin',     label:'BTC/USD',  sym:'BINANCE:BTCUSDT', shortLabel:'BTC',  apiSym:'BTCUSDT',  exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.007, maxNotional: 200, isHIP3: false },  // v5.3: re-enabled with $200 cap
-  hyperliquid: { id:'hyperliquid', label:'HYPE/USD', sym:'BYBIT:HYPEUSDT',  shortLabel:'HYPE', apiSym:'HYPEUSDT', exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, maxNotional: 200, isHIP3: false },  // v5.3: re-enabled with $200 cap
-  sp500:       { id:'sp500',       label:'S&P500',   sym:'OANDA:SPX500USD', shortLabel:'SPX',  apiSym:'xyz:SP500', exchange:'hyperliquid', minRR: 1.5, feeEst: 0.10, minStopPct: 0.005, maxNotional: 500, isHIP3: true },  // v5.0: 0.05->0.10 (HIP-3 taker fees)
+  hyperliquid: { id:'hyperliquid', label:'HYPE/USD', sym:'BYBIT:HYPEUSDT',  shortLabel:'HYPE', apiSym:'HYPEUSDT', exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, maxNotional: 100, isHIP3: false },  // v5.5: halved $200→$100 after 3 consecutive SL hits (synced w/ bot.js)
+  sp500:       { id:'sp500',       label:'S&P500',   sym:'OANDA:SPX500USD', shortLabel:'SPX',  apiSym:'xyz:SP500', exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, maxNotional: 500, isHIP3: true },  // v5.5: minRR 1.5→1.2 (synced w/ bot.js)
   gold:        { id:'gold',        label:'GOLD/USD', sym:'OANDA:XAUUSD',    shortLabel:'GOLD', apiSym:'xyz:GOLD', exchange:'hyperliquid', minRR: 1.5, feeEst: 0.12, minStopPct: 0.005, maxNotional: 500, isHIP3: true },  // v5.0: 0.05->0.12 for builder fees
 };
 
@@ -628,9 +628,11 @@ function _inheritManualPolicy(){
 }
 const MANUAL_NOTIONAL_MULT = parseFloat(localStorage.getItem('hl_manual_notional_mult') || '1.05');
 
-// v5.4: SP500 session-scaled maxNotional helper (synced w/ bot.js).
+// v5.6: SP500 session-scaled maxNotional helper (synced w/ bot.js v5.6).
 // Returns { cap, tier }. cap=0 means "do not open this LONG".
 // Shorts fall through to the coin default cap regardless of session.
+// v5.5: Added PARTIAL UP tiers (one of 1W/1D LONG, other NEUTRAL — was too restrictive).
+// v5.6: Raised caps — STRONG UP+US $750→$1500, UP+US $500→$750, PARTIAL UP+US $350→$500.
 function sp500EffectiveCap(sig, conf, results) {
   const defaultCap = (COINS.sp500 && COINS.sp500.maxNotional) || 500;
   if (sig !== 'LONG') return { cap: defaultCap, tier: 'SHORT/default' };
@@ -639,10 +641,13 @@ function sp500EffectiveCap(sig, conf, results) {
   const wk = results && results['1W'] && results['1W'].sig;
   const dy = results && results['1D'] && results['1D'].sig;
   const regimeUp = wk === 'LONG' && dy === 'LONG';
+  const partialUp = (wk === 'LONG' || dy === 'LONG') && wk !== 'SHORT' && dy !== 'SHORT';
   const strongUp = regimeUp && (typeof conf === 'number' && conf >= 70);
-  if (strongUp && inUSSession)   return { cap: 750, tier: 'STRONG UP + US' };
-  if (regimeUp && inUSSession)   return { cap: 500, tier: 'UP + US' };
+  if (strongUp && inUSSession)   return { cap: 1500, tier: 'STRONG UP + US (v5.6)' };
+  if (regimeUp && inUSSession)   return { cap: 750, tier: 'UP + US (v5.6)' };
   if (regimeUp && !inUSSession)  return { cap: 200, tier: 'UP + non-US' };
+  if (partialUp && inUSSession)  return { cap: 500, tier: 'PARTIAL UP + US (v5.6)' };
+  if (partialUp && !inUSSession) return { cap: 150, tier: 'PARTIAL UP + non-US (v5.5)' };
   return { cap: 0, tier: `regime-not-UP (1W=${wk||'n/a'}, 1D=${dy||'n/a'}, US=${inUSSession})` };
 }
 
@@ -4319,16 +4324,46 @@ const HL = {
           const side = szi > 0 ? 'LONG' : 'SHORT';
           const ratio = (notional / capBase).toFixed(2);
           if (_inheritMode === 'ignore') {
-            // Do NOT add to activeTrades; bot will not manage SL/TP/trail on this position.
+            // v5.6: "ignore" now places one-time protective SL/TP, then hands off (synced w/ bot.js).
             if (!alreadyAlerted) {
-              console.log(`HL INHERIT IGNORE: ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — NOT managed by bot (manual trade) [v5.5]`);
-              showToast(`⚠️ MANUAL ${pos.coin} ${side}`, `$${notional.toFixed(0)} = ${ratio}× cap — not managed`, side === 'SHORT');
-              if (typeof sendTelegram === 'function') {
-                sendTelegram(`⚠️ <b>MANUAL POSITION DETECTED: ${pos.coin} ${side}</b>\nSize: ${Math.abs(szi)}\nEntry: $${fmt(entry)}\nNotional: $${notional.toFixed(0)} (${ratio}× cap $${capBase})\nBot will NOT manage SL/TP on this position. Manage manually.`).catch(()=>{});
+              console.log(`HL INHERIT PROTECT: ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — placing protective SL/TP only (no trailing) [v5.6]`);
+              showToast(`🛡 PROTECT ${pos.coin} ${side}`, `$${notional.toFixed(0)} = ${ratio}× cap — placing SL/TP`, side === 'SHORT');
+
+              // Calculate a reasonable SL: 2% for standard assets, 1.5% for HIP-3
+              const slPct = coinCfg.isHIP3 ? 0.015 : 0.02;
+              const _isLong = side === 'LONG';
+              const protectSl = _isLong ? entry * (1 - slPct) : entry * (1 + slPct);
+              const protectTp = _isLong ? entry * (1 + slPct * 2) : entry * (1 - slPct * 2);
+
+              try {
+                await this.cancelTriggerOrders(pos.coin);
+                await new Promise(r => setTimeout(r, 300));
+
+                const _slPx = _isLong ? protectSl * 0.98 : protectSl * 1.02;
+                const slRes = await this.placeOrder(pos.coin, !_isLong, Math.abs(szi), _slPx,
+                  { trigger: { isMarket: true, triggerPx: protectSl, tpsl: 'sl' } }, true);
+                const slOk = slRes && slRes.status !== 'err';
+
+                const _tpPx = _isLong ? protectTp * 1.02 : protectTp * 0.98;
+                const tpRes = await this.placeOrder(pos.coin, !_isLong, Math.abs(szi), _tpPx,
+                  { trigger: { isMarket: true, triggerPx: protectTp, tpsl: 'tp' } }, true);
+                const tpOk = tpRes && tpRes.status !== 'err';
+
+                const statusMsg = `SL ${slOk ? '✅' : '❌'} $${fmt(protectSl)} (${(slPct*100).toFixed(1)}%) | TP ${tpOk ? '✅' : '❌'} $${fmt(protectTp)} (${(slPct*200).toFixed(1)}%)`;
+                console.log(`HL INHERIT PROTECT: ${pos.coin} ${statusMsg}`);
+                if (typeof sendTelegram === 'function') {
+                  sendTelegram(`🛡 <b>MANUAL POSITION PROTECTED: ${pos.coin} ${side}</b>\nSize: ${Math.abs(szi)}\nEntry: $${fmt(entry)}\nNotional: $${notional.toFixed(0)} (${ratio}× cap $${capBase})\n\n${statusMsg}\n\n<i>One-time protection only — bot will NOT trail or adjust.</i>`).catch(()=>{});
+                }
+              } catch (e) {
+                console.error(`HL INHERIT PROTECT failed for ${pos.coin}:`, e.message);
+                if (typeof sendTelegram === 'function') {
+                  sendTelegram(`⚠️ <b>MANUAL POSITION DETECTED: ${pos.coin} ${side}</b>\nSize: ${Math.abs(szi)}\nEntry: $${fmt(entry)}\nNotional: $${notional.toFixed(0)} (${ratio}× cap $${capBase})\n\n❌ <b>FAILED to place SL/TP</b> — place manually!`).catch(()=>{});
+                }
               }
+
               this.manualInheritedSeen[seenKey] = Date.now();
             }
-            continue; // skip — don't add to activeTrades
+            continue; // skip — don't add to activeTrades (no trailing/management)
           } else if (_inheritMode === 'trim') {
             // Queue a trim to get notional back under cap, then track the trimmed remainder.
             if (!alreadyAlerted) {
@@ -5160,13 +5195,42 @@ const HL = {
       }
 
       if (newSl !== null && newSl !== trade.sl) {
+        // v5.6 FIX: Prevent duplicate order spam (synced w/ bot.js).
+        // Skip negligible SL changes (< 0.05%) and verify cancel before placing new orders.
+        const slChangePct = Math.abs(newSl - (trade.sl || 0)) / (trade.sl || newSl);
+        if (slChangePct < 0.0005) continue;
+
         try {
-          // Cancel existing SL trigger, place new one
-          await this.cancelTriggerOrders(trade.asset);
+          // Cancel existing triggers
+          const cancelled = await this.cancelTriggerOrders(trade.asset);
+
+          // Wait for exchange to process, then verify
+          if (cancelled > 0) await new Promise(r => setTimeout(r, 500));
+          const remainingOrders = await this.fetchOpenOrders();
+          const remainingTriggers = remainingOrders.filter(o => {
+            if (o.coin !== trade.asset) return false;
+            return o.isTrigger === true || (o.orderType && /Stop|Take|Trigger/i.test(o.orderType));
+          });
+          if (remainingTriggers.length > 0) {
+            console.warn(`HL trailStops: ${trade.asset} still has ${remainingTriggers.length} trigger(s) after cancel — retrying`);
+            for (const o of remainingTriggers) { try { await this.cancelOrder(trade.asset, o.oid); } catch(e){} }
+            await new Promise(r => setTimeout(r, 300));
+            const finalCheck = await this.fetchOpenOrders();
+            const stillRemain = finalCheck.filter(o => {
+              if (o.coin !== trade.asset) return false;
+              return o.isTrigger === true || (o.orderType && /Stop|Take|Trigger/i.test(o.orderType));
+            });
+            if (stillRemain.length > 0) {
+              console.error(`HL trailStops: ${trade.asset} STILL has ${stillRemain.length} stuck triggers — skipping to prevent stacking`);
+              continue;
+            }
+          }
+
+          // Place new SL (only after old triggers confirmed gone)
           const slPx = isLong ? newSl * 0.98 : newSl * 1.02;
           await this.placeOrder(trade.asset, !isLong, trade.size, slPx,
             { trigger: { isMarket: true, triggerPx: newSl, tpsl: 'sl' } }, true);
-          // Re-place TP if it was cancelled
+          // Re-place TP
           if (trade.tp) {
             const tpPx = isLong ? trade.tp * 1.02 : trade.tp * 0.98;
             await this.placeOrder(trade.asset, !isLong, trade.size, tpPx,
