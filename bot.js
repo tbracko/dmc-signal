@@ -45,13 +45,42 @@
 //     strong regimes while preserving safety otherwise. Implementation: sp500EffectiveCap() helper
 //     sets coinState[coinId].effectiveMaxNotional, which executeTrade reads in place of coin.maxNotional.
 //
+// v5.6 changelog (2026-04-18):
+//   - SP500 session-scaled cap increase: STRONG UP + US raised $750 → $1,500 (3× base).
+//     UP + US raised $500 → $750. PARTIAL UP + US raised $350 → $500.
+//     Rationale: Apr 17 manual SP500 long at $2,132 notional captured +$19.85 — best single
+//     trade in 12 days. 5/5 consecutive SP500 US-session longs profitable (+$31.19 cumulative).
+//     The edge is proven and under-exploited by the bot. $1,500 STRONG UP cap lets the bot
+//     capture ~70% of manual-level returns while staying within automated risk limits.
+//     Non-US-session and non-UP tiers unchanged (risk preservation).
+//
+//   - CRITICAL FIX: Duplicate SL/TP order spam (100+ orders on BTC reported Apr 17).
+//     Root causes:
+//       (a) closePosition() did not cancel trigger orders before flipping — old short's SL/TP
+//           stayed on-exchange when position flipped to long, then stacked with new orders.
+//       (b) trailStops() placed new SL+TP every 30s cycle even when cancelTriggerOrders() failed
+//           silently (error caught, returned 0, but code proceeded to place new orders).
+//       (c) No minimum SL change threshold — even 1 cent of price movement triggered a full
+//           cancel-and-replace cycle, creating unnecessary order churn.
+//     Fixes:
+//       (a) closePosition() now cancels all trigger orders for the asset BEFORE closing.
+//       (b) trailStops() now verifies cancels succeeded (fetches orders again, retries once)
+//           and REFUSES to place new orders if old triggers still exist.
+//       (c) Added 0.05% minimum SL change threshold to skip negligible updates.
+//
+//   - Manual position SL/TP protection: 'ignore' mode now places one-time protective SL (2%
+//     for standard, 1.5% for HIP-3) and TP (2R) on manual positions. Previously, manual
+//     positions had NO automated protection at all — the orphaned HYPE short on Apr 17 had
+//     -$4.90 unrealized with no stop. Bot still does NOT trail or adjust these orders after
+//     initial placement.
+//
 // v5.5 changelog (2026-04-16):
 //   - Inherited-manual-position policy (INHERIT_MANUAL_POSITIONS env var).
 //     When syncPositions discovers a *new* position whose entry-notional exceeds the asset's
 //     maxNotional by > 1.05×, it is almost certainly a manual trade by Tomaž. Three modes:
-//       . 'ignore' (DEFAULT, safest): do NOT add to activeTrades. Bot will not place SL/TP or
-//         trail on the position. Tomaž manages it manually. A Telegram alert fires once per
-//         detection so the oversized position is visible.
+//       . 'ignore' (DEFAULT): do NOT add to activeTrades. Bot places one-time protective SL/TP
+//         (v5.6) but will NOT trail, adjust, or re-place orders. Telegram alert fires once per
+//         detection with the SL/TP levels. Previously had no protection at all.
 //       . 'trim': bot places a reduce-only market order to bring the position down to
 //         maxNotional size, THEN adds the trimmed position to activeTrades for normal
 //         management. Alert fires with the trim details. Use only after a period of stable
@@ -1477,13 +1506,48 @@ const HL = {
           const side = szi > 0 ? 'LONG' : 'SHORT';
           const ratio = (notional / capBase).toFixed(2);
           if (INHERIT_MANUAL_POSITIONS === 'ignore') {
-            // Do NOT add to activeTrades; bot will not manage SL/TP/trail on this position.
+            // v5.6: "ignore" now means "don't trail/manage sizing, BUT place initial SL/TP protection".
+            // Previously, manual positions had NO protection at all — the user had no automated SL,
+            // which is dangerous (the HYPE orphan on Apr 17 had -$4.90 unrealized with no stop).
+            // Now: place a basic ATR-based SL + 2R TP on first detection, then hands off.
+            // Bot will NOT trail, adjust, or re-place these orders — they're one-time protection.
             if (!alreadyAlerted) {
-              console.log(`HL INHERIT IGNORE: ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — NOT managed by bot (manual trade)`);
-              sendTelegram(`⚠️ <b>MANUAL POSITION DETECTED: ${pos.coin} ${side}</b>\nSize: ${Math.abs(szi)}\nEntry: $${fmt(entry)}\nNotional: $${notional.toFixed(0)} (${ratio}× cap $${capBase})\nBot will NOT manage SL/TP on this position. Manage manually.`).catch(()=>{});
+              console.log(`HL INHERIT PROTECT: ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — placing protective SL/TP only (no trailing)`);
+
+              // Calculate a reasonable SL: 2% for standard assets, 1.5% for HIP-3
+              const slPct = coinCfg.isHIP3 ? 0.015 : 0.02;
+              const isLong = side === 'LONG';
+              const protectSl = isLong ? entry * (1 - slPct) : entry * (1 + slPct);
+              const protectTp = isLong ? entry * (1 + slPct * 2) : entry * (1 - slPct * 2);  // 2R target
+
+              // Place protective SL
+              try {
+                // First cancel any existing triggers for this asset to avoid stacking
+                await this.cancelTriggerOrders(pos.coin);
+                await new Promise(r => setTimeout(r, 300));
+
+                const slPx = isLong ? protectSl * 0.98 : protectSl * 1.02;
+                const slRes = await this.placeOrder(pos.coin, !isLong, Math.abs(szi), slPx,
+                  { trigger: { isMarket: true, triggerPx: protectSl, tpsl: 'sl' } }, true);
+                const slOk = slRes && slRes.status !== 'err';
+
+                // Place protective TP
+                const tpPx = isLong ? protectTp * 1.02 : protectTp * 0.98;
+                const tpRes = await this.placeOrder(pos.coin, !isLong, Math.abs(szi), tpPx,
+                  { trigger: { isMarket: true, triggerPx: protectTp, tpsl: 'tp' } }, true);
+                const tpOk = tpRes && tpRes.status !== 'err';
+
+                const statusMsg = `SL ${slOk ? '✅' : '❌'} $${fmt(protectSl)} (${(slPct*100).toFixed(1)}%) | TP ${tpOk ? '✅' : '❌'} $${fmt(protectTp)} (${(slPct*200).toFixed(1)}%)`;
+                console.log(`HL INHERIT PROTECT: ${pos.coin} ${statusMsg}`);
+                sendTelegram(`🛡 <b>MANUAL POSITION PROTECTED: ${pos.coin} ${side}</b>\nSize: ${Math.abs(szi)}\nEntry: $${fmt(entry)}\nNotional: $${notional.toFixed(0)} (${ratio}× cap $${capBase})\n\n${statusMsg}\n\n<i>One-time protection only — bot will NOT trail or adjust these orders.</i>`).catch(()=>{});
+              } catch (e) {
+                console.error(`HL INHERIT PROTECT: failed to place SL/TP for ${pos.coin}:`, e.message);
+                sendTelegram(`⚠️ <b>MANUAL POSITION DETECTED: ${pos.coin} ${side}</b>\nSize: ${Math.abs(szi)}\nEntry: $${fmt(entry)}\nNotional: $${notional.toFixed(0)} (${ratio}× cap $${capBase})\n\n❌ <b>FAILED to place protective SL/TP</b> — place manually!\nError: ${e.message}`).catch(()=>{});
+              }
+
               this.manualInheritedSeen[seenKey] = Date.now();
             }
-            continue; // skip — don't add to activeTrades
+            continue; // skip — don't add to activeTrades (no trailing/management)
           } else if (INHERIT_MANUAL_POSITIONS === 'trim') {
             // Queue a trim to get notional back under cap, then track the trimmed remainder.
             if (!alreadyAlerted) {
@@ -2142,8 +2206,57 @@ const HL = {
         // v5.1: Skip if trailing is disabled for this trade due to prior failures
         if (trade.trailDisabled) continue;
 
+        // v5.6 FIX: Prevent duplicate order spam.
+        // 1. Skip if SL change is negligible (< 0.05% of price) to avoid unnecessary order churn
+        // 2. Verify cancel succeeded before placing new orders
+        // 3. Verify no trigger orders remain after cancel (race condition guard)
+        const slChangePct = Math.abs(newSl - (trade.sl || 0)) / (trade.sl || newSl);
+        if (slChangePct < 0.0005) {
+          // SL changed by less than 0.05% — not worth the order churn
+          continue;
+        }
+
         try {
+          // Step 1: Cancel existing trigger orders
           const cancelled = await this.cancelTriggerOrders(trade.asset);
+
+          // Step 2: Wait briefly for exchange to process cancels, then verify
+          if (cancelled > 0) {
+            await new Promise(r => setTimeout(r, 500));  // 500ms settle time
+          }
+
+          // Step 3: Verify triggers are actually gone before placing new ones
+          const remainingOrders = await this.fetchOpenOrders();
+          const remainingTriggers = remainingOrders.filter(o => {
+            if (o.coin !== trade.asset) return false;
+            return o.isTrigger === true || (o.orderType && /Stop|Take|Trigger/i.test(o.orderType));
+          });
+          if (remainingTriggers.length > 0) {
+            console.warn(`HL trailStops: ${trade.asset} still has ${remainingTriggers.length} trigger(s) after cancel — retrying cancel`);
+            for (const o of remainingTriggers) {
+              try { await this.cancelOrder(trade.asset, o.oid); } catch(e){}
+            }
+            await new Promise(r => setTimeout(r, 300));
+            // Re-check one more time
+            const finalCheck = await this.fetchOpenOrders();
+            const stillRemain = finalCheck.filter(o => {
+              if (o.coin !== trade.asset) return false;
+              return o.isTrigger === true || (o.orderType && /Stop|Take|Trigger/i.test(o.orderType));
+            });
+            if (stillRemain.length > 0) {
+              console.error(`HL trailStops: ${trade.asset} STILL has ${stillRemain.length} trigger(s) after retry — SKIPPING new order placement to prevent stacking`);
+              // v5.1: Track consecutive trail failures per coin
+              this.trailFailCount[coinId] = (this.trailFailCount[coinId] || 0) + 1;
+              if (this.trailFailCount[coinId] >= this.MAX_TRAIL_FAILURES) {
+                trade.trailDisabled = true;
+                this.saveActiveTrades();
+                await sendTelegram(`⏸ <b>TRAILING DISABLED: ${trade.asset}</b>\nCannot cancel existing triggers — ${stillRemain.length} stuck orders. Manual cleanup needed.`);
+              }
+              continue;  // DO NOT place new orders — this prevents stacking
+            }
+          }
+
+          // Step 4: Place new SL (only after confirming old triggers are gone)
           const slPx = isLong ? newSl * 0.98 : newSl * 1.02;
           const trailSlRes = await this.placeOrder(trade.asset, !isLong, trade.size, slPx,
             { trigger: { isMarket: true, triggerPx: newSl, tpsl: 'sl' } }, true);
@@ -2173,7 +2286,7 @@ const HL = {
           }
           // v5.1: Success -- reset failure counter
           this.trailFailCount[coinId] = 0;
-          // Re-place TP
+          // Re-place TP (only ONE TP for the remaining size — do not re-place TP1/TP2 ladder)
           if (trade.tp) {
             const tpPx = isLong ? trade.tp * 1.02 : trade.tp * 0.98;
             const trailTpRes = await this.placeOrder(trade.asset, !isLong, trade.size, tpPx,
@@ -2198,6 +2311,15 @@ const HL = {
     const isLong = trade.side === 'LONG';
     const slip = px * 0.01;
     const closePx = isLong ? px - slip : px + slip;
+
+    // v5.6 FIX: Cancel ALL trigger orders for this asset BEFORE closing.
+    // Previously, closing a position (e.g. short→long flip) left orphaned SL/TP triggers
+    // from the old position on-exchange, which then stacked with new orders from executeTrade
+    // and trailStops, causing 100+ duplicate orders (reported Apr 17).
+    try {
+      const cancelled = await this.cancelTriggerOrders(trade.asset);
+      if (cancelled > 0) console.log(`HL closePosition: cancelled ${cancelled} trigger orders for ${trade.asset} before closing`);
+    } catch (e) { console.warn('HL closePosition: trigger cancel error (proceeding):', e.message); }
 
     try {
       const result = await this.placeOrder(trade.asset, !isLong, trade.size, closePx, { limit: { tif: 'Ioc' } }, true);
@@ -2456,9 +2578,11 @@ async function maybeAlert(sig, tf, type, level, target, rr, stopPrice, coinId, p
 // Returns { cap, tier } where cap=0 means "do not trade this LONG".
 // Shorts return the coin default cap regardless of session (existing behavior preserved).
 // Tiers (LONG only):
-//   STRONG UP (1W+1D LONG AND conf >= 70%) + US session (13-21 UTC)  -> $750
-//   UP (1W+1D LONG)                        + US session              -> $500 (= previous flat cap)
-//   UP                                     + non-US session          -> $200 (NEW — was hard-blocked)
+//   STRONG UP (1W+1D LONG AND conf >= 70%) + US session (13-21 UTC)  -> $1500 (v5.6: was $750)
+//   UP (1W+1D LONG)                        + US session              -> $750  (v5.6: was $500)
+//   UP                                     + non-US session          -> $200
+//   PARTIAL UP (one LONG, other NEUTRAL)   + US session              -> $500  (v5.6: was $350)
+//   PARTIAL UP                             + non-US session          -> $150
 //   anything else + LONG                                             -> 0  (block)
 function sp500EffectiveCap(sig, conf, allResults) {
   const defaultCap = (COINS.sp500 && COINS.sp500.maxNotional) || 500;
@@ -2474,11 +2598,15 @@ function sp500EffectiveCap(sig, conf, allResults) {
   // at reduced caps. Previously required BOTH 1W+1D LONG which was too restrictive and caused
   // all SP500 entries to be manual. The 4-day SP500 tail win streak (+$11.34) was entirely manual
   // because the bot couldn't enter under the strict regime check.
-  if (strongUp && inUSSession)       return { cap: 750, tier: 'STRONG UP + US' };
-  if (regimeUp && inUSSession)       return { cap: 500, tier: 'UP + US' };
+  // v5.6: STRONG UP + US raised from $750 → $1500 (3× base). Apr 17 manual SP500 long at $2,132
+  // notional captured +$19.85 — 5/5 consecutive SP500 US-session wins prove this edge is durable.
+  // $1,500 captures ~70% of what manual sizing achieves while staying within automated risk limits.
+  // UP + US bumped from $500 → $750 to give non-STRONG regimes more room during proven session.
+  if (strongUp && inUSSession)       return { cap: 1500, tier: 'STRONG UP + US (v5.6)' };
+  if (regimeUp && inUSSession)       return { cap: 750, tier: 'UP + US (v5.6)' };
   if (regimeUp && !inUSSession)      return { cap: 200, tier: 'UP + non-US' };
-  if (partialUp && inUSSession)      return { cap: 350, tier: 'PARTIAL UP + US (v5.5)' };    // NEW
-  if (partialUp && !inUSSession)     return { cap: 150, tier: 'PARTIAL UP + non-US (v5.5)' }; // NEW
+  if (partialUp && inUSSession)      return { cap: 500, tier: 'PARTIAL UP + US (v5.6)' };    // was $350
+  if (partialUp && !inUSSession)     return { cap: 150, tier: 'PARTIAL UP + non-US (v5.5)' };
   return { cap: 0, tier: `regime-not-UP (1W=${wk||'n/a'}, 1D=${dy||'n/a'}, US=${inUSSession})` };
 }
 
