@@ -321,8 +321,18 @@ async function getPrice(coinId){
 // -- UTILITIES -----------------------------------------------------------------
 function fmt(n){ return n>=1000 ? n.toLocaleString('en-US',{maximumFractionDigits:0}) : n.toFixed(2); }
 function atr(c, p=14){
-  const tr = c.slice(1).map((x,i)=>Math.max(x.h-x.l, Math.abs(x.h-c[i].c), Math.abs(x.l-c[i].c)));
-  return tr.slice(-p).reduce((s,v)=>s+v, 0) / p;
+  // v5.7: guard against malformed candles (NaN h/l/c) or short arrays — previously a
+  // single bad candle poisoned the ATR → SL placement fed NaN/undefined prices.
+  if (!Array.isArray(c) || c.length < 2) return 0;
+  const tr = c.slice(1).map((x,i)=>{
+    const h=x.h, l=x.l, pc=c[i].c;
+    if(!Number.isFinite(h) || !Number.isFinite(l) || !Number.isFinite(pc)) return null;
+    return Math.max(h-l, Math.abs(h-pc), Math.abs(l-pc));
+  }).filter(v => v != null && Number.isFinite(v));
+  if (tr.length === 0) return 0;
+  const slice = tr.slice(-p);
+  const result = slice.reduce((s,v)=>s+v, 0) / slice.length;
+  return Number.isFinite(result) ? result : 0;
 }
 function isSwingHigh(c, i, N=3){
   const bh = c[i].bh;
@@ -1368,6 +1378,11 @@ const HL = {
         body: JSON.stringify({ type: 'spotClearinghouseState', user: queryAddr })
       })
     ]);
+    // v5.7: surface HTTP errors explicitly — silent .json() on an HTTP 429/500 used to
+    // produce undefined → parseFloat('0') → 0 equity, which looked like a real wallet drain
+    // and tripped downstream guards.
+    if (!perpsRes.ok) throw new Error(`perps clearinghouseState HTTP ${perpsRes.status}`);
+    if (!spotRes.ok)  throw new Error(`spotClearinghouseState HTTP ${spotRes.status}`);
     const perpsData = await perpsRes.json();
     const spotData = await spotRes.json();
     // v5.5 fix: true equity = spot USDC balance (HIP-3 quirk: perps accountValue includes
@@ -1402,14 +1417,27 @@ const HL = {
 
   // -- Persist active trades to file (replaces localStorage) --
   saveActiveTrades() {
-    try { fs.writeFileSync(ACTIVE_TRADES_FILE, JSON.stringify(this.activeTrades)); } catch(e){}
+    // v5.7: atomic write (tmp + rename) so a crash mid-write can't leave a half-written file.
+    // Log any failure (was previously silent — if disk filled or perms broke, in-memory state
+    // silently diverged from disk and the next session lost position tracking).
+    try {
+      const tmp = ACTIVE_TRADES_FILE + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(this.activeTrades));
+      fs.renameSync(tmp, ACTIVE_TRADES_FILE);
+    } catch(e) {
+      console.error('HL saveActiveTrades FAILED:', e.message);
+      sendTelegram(`⚠️ <b>saveActiveTrades failed</b>\n${e.message}\n\nIn-memory state may diverge from disk. Check disk/permissions.`).catch(()=>{});
+    }
   },
   loadActiveTrades() {
     try {
       if (fs.existsSync(ACTIVE_TRADES_FILE)) {
         this.activeTrades = JSON.parse(fs.readFileSync(ACTIVE_TRADES_FILE, 'utf8'));
       }
-    } catch(e){ this.activeTrades = {}; }
+    } catch(e) {
+      console.error('HL loadActiveTrades FAILED, resetting to empty:', e.message);
+      this.activeTrades = {};
+    }
   },
 
   // -- HIP-3 dexes we trade on (for querying positions, orders, fills) --
@@ -1440,7 +1468,11 @@ const HL = {
   async syncPositions() {
     try {
       const queryAddr = (this.masterAddress || this.address).toLowerCase();
-      const [posRes, ...hip3PosRes] = await Promise.all([
+      // v5.7: allSettled so a single HIP-3 dex outage cannot blank out the entire sync
+      // (previously: if xyz dex timed out, Promise.all rejected and the catch below wiped
+      // activeTrades tracking, causing trailStops to see stale state on next cycle).
+      // Main-dex position fetch is MANDATORY: if it fails, bail out cleanly.
+      const settled = await Promise.allSettled([
         fetch(HL_API + '/info', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr })
@@ -1449,13 +1481,30 @@ const HL = {
           fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr, dex }) }))
       ]);
+      const mainSettled = settled[0];
+      const hip3Settled = settled.slice(1);
+      if (mainSettled.status !== 'fulfilled' || !mainSettled.value.ok) {
+        const reason = mainSettled.status !== 'fulfilled' ? mainSettled.reason?.message : `HTTP ${mainSettled.value.status}`;
+        console.warn('HL syncPositions: main dex fetch failed, skipping cycle:', reason);
+        return;
+      }
+      const posRes = mainSettled.value;
+      const hip3PosRes = [];
+      for (let i = 0; i < hip3Settled.length; i++) {
+        const s = hip3Settled[i];
+        const dex = this.HIP3_DEXES[i];
+        if (s.status === 'fulfilled' && s.value.ok) hip3PosRes.push(s.value);
+        else console.warn(`HL syncPositions: HIP-3 dex "${dex}" fetch failed — positions on that dex may be out of sync:`, s.status === 'fulfilled' ? `HTTP ${s.value.status}` : s.reason?.message);
+      }
       const trigOrders = await this.fetchTriggerOrders();
       const data = await posRes.json();
       const positions = [...(data.assetPositions || [])];
       // Merge HIP-3 positions
       for (const r of hip3PosRes) {
-        const d = await r.json();
-        if (d.assetPositions) positions.push(...d.assetPositions);
+        try {
+          const d = await r.json();
+          if (d.assetPositions) positions.push(...d.assetPositions);
+        } catch (e) { console.warn('HL syncPositions: HIP-3 JSON parse failed:', e.message); }
       }
       const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', 'S&P500': 'sp500', 'xyz:SP500': 'sp500', GOLD: 'gold', 'xyz:GOLD': 'gold' };
 
@@ -2107,16 +2156,34 @@ const HL = {
     let livePositions;
     try {
       const queryAddr = (this.masterAddress || this.address).toLowerCase();
-      const [mainRes, ...hip3Res] = await Promise.all([
+      // v5.7: allSettled so a HIP-3 dex outage doesn't crash the whole trail cycle.
+      // If main dex fetch fails we MUST bail — partial data would risk closing positions
+      // based on stale trail state.
+      const settled = await Promise.allSettled([
         fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr }) }),
         ...this.HIP3_DEXES.map(dex =>
           fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr, dex }) }))
       ]);
-      const mainData = await mainRes.json();
+      const mainSettled = settled[0];
+      if (mainSettled.status !== 'fulfilled' || !mainSettled.value.ok) {
+        const reason = mainSettled.status !== 'fulfilled' ? mainSettled.reason?.message : `HTTP ${mainSettled.value.status}`;
+        console.warn('trailStops: main position fetch failed, skipping cycle:', reason);
+        return;
+      }
+      const mainData = await mainSettled.value.json();
       livePositions = [...(mainData.assetPositions || [])];
-      for (const r of hip3Res) { const d = await r.json(); livePositions.push(...(d.assetPositions || [])); }
+      for (let i = 1; i < settled.length; i++) {
+        const s = settled[i];
+        const dex = this.HIP3_DEXES[i - 1];
+        if (s.status !== 'fulfilled' || !s.value.ok) {
+          console.warn(`trailStops: HIP-3 dex "${dex}" position fetch failed — skipping its positions this cycle`);
+          continue;
+        }
+        try { const d = await s.value.json(); livePositions.push(...(d.assetPositions || [])); }
+        catch (e) { console.warn(`trailStops: HIP-3 "${dex}" JSON parse failed:`, e.message); }
+      }
     } catch (e) { console.warn('trailStops: position fetch failed, skipping cycle:', e.message); return; }
 
     for (const [coinId, trade] of Object.entries(this.activeTrades)) {
