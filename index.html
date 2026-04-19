@@ -4187,6 +4187,9 @@ const HL = {
         body: JSON.stringify({ type: 'spotClearinghouseState', user: queryAddr })
       })
     ]);
+    // v5.7: fail loudly on HTTP error rather than letting undefined propagate into $0 equity
+    if (!perpsRes.ok) throw new Error(`perps clearinghouseState HTTP ${perpsRes.status}`);
+    if (!spotRes.ok)  throw new Error(`spotClearinghouseState HTTP ${spotRes.status}`);
     const perpsData = await perpsRes.json();
     const spotData = await spotRes.json();
     console.log('HL perps response:', JSON.stringify(perpsData).slice(0, 500));
@@ -4213,13 +4216,14 @@ const HL = {
 
   // ── Persist activeTrades to/from localStorage ──
   saveActiveTrades() {
-    try { localStorage.setItem('hl_active_trades', JSON.stringify(this.activeTrades)); } catch(e){}
+    try { localStorage.setItem('hl_active_trades', JSON.stringify(this.activeTrades)); }
+    catch(e) { console.error('HL saveActiveTrades FAILED (localStorage quota/perms?):', e.message); }
   },
   loadActiveTrades() {
     try {
       const raw = localStorage.getItem('hl_active_trades');
       if (raw) this.activeTrades = JSON.parse(raw);
-    } catch(e){}
+    } catch(e) { console.error('HL loadActiveTrades FAILED — resetting:', e.message); this.activeTrades = {}; }
   },
 
   // ── HIP-3 dexes we trade on (for querying positions, orders, fills) ──
@@ -4250,8 +4254,8 @@ const HL = {
   async syncPositions() {
     try {
       const queryAddr = (this.masterAddress || this.address).toLowerCase();
-      // Fetch main + HIP-3 positions + trigger orders in parallel
-      const [posRes, ...hip3PosRes] = await Promise.all([
+      // v5.7: allSettled — partial failure of a HIP-3 dex no longer blanks out the whole sync.
+      const settled = await Promise.allSettled([
         fetch(this.API + '/info', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr })
@@ -4260,13 +4264,29 @@ const HL = {
           fetch(this.API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr, dex }) }))
       ]);
+      const mainSettled = settled[0];
+      if (mainSettled.status !== 'fulfilled' || !mainSettled.value.ok) {
+        const reason = mainSettled.status !== 'fulfilled' ? mainSettled.reason?.message : `HTTP ${mainSettled.value.status}`;
+        console.warn('HL syncPositions: main dex fetch failed, skipping cycle:', reason);
+        return;
+      }
+      const posRes = mainSettled.value;
+      const hip3PosRes = [];
+      for (let i = 1; i < settled.length; i++) {
+        const s = settled[i];
+        const dex = this.HIP3_DEXES[i - 1];
+        if (s.status === 'fulfilled' && s.value.ok) hip3PosRes.push(s.value);
+        else console.warn(`HL syncPositions: HIP-3 dex "${dex}" failed this cycle`);
+      }
       const trigOrders = await this.fetchTriggerOrders();
       const data = await posRes.json();
       const positions = [...(data.assetPositions || [])];
       // Merge HIP-3 dex positions
       for (const r of hip3PosRes) {
-        const d = await r.json();
-        if (d.assetPositions) positions.push(...d.assetPositions);
+        try {
+          const d = await r.json();
+          if (d.assetPositions) positions.push(...d.assetPositions);
+        } catch (e) { console.warn('HL syncPositions HIP-3 parse failed:', e.message); }
       }
       const symToId = SYM_TO_COIN_ID;
 
@@ -5097,16 +5117,27 @@ const HL = {
     let livePositions;
     try {
       const queryAddr = (this.masterAddress || this.address).toLowerCase();
-      const [mainRes, ...hip3Res] = await Promise.all([
+      // v5.7: allSettled + main-must-succeed guard (matches bot.js fix).
+      const settled = await Promise.allSettled([
         fetch(this.API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr }) }),
         ...this.HIP3_DEXES.map(dex =>
           fetch(this.API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr, dex }) }))
       ]);
-      const mainData = await mainRes.json();
+      const mainSettled = settled[0];
+      if (mainSettled.status !== 'fulfilled' || !mainSettled.value.ok) {
+        console.warn('trailStops: main position fetch failed, skipping cycle');
+        return;
+      }
+      const mainData = await mainSettled.value.json();
       livePositions = [...(mainData.assetPositions || [])];
-      for (const r of hip3Res) { const d = await r.json(); livePositions.push(...(d.assetPositions || [])); }
+      for (let i = 1; i < settled.length; i++) {
+        const s = settled[i];
+        if (s.status !== 'fulfilled' || !s.value.ok) continue;
+        try { const d = await s.value.json(); livePositions.push(...(d.assetPositions || [])); }
+        catch (e) { /* keep going with main-dex positions only */ }
+      }
     } catch (e) { console.warn('trailStops: position fetch failed, skipping cycle:', e.message); return; }
 
     for (const [coinId, trade] of Object.entries(this.activeTrades)) {
