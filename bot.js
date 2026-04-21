@@ -1665,7 +1665,24 @@ const HL = {
               this.saveManualSeen();
               console.log(`HL INHERIT PROTECT: ${pos.coin} ${side} already has triggers (SL:${trig.sl||'n/a'} TP:${trig.tp||'n/a'}) — marking seen, no new orders`);
             }
-            continue; // skip — don't add to activeTrades (no trailing/management)
+            // v5.7 FIX: DO add manual positions to activeTrades with source='manual-ignored'.
+            // Previously, `continue` here skipped adding to activeTrades, which meant:
+            //   (a) maybeAutoTrade didn't see the position → fired executeTrade → placed DUPLICATE SL/TP
+            //   (b) exposure cap didn't count manual notional → bot could over-leverage
+            // Now: position is tracked (blocks new trades on same coin) but NOT trailed.
+            this.activeTrades[coinId] = {
+              asset: pos.coin,
+              side,
+              size: Math.abs(szi),
+              entry: entry,
+              sl: trig.sl || null,
+              tp: trig.tp || null,
+              initialSl: trig.sl || 0,
+              bestPrice: entry,
+              trailState: 'manual',  // special state — trailStops will skip this
+              source: 'manual-ignored'
+            };
+            continue; // skip further processing for this position (trim/manage paths)
           } else if (INHERIT_MANUAL_POSITIONS === 'trim') {
             // Queue a trim to get notional back under cap, then track the trimmed remainder.
             if (!alreadyAlerted) {
@@ -2304,6 +2321,9 @@ const HL = {
 
     for (const [coinId, trade] of Object.entries(this.activeTrades)) {
       if (!trade || !trade.entry || !trade.sl) continue;
+
+      // v5.7: Skip manual-ignored positions — they have one-time protective SL/TP only, no trailing
+      if (trade.source === 'manual-ignored' || trade.trailState === 'manual') continue;
 
       // v5.0 FIX #2: Verify position still exists on-exchange
       const stillOpen = livePositions.find(p =>
@@ -2965,6 +2985,12 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
 
   const existing = HL.activeTrades[coinId];
   if (existing) {
+    // v5.7: Never auto-trade (stack or reverse) on a coin with a manual position.
+    // The user is managing this position themselves — bot must not interfere.
+    if (existing.source === 'manual-ignored' || existing.trailState === 'manual') {
+      console.log(`HL auto-trade SKIP ${sym}: manual position active (${existing.side}, source=${existing.source}) — hands off`);
+      return;
+    }
     if (existing.side === d.sig) {
       // Same direction -- SKIP (max 1 position per coin to limit exposure)
       console.log(`HL auto-trade SKIP ${sym}: already in ${existing.side} (no stacking)`);
