@@ -171,6 +171,7 @@ const HL_API  = 'https://api.hyperliquid.xyz';
 const coinState = {};  // coinId -> { price, htfDir, results: { tf: dmsResult } }
 const ACTIVE_TRADES_FILE = path.join(__dirname, '.active_trades.json');
 const CLOSED_TRADES_FILE = path.join(__dirname, '.closed_trades.json');
+const MANUAL_SEEN_FILE   = path.join(__dirname, '.manual_seen.json');  // v5.7: persist manual-position detection across restarts
 
 // -- DEDUP ---------------------------------------------------------------------
 function loadDedup(){
@@ -1364,6 +1365,7 @@ const HL = {
       this.tradesToday = 0;
       this.lastTradeDay = new Date().toDateString();
       this.loadActiveTrades();
+      this.loadManualSeen();  // v5.7: restore manual-position detection state across restarts
       console.log('HL loaded persisted trades:', Object.keys(this.activeTrades).length, '->', JSON.stringify(this.activeTrades));
       await this.syncPositions();
       await this.processPendingTrims();   // v5.5: trim any oversized manual positions found at startup
@@ -1469,6 +1471,25 @@ const HL = {
     } catch(e) {
       console.error('HL loadActiveTrades FAILED, resetting to empty:', e.message);
       this.activeTrades = {};
+    }
+  },
+
+  // v5.7: Persist manualInheritedSeen to disk so bot restarts don't re-detect
+  // the same manual position and spam duplicate SL/TP orders.
+  saveManualSeen() {
+    try {
+      fs.writeFileSync(MANUAL_SEEN_FILE, JSON.stringify(this.manualInheritedSeen || {}));
+    } catch(e) { console.error('HL saveManualSeen FAILED:', e.message); }
+  },
+  loadManualSeen() {
+    try {
+      if (fs.existsSync(MANUAL_SEEN_FILE)) {
+        this.manualInheritedSeen = JSON.parse(fs.readFileSync(MANUAL_SEEN_FILE, 'utf8'));
+        console.log('HL: loaded manualInheritedSeen:', Object.keys(this.manualInheritedSeen).length, 'entries');
+      }
+    } catch(e) {
+      console.error('HL loadManualSeen FAILED, resetting to empty:', e.message);
+      this.manualInheritedSeen = {};
     }
   },
 
@@ -1602,13 +1623,15 @@ const HL = {
             // which is dangerous (the HYPE orphan on Apr 17 had -$4.90 unrealized with no stop).
             // Now: place a basic ATR-based SL + 2R TP on first detection, then hands off.
             // Bot will NOT trail, adjust, or re-place these orders — they're one-time protection.
-            if (!alreadyAlerted) {
-              // v5.7 FIX: Mark as seen IMMEDIATELY, before any async work.
-              // Previously this was set after placeOrder calls, creating a TOCTOU race:
-              // concurrent syncPositions calls could both see alreadyAlerted=false and
-              // place duplicate SL/TP orders. Moving it here ensures only the first call
-              // enters the protection block.
+            // v5.7 FIX: Triple guard against duplicate SL/TP placement:
+            //   (a) manualInheritedSeen persisted to disk (survives restarts)
+            //   (b) Mark seen BEFORE any async work (prevents TOCTOU race)
+            //   (c) Check if triggers already exist for this asset (final safety net)
+            const hasTriggers = trig.sl || trig.tp;
+            if (!alreadyAlerted && !hasTriggers) {
+              // Mark seen IMMEDIATELY + persist to disk, before any async work
               this.manualInheritedSeen[seenKey] = Date.now();
+              this.saveManualSeen();
 
               console.log(`HL INHERIT PROTECT: ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — placing protective SL/TP only (no trailing)`);
 
@@ -1618,18 +1641,12 @@ const HL = {
               const protectSl = isLong ? entry * (1 - slPct) : entry * (1 + slPct);
               const protectTp = isLong ? entry * (1 + slPct * 2) : entry * (1 - slPct * 2);  // 2R target
 
-              // Place protective SL
               try {
-                // First cancel any existing triggers for this asset to avoid stacking
-                await this.cancelTriggerOrders(pos.coin);
-                await new Promise(r => setTimeout(r, 300));
-
                 const slPx = isLong ? protectSl * 0.98 : protectSl * 1.02;
                 const slRes = await this.placeOrder(pos.coin, !isLong, Math.abs(szi), slPx,
                   { trigger: { isMarket: true, triggerPx: protectSl, tpsl: 'sl' } }, true);
                 const slOk = slRes && slRes.status !== 'err';
 
-                // Place protective TP
                 const tpPx = isLong ? protectTp * 1.02 : protectTp * 0.98;
                 const tpRes = await this.placeOrder(pos.coin, !isLong, Math.abs(szi), tpPx,
                   { trigger: { isMarket: true, triggerPx: protectTp, tpsl: 'tp' } }, true);
@@ -1642,7 +1659,11 @@ const HL = {
                 console.error(`HL INHERIT PROTECT: failed to place SL/TP for ${pos.coin}:`, e.message);
                 sendTelegram(`⚠️ <b>MANUAL POSITION DETECTED: ${pos.coin} ${side}</b>\nSize: ${Math.abs(szi)}\nEntry: $${fmt(entry)}\nNotional: $${notional.toFixed(0)} (${ratio}× cap $${capBase})\n\n❌ <b>FAILED to place protective SL/TP</b> — place manually!\nError: ${e.message}`).catch(()=>{});
               }
-              // v5.7: manualInheritedSeen already set at top of this block (before async work)
+            } else if (hasTriggers && !alreadyAlerted) {
+              // Triggers exist (placed manually or from a previous bot run) — just mark as seen, don't re-place
+              this.manualInheritedSeen[seenKey] = Date.now();
+              this.saveManualSeen();
+              console.log(`HL INHERIT PROTECT: ${pos.coin} ${side} already has triggers (SL:${trig.sl||'n/a'} TP:${trig.tp||'n/a'}) — marking seen, no new orders`);
             }
             continue; // skip — don't add to activeTrades (no trailing/management)
           } else if (INHERIT_MANUAL_POSITIONS === 'trim') {
@@ -1651,6 +1672,7 @@ const HL = {
               console.log(`HL INHERIT TRIM: ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — scheduling reduce-only trim to $${capBase}`);
               sendTelegram(`✂️ <b>TRIMMING MANUAL POSITION: ${pos.coin} ${side}</b>\nCurrent notional: $${notional.toFixed(0)} (${ratio}× cap)\nTarget: $${capBase}\nPlacing reduce-only order.`).catch(()=>{});
               this.manualInheritedSeen[seenKey] = Date.now();
+              this.saveManualSeen();
               // Queue the trim — run async so we don't block sync
               if (!this._pendingTrims) this._pendingTrims = [];
               this._pendingTrims.push({ coinId, side, currentSize: Math.abs(szi), currentEntry: entry, targetNotional: capBase });
@@ -1675,6 +1697,7 @@ const HL = {
             console.log(`HL INHERIT MANAGE: ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — managing at full size (not recommended)`);
             sendTelegram(`⚠️ <b>MANAGING OVERSIZED POSITION: ${pos.coin} ${side}</b>\nNotional $${notional.toFixed(0)} (${ratio}× cap)\nBot will apply its default SL/TP. Consider setting INHERIT_MANUAL_POSITIONS=ignore.`).catch(()=>{});
             this.manualInheritedSeen[seenKey] = Date.now();
+            this.saveManualSeen();
           }
         }
 
@@ -1767,6 +1790,23 @@ const HL = {
       }
 
       this.saveActiveTrades();
+
+      // v5.7: Clean stale entries from manualInheritedSeen — remove keys for positions
+      // that no longer exist (coin closed or was reversed). This allows re-detection if
+      // the user opens a new manual position on the same asset later.
+      if (this.manualInheritedSeen) {
+        let cleaned = false;
+        for (const key of Object.keys(this.manualInheritedSeen)) {
+          const coinId = key.split(':')[0];
+          if (!nowOpen.has(coinId)) {
+            delete this.manualInheritedSeen[key];
+            cleaned = true;
+            console.log(`HL: cleaned stale manualInheritedSeen entry: ${key}`);
+          }
+        }
+        if (cleaned) this.saveManualSeen();
+      }
+
       console.log('HL positions synced:', Object.keys(this.activeTrades).length, 'open');
     } catch(e) { console.warn('HL syncPositions error:', e.message); }
     finally { this._syncInFlight = false; }
