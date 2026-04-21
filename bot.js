@@ -334,6 +334,38 @@ function atr(c, p=14){
   const result = slice.reduce((s,v)=>s+v, 0) / slice.length;
   return Number.isFinite(result) ? result : 0;
 }
+// v5.7: Trend-exhaustion detector — measures cumulative price move over trailing 48 hours
+// using 4H candles (12 candles = 48h). Returns the signed percentage move from the close
+// 48h ago to the current close. Positive = price went up, negative = price went down.
+// Used by maybeAutoTrade to detect late-cycle entries and tighten stops or reduce size.
+function trendExhaustion48h(h4Candles) {
+  if (!Array.isArray(h4Candles) || h4Candles.length < 13) return { movePct: 0, highPct: 0, lowPct: 0 };
+  const recent = h4Candles.slice(-13); // 12 intervals × 4h = 48h, +1 for the starting close
+  const startClose = recent[0].c;
+  const endClose = recent[recent.length - 1].c;
+  if (!Number.isFinite(startClose) || !Number.isFinite(endClose) || startClose <= 0) return { movePct: 0, highPct: 0, lowPct: 0 };
+  const movePct = (endClose - startClose) / startClose * 100;
+  // Also track max excursion (peak-to-trough within the window) for a more nuanced view
+  let highest = -Infinity, lowest = Infinity;
+  for (let i = 1; i < recent.length; i++) {
+    if (Number.isFinite(recent[i].h) && recent[i].h > highest) highest = recent[i].h;
+    if (Number.isFinite(recent[i].l) && recent[i].l < lowest) lowest = recent[i].l;
+  }
+  const highPct = startClose > 0 ? (highest - startClose) / startClose * 100 : 0;
+  const lowPct  = startClose > 0 ? (startClose - lowest) / startClose * 100 : 0;
+  return { movePct, highPct, lowPct };
+}
+
+// v5.7: Per-coin exhaustion thresholds — configurable via COINS or environment
+// tightenPct: tighten SL to 1.5% and halve size when directional move exceeds this
+// skipPct:    skip entry entirely when directional move exceeds this
+const EXHAUSTION_THRESHOLDS = {
+  bitcoin:     { tightenPct: 3.0, skipPct: 5.0 },
+  hyperliquid: { tightenPct: 5.0, skipPct: 8.0 },
+  sp500:       { tightenPct: 2.0, skipPct: 4.0 },
+  gold:        { tightenPct: 2.0, skipPct: 4.0 },
+};
+
 function isSwingHigh(c, i, N=3){
   const bh = c[i].bh;
   for(let j=i-N; j<=i+N; j++){
@@ -1465,7 +1497,17 @@ const HL = {
   },
 
   // -- Sync positions with real HL state (main + HIP-3 dexes) --
+  _syncInFlight: false,  // v5.7: re-entrancy guard — prevents concurrent syncPositions from racing
+
   async syncPositions() {
+    // v5.7: Re-entrancy guard — if a sync is already running, skip this call.
+    // Prevents the TOCTOU race where two concurrent calls both see alreadyAlerted=false
+    // and place duplicate SL/TP orders on manual positions.
+    if (this._syncInFlight) {
+      console.log('HL syncPositions: skipping — already in flight');
+      return;
+    }
+    this._syncInFlight = true;
     try {
       const queryAddr = (this.masterAddress || this.address).toLowerCase();
       // v5.7: allSettled so a single HIP-3 dex outage cannot blank out the entire sync
@@ -1561,6 +1603,13 @@ const HL = {
             // Now: place a basic ATR-based SL + 2R TP on first detection, then hands off.
             // Bot will NOT trail, adjust, or re-place these orders — they're one-time protection.
             if (!alreadyAlerted) {
+              // v5.7 FIX: Mark as seen IMMEDIATELY, before any async work.
+              // Previously this was set after placeOrder calls, creating a TOCTOU race:
+              // concurrent syncPositions calls could both see alreadyAlerted=false and
+              // place duplicate SL/TP orders. Moving it here ensures only the first call
+              // enters the protection block.
+              this.manualInheritedSeen[seenKey] = Date.now();
+
               console.log(`HL INHERIT PROTECT: ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — placing protective SL/TP only (no trailing)`);
 
               // Calculate a reasonable SL: 2% for standard assets, 1.5% for HIP-3
@@ -1593,8 +1642,7 @@ const HL = {
                 console.error(`HL INHERIT PROTECT: failed to place SL/TP for ${pos.coin}:`, e.message);
                 sendTelegram(`⚠️ <b>MANUAL POSITION DETECTED: ${pos.coin} ${side}</b>\nSize: ${Math.abs(szi)}\nEntry: $${fmt(entry)}\nNotional: $${notional.toFixed(0)} (${ratio}× cap $${capBase})\n\n❌ <b>FAILED to place protective SL/TP</b> — place manually!\nError: ${e.message}`).catch(()=>{});
               }
-
-              this.manualInheritedSeen[seenKey] = Date.now();
+              // v5.7: manualInheritedSeen already set at top of this block (before async work)
             }
             continue; // skip — don't add to activeTrades (no trailing/management)
           } else if (INHERIT_MANUAL_POSITIONS === 'trim') {
@@ -1721,6 +1769,7 @@ const HL = {
       this.saveActiveTrades();
       console.log('HL positions synced:', Object.keys(this.activeTrades).length, 'open');
     } catch(e) { console.warn('HL syncPositions error:', e.message); }
+    finally { this._syncInFlight = false; }
   },
 
   // -- Place an order --
@@ -1981,12 +2030,37 @@ const HL = {
     }
 
     const riskAmount = accountSize * riskPct / 100;
-    const slDistance = Math.abs(currentPrice - stopPrice);
+    let effectiveStopPrice = stopPrice;
+
+    // v5.7: Trend-exhaustion modifier — tighten SL and halve size on late-cycle entries
+    // Set by maybeAutoTrade when the 48h directional move exceeds the tighten threshold.
+    const exhaustionMod = coinState[coinId]?.exhaustionModifier;
+    if (exhaustionMod?.tightenSL) {
+      const maxSlPct = 0.015; // cap at 1.5% from entry
+      const maxSlDist = currentPrice * maxSlPct;
+      const origSlDist = Math.abs(currentPrice - stopPrice);
+      if (origSlDist > maxSlDist) {
+        effectiveStopPrice = isBuy ? currentPrice - maxSlDist : currentPrice + maxSlDist;
+        console.log(`HL EXHAUSTION: ${asset} SL tightened from ${stopPrice.toFixed(1)} (${(origSlDist/currentPrice*100).toFixed(2)}%) to ${effectiveStopPrice.toFixed(1)} (${maxSlPct*100}%) [v5.7]`);
+      }
+    }
+    // Clean up one-shot modifier
+    if (coinState[coinId]?.exhaustionModifier) delete coinState[coinId].exhaustionModifier;
+
+    const slDistance = Math.abs(currentPrice - effectiveStopPrice);
     // v5.0: Use per-coin minStopPct instead of hard 0.3%
     const minStopDist = currentPrice * (coin.minStopPct || 0.005);
     if (slDistance < minStopDist) { console.warn('HL: SL too tight (' + (slDistance/currentPrice*100).toFixed(3) + '% < ' + ((coin.minStopPct||0.005)*100).toFixed(1) + '%)'); return null; }
 
     let size = riskAmount / slDistance;
+
+    // v5.7: Trend-exhaustion size reduction — halve position when entering a late-cycle move
+    if (exhaustionMod?.sizeMultiplier && exhaustionMod.sizeMultiplier < 1) {
+      const oldSize = size;
+      size *= exhaustionMod.sizeMultiplier;
+      console.log(`HL EXHAUSTION: ${asset} size reduced ${oldSize.toFixed(6)} -> ${size.toFixed(6)} (×${exhaustionMod.sizeMultiplier}) [v5.7]`);
+    }
+
     const szDec = this.szDecimals[asset] || 3;
 
     // v5.0: Cap max notional for HIP-3 assets (#4)
@@ -2060,9 +2134,10 @@ const HL = {
       }
 
       // 2. Stop Loss (full position)
-      const slPx = isBuy ? stopPrice * 0.98 : stopPrice * 1.02;
+      // v5.7: use effectiveStopPrice (may be tightened by exhaustion filter)
+      const slPx = isBuy ? effectiveStopPrice * 0.98 : effectiveStopPrice * 1.02;
       const slRes = await this.placeOrder(asset, !isBuy, size, slPx,
-        { trigger: { isMarket: true, triggerPx: stopPrice, tpsl: 'sl' } }, true);
+        { trigger: { isMarket: true, triggerPx: effectiveStopPrice, tpsl: 'sl' } }, true);
       if (!slRes || slRes.status === 'err') {
         console.error('HL SL placement failed:', slRes ? slRes.response : 'null');
         await sendTelegram(`⚠️ <b>SL FAILED for ${sig} ${asset}</b>\nTrade open WITHOUT stop loss -- place manually!`);
@@ -2073,7 +2148,7 @@ const HL = {
       // v5.2: HIP-3 assets use limit trigger (isMarket:false) for TP to avoid taker fees
       // SL remains isMarket:true for guaranteed fills — TP can afford to miss occasionally
       if (target) {
-        const riskDist = Math.abs(currentPrice - stopPrice);
+        const riskDist = Math.abs(currentPrice - effectiveStopPrice);
         const tp1Price = isBuy ? currentPrice + riskDist * 1.0 : currentPrice - riskDist * 1.0;  // 1R
         const tp2Price = isBuy ? currentPrice + riskDist * 1.8 : currentPrice - riskDist * 1.8;  // 1.8R
         // TP3 = remaining 33% handled by trailStops() — no order placed
@@ -2124,8 +2199,8 @@ const HL = {
       const actualEntry = entryRes.avgPx ? +entryRes.avgPx : currentPrice;
       this.activeTrades[coinId] = {
         asset, side: sig, size, entry: actualEntry,
-        sl: stopPrice, tp: target,
-        initialSl: stopPrice,
+        sl: effectiveStopPrice, tp: target,
+        initialSl: effectiveStopPrice,
         bestPrice: actualEntry,
         trailState: 'initial',
         partialTp: true,   // v5.0: partial TP is now default
@@ -2137,8 +2212,9 @@ const HL = {
       this.saveActiveTrades();
       this.tradesToday++;
 
-      const tradeMsg = `${isBuy ? '🟢' : '🔴'} <b>AUTO-TRADE: ${sig} ${asset}</b>\nEntry: <b>$${fmt(actualEntry)}</b>\nSize: ${size.toFixed(szDec)}\nSL: <b>$${fmt(stopPrice)}</b>${target ? '\nTP: <b>$' + fmt(target) + '</b>' : ''}\nR:R ${rr || '?'}\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
-      console.log(`HL TRADE: ${sig} ${asset} | Size: ${size.toFixed(szDec)} | Entry: $${fmt(actualEntry)} | SL: $${fmt(stopPrice)}${target ? ' | TP: $' + fmt(target) : ''}`);
+      const exhaustionNote = (effectiveStopPrice !== stopPrice) ? `\n⚡ Exhaustion filter: SL tightened from $${fmt(stopPrice)} to $${fmt(effectiveStopPrice)}` : '';
+      const tradeMsg = `${isBuy ? '🟢' : '🔴'} <b>AUTO-TRADE: ${sig} ${asset}</b>\nEntry: <b>$${fmt(actualEntry)}</b>\nSize: ${size.toFixed(szDec)}\nSL: <b>$${fmt(effectiveStopPrice)}</b>${target ? '\nTP: <b>$' + fmt(target) + '</b>' : ''}\nR:R ${rr || '?'}${exhaustionNote}\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
+      console.log(`HL TRADE: ${sig} ${asset} | Size: ${size.toFixed(szDec)} | Entry: $${fmt(actualEntry)} | SL: $${fmt(effectiveStopPrice)}${target ? ' | TP: $' + fmt(target) : ''}${effectiveStopPrice !== stopPrice ? ' [EXHAUSTION-TIGHTENED]' : ''}`);
       await sendTelegram(tradeMsg);
 
       return entryRes;
@@ -2798,6 +2874,42 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
     }
   }
 
+  // v5.7: Trend-exhaustion filter — detect late-cycle entries after extended moves
+  // When price has already moved significantly in the signal direction over the last 48h,
+  // the expected remaining edge shrinks while reversal risk increases.
+  // Three tiers: (1) below tightenPct → normal, (2) tightenPct–skipPct → tighten SL + halve size,
+  // (3) above skipPct → skip entry entirely.
+  // The exhaustion modifier is stored on coinState so executeTrade can read it.
+  {
+    const exh = coinState[coinId]?.exhaustion48h || { movePct: 0, highPct: 0, lowPct: 0 };
+    const thresholds = EXHAUSTION_THRESHOLDS[coinId] || { tightenPct: 3.0, skipPct: 5.0 };
+    // Directional move: for LONG signals, check how much price has already gone UP (positive movePct)
+    // For SHORT signals, check how much price has already gone DOWN (negative movePct → use abs)
+    const directionalMove = d.sig === 'LONG' ? exh.movePct : -exh.movePct;
+    // Also consider max excursion: if price rallied 5% then pulled back to +2%, the trend
+    // may already be exhausting even though net move is only 2%. Use the higher of the two.
+    const excursion = d.sig === 'LONG' ? exh.highPct : exh.lowPct;
+    const effectiveMove = Math.max(directionalMove, excursion * 0.6); // weight excursion at 60%
+
+    if (effectiveMove >= thresholds.skipPct) {
+      console.log(`HL EXHAUSTION SKIP: ${sym} ${d.sig} blocked — 48h move ${directionalMove.toFixed(1)}% (excursion ${excursion.toFixed(1)}%, effective ${effectiveMove.toFixed(1)}%) >= skip threshold ${thresholds.skipPct}% (v5.7)`);
+      await sendTelegram(`🔋 <b>EXHAUSTION SKIP: ${sym} ${d.sig}</b>\n48h move: ${directionalMove.toFixed(1)}% in signal direction\nExcursion: ${excursion.toFixed(1)}%\nThreshold: ${thresholds.skipPct}% (skip)\nTrend likely exhausted — entry blocked.`);
+      return;
+    }
+    if (effectiveMove >= thresholds.tightenPct) {
+      // Store the exhaustion modifier so executeTrade can tighten stops and halve size
+      if (!coinState[coinId]) coinState[coinId] = {};
+      coinState[coinId].exhaustionModifier = {
+        tightenSL: true,    // executeTrade will cap SL at 1.5% instead of ATR-based
+        sizeMultiplier: 0.5 // executeTrade will halve position size
+      };
+      console.log(`HL EXHAUSTION TIGHTEN: ${sym} ${d.sig} — 48h move ${directionalMove.toFixed(1)}% (excursion ${excursion.toFixed(1)}%, effective ${effectiveMove.toFixed(1)}%) >= tighten threshold ${thresholds.tightenPct}% — SL capped at 1.5%, size halved (v5.7)`);
+    } else {
+      // Clear any stale modifier
+      if (coinState[coinId]?.exhaustionModifier) delete coinState[coinId].exhaustionModifier;
+    }
+  }
+
   const effectiveWithTrend = withTrend && !storyConflicts;
   const minConf = effectiveWithTrend ? Math.max(MIN_CONFIDENCE - 15, 25) : storyConflicts ? Math.min(MIN_CONFIDENCE + 15, 80) : MIN_CONFIDENCE;
   const trendLabel = effectiveWithTrend ? 'WITH-TREND' : storyConflicts ? 'COUNTER-STORY' : 'NEUTRAL-TREND';
@@ -2865,6 +2977,13 @@ async function scanCoin(coinId){
     if(h4C && h1C) { const nm = nextMove(h4C, h1C); if(nm) htfDir = nm.dir; }
     else if(h4C)   { const nm = nextMove(h4C, h4C); if(nm) htfDir = nm.dir; }
     coinState[coinId].htfDir = htfDir;
+
+    // v5.7: Compute trend exhaustion for late-cycle entry detection
+    if (h4C && h4C.length >= 13) {
+      coinState[coinId].exhaustion48h = trendExhaustion48h(h4C);
+    } else {
+      coinState[coinId].exhaustion48h = { movePct: 0, highPct: 0, lowPct: 0 };
+    }
 
     // v4.9: Compute storyDir for auto-trade filtering (mirrors HTML buildStory)
     let storyDir = 'UNCLEAR';
