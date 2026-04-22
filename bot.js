@@ -3335,7 +3335,7 @@ async function scanAll(){
 }
 
 async function main(){
-  console.log(`DMS Signal Bot v4.9 started. Interval: ${INTERVAL_MS/1000}s`);
+  console.log(`DMS Signal Bot v5.9 started (inherit-protect KILL SWITCH). Interval: ${INTERVAL_MS/1000}s`);
   console.log(`Coins: BTC, HYPE, SPX, GOLD  |  Token: ...${TG_TOKEN.slice(-6)}  |  Chat: ${TG_CHATID}`);
 
   // Initialize Hyperliquid trading module
@@ -3345,14 +3345,14 @@ async function main(){
       console.log('Auto-trading ENABLED | Risk:', RISK_PCT + '%', '| Min conf:', MIN_CONFIDENCE + '%', '| Max trades/day:', MAX_TRADES_DAY);
       // Backfill any closed trades missed during downtime
       await syncFillHistory();
-      await sendTelegram('🤖 <b>DMS Signal Bot v4.9 started</b>\n✅ Auto-trading ENABLED\nScanning BTC . HYPE . SPX . GOLD every 2 min\nRisk: ' + RISK_PCT + '% | Min conf: ' + MIN_CONFIDENCE + '%');
+      await sendTelegram('🤖 <b>DMS Signal Bot v5.9 started (inherit-protect KILL SWITCH)</b>\n✅ Auto-trading ENABLED\nScanning BTC . HYPE . SPX . GOLD every 2 min\nRisk: ' + RISK_PCT + '% | Min conf: ' + MIN_CONFIDENCE + '%');
     } else {
       console.warn('Auto-trading init FAILED -- running in alert-only mode');
-      await sendTelegram('🤖 <b>DMS Signal Bot v4.9 started</b>\n⚠️ Auto-trading FAILED to init\nRunning in alert-only mode');
+      await sendTelegram('🤖 <b>DMS Signal Bot v5.9 started (inherit-protect KILL SWITCH)</b>\n⚠️ Auto-trading FAILED to init\nRunning in alert-only mode');
     }
   } else {
     console.log('Auto-trading DISABLED (set AUTO_TRADE=true and HL_PRIVATE_KEY to enable)');
-    await sendTelegram('🤖 <b>DMS Signal Bot v4.9 started</b>\nScanning BTC . HYPE . SPX . GOLD every 2 minutes.\n🔔 Alert-only mode');
+    await sendTelegram('🤖 <b>DMS Signal Bot v5.9 started (inherit-protect KILL SWITCH)</b>\nScanning BTC . HYPE . SPX . GOLD every 2 minutes.\n🔔 Alert-only mode');
   }
 
   await scanAll();
