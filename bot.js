@@ -363,8 +363,8 @@ function trendExhaustion48h(h4Candles) {
 const EXHAUSTION_THRESHOLDS = {
   bitcoin:     { tightenPct: 3.0, skipPct: 5.0 },
   hyperliquid: { tightenPct: 5.0, skipPct: 8.0 },
-  sp500:       { tightenPct: 2.0, skipPct: 4.0 },
-  gold:        { tightenPct: 2.0, skipPct: 4.0 },
+  sp500:       { tightenPct: 2.0, skipPct: 3.5 },
+  gold:        { tightenPct: 2.0, skipPct: 3.5 },
 };
 
 function isSwingHigh(c, i, N=3){
@@ -2964,6 +2964,7 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
         sizeMultiplier: 0.5 // executeTrade will halve position size
       };
       console.log(`HL EXHAUSTION TIGHTEN: ${sym} ${d.sig} — 48h move ${directionalMove.toFixed(1)}% (excursion ${excursion.toFixed(1)}%, effective ${effectiveMove.toFixed(1)}%) >= tighten threshold ${thresholds.tightenPct}% — SL capped at 1.5%, size halved (v5.7)`);
+      await sendTelegram(`⚡ <b>EXHAUSTION TIGHTEN: ${sym} ${d.sig}</b>\n48h move: ${directionalMove.toFixed(1)}% in signal direction\nExcursion: ${excursion.toFixed(1)}%\nThreshold: ${thresholds.tightenPct}% (tighten)\nSL capped at 1.5%, size halved.`);
     } else {
       // Clear any stale modifier
       if (coinState[coinId]?.exhaustionModifier) delete coinState[coinId].exhaustionModifier;
