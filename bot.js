@@ -1,4 +1,4 @@
-// DMS Signal Bot v5.4 -- AUTO-TRADE edition
+// DMS Signal Bot v5.9 -- AUTO-TRADE edition (v5.9 = inherit-protect KILL SWITCH 2026-04-22)
 // Mirrors the DMS algorithm from index.html exactly -- same levels, same scoring, same signals
 // Now also executes trades on Hyperliquid with TP/SL/trailing stops
 // Node 18+ required (uses built-in fetch)
@@ -1618,91 +1618,21 @@ const HL = {
           const side = szi > 0 ? 'LONG' : 'SHORT';
           const ratio = (notional / capBase).toFixed(2);
           if (INHERIT_MANUAL_POSITIONS === 'ignore') {
-            // v5.6: "ignore" now means "don't trail/manage sizing, BUT place initial SL/TP protection".
-            // Previously, manual positions had NO protection at all — the user had no automated SL,
-            // which is dangerous (the HYPE orphan on Apr 17 had -$4.90 unrealized with no stop).
-            // Now: place a basic ATR-based SL + 2R TP on first detection, then hands off.
-            // Bot will NOT trail, adjust, or re-place these orders — they're one-time protection.
-            // v5.7 FIX: Triple guard against duplicate SL/TP placement:
-            //   (a) manualInheritedSeen persisted to disk (survives restarts)
-            //   (b) Mark seen BEFORE any async work (prevents TOCTOU race)
-            //   (c) Check if triggers already exist for this asset (final safety net)
-            // v5.8 FIX (2026-04-22): Add a fresh on-exchange trigger fetch immediately
-            //   before placement. Reason: 12 duplicate SL/TPs piled up on a single SP500
-            //   manual position because (i) .manual_seen.json never persisted (silent
-            //   writeFileSync failure or missing working dir), so `alreadyAlerted` reset
-            //   on every restart, AND (ii) the cached `trig` map (from start of this
-            //   syncPositions cycle) was stale — orders placed by a parallel process or
-            //   a prior cycle in the last few seconds weren't reflected. The fresh fetch
-            //   right before placement closes both holes. If fresh check fails, SKIP
-            //   placement (safer than current behavior which placed unconditionally).
-            const hasTriggers = trig.sl || trig.tp;
-            if (!alreadyAlerted && !hasTriggers) {
-              // v5.8: Fresh re-check immediately before placement. Catches duplicates
-              // from concurrent bot processes, just-placed orders not yet visible at
-              // start-of-cycle, and lost in-memory dedup state.
-              let freshHasTriggers = false;
-              let freshCheckOk = false;
-              try {
-                const freshTrigOrders = await this.fetchTriggerOrders();
-                if (Array.isArray(freshTrigOrders)) {
-                  freshCheckOk = true;
-                  freshHasTriggers = freshTrigOrders.some(o => {
-                    if (o.coin !== pos.coin) return false;
-                    if (!o.reduceOnly) return false;
-                    const ot = (o.orderType || '').toLowerCase();
-                    return o.isTrigger === true || ot.includes('stop') || ot.includes('take profit') || o.tpsl === 'sl' || o.tpsl === 'tp';
-                  });
-                }
-              } catch (preErr) {
-                console.warn(`HL INHERIT PROTECT: fresh trigger check failed for ${pos.coin}:`, preErr.message);
-              }
-
-              if (!freshCheckOk) {
-                // Fresh check failed — skip placement to avoid spamming duplicates on transient API errors
-                console.warn(`HL INHERIT PROTECT: ${pos.coin} ${side} SKIPPING placement — fresh trigger fetch failed, will retry next cycle`);
-              } else if (freshHasTriggers) {
-                // Orders already exist on-exchange (placed by another process / prior cycle / manually). Mark seen, don't duplicate.
-                this.manualInheritedSeen[seenKey] = Date.now();
-                this.saveManualSeen();
-                console.log(`HL INHERIT PROTECT: ${pos.coin} ${side} found existing reduce-only triggers on-exchange (fresh check) — marking seen, no new orders`);
-              } else {
-                // Mark seen IMMEDIATELY + persist to disk, before any async work
-                this.manualInheritedSeen[seenKey] = Date.now();
-                this.saveManualSeen();
-
-                console.log(`HL INHERIT PROTECT: ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — placing protective SL/TP only (no trailing)`);
-
-                // Calculate a reasonable SL: 2% for standard assets, 1.5% for HIP-3
-                const slPct = coinCfg.isHIP3 ? 0.015 : 0.02;
-                const isLong = side === 'LONG';
-                const protectSl = isLong ? entry * (1 - slPct) : entry * (1 + slPct);
-                const protectTp = isLong ? entry * (1 + slPct * 2) : entry * (1 - slPct * 2);  // 2R target
-
-                try {
-                  const slPx = isLong ? protectSl * 0.98 : protectSl * 1.02;
-                  const slRes = await this.placeOrder(pos.coin, !isLong, Math.abs(szi), slPx,
-                    { trigger: { isMarket: true, triggerPx: protectSl, tpsl: 'sl' } }, true);
-                  const slOk = slRes && slRes.status !== 'err';
-
-                  const tpPx = isLong ? protectTp * 1.02 : protectTp * 0.98;
-                  const tpRes = await this.placeOrder(pos.coin, !isLong, Math.abs(szi), tpPx,
-                    { trigger: { isMarket: true, triggerPx: protectTp, tpsl: 'tp' } }, true);
-                  const tpOk = tpRes && tpRes.status !== 'err';
-
-                  const statusMsg = `SL ${slOk ? '✅' : '❌'} $${fmt(protectSl)} (${(slPct*100).toFixed(1)}%) | TP ${tpOk ? '✅' : '❌'} $${fmt(protectTp)} (${(slPct*200).toFixed(1)}%)`;
-                  console.log(`HL INHERIT PROTECT: ${pos.coin} ${statusMsg}`);
-                  sendTelegram(`🛡 <b>MANUAL POSITION PROTECTED: ${pos.coin} ${side}</b>\nSize: ${Math.abs(szi)}\nEntry: $${fmt(entry)}\nNotional: $${notional.toFixed(0)} (${ratio}× cap $${capBase})\n\n${statusMsg}\n\n<i>One-time protection only — bot will NOT trail or adjust these orders.</i>`).catch(()=>{});
-                } catch (e) {
-                  console.error(`HL INHERIT PROTECT: failed to place SL/TP for ${pos.coin}:`, e.message);
-                  sendTelegram(`⚠️ <b>MANUAL POSITION DETECTED: ${pos.coin} ${side}</b>\nSize: ${Math.abs(szi)}\nEntry: $${fmt(entry)}\nNotional: $${notional.toFixed(0)} (${ratio}× cap $${capBase})\n\n❌ <b>FAILED to place protective SL/TP</b> — place manually!\nError: ${e.message}`).catch(()=>{});
-                }
-              }
-            } else if (hasTriggers && !alreadyAlerted) {
-              // Triggers exist (placed manually or from a previous bot run) — just mark as seen, don't re-place
+            // v5.9 EMERGENCY KILL SWITCH (2026-04-22): The inherit-protect feature
+            //   has placed 14+ duplicate SL/TP orders across BTC + SP500 manual
+            //   positions despite v5.6/v5.7/v5.8 guards. Telegram is being spammed
+            //   on every refresh. The risk to capital from a misfiring auto-placer
+            //   on a leveraged position now outweighs the upside of having
+            //   automated SL on user-opened manual trades.
+            // BEHAVIOR: Detect manual positions, log once, register them in
+            //   activeTrades as 'manual-ignored' (so the bot won't try to trade the
+            //   same coin), but place ZERO orders and send ZERO telegram alerts.
+            //   The user manages SL/TP themselves for manual trades.
+            // To re-enable, restore the v5.8 placement block from git history.
+            if (!alreadyAlerted) {
               this.manualInheritedSeen[seenKey] = Date.now();
               this.saveManualSeen();
-              console.log(`HL INHERIT PROTECT: ${pos.coin} ${side} already has triggers (SL:${trig.sl||'n/a'} TP:${trig.tp||'n/a'}) — marking seen, no new orders`);
+              console.log(`HL INHERIT IGNORE (v5.9 kill-switch): ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — manual position detected, NO orders placed, NO telegram. User manages SL/TP.`);
             }
             // v5.7 FIX: DO add manual positions to activeTrades with source='manual-ignored'.
             // Previously, `continue` here skipped adding to activeTrades, which meant:
