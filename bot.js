@@ -1627,37 +1627,76 @@ const HL = {
             //   (a) manualInheritedSeen persisted to disk (survives restarts)
             //   (b) Mark seen BEFORE any async work (prevents TOCTOU race)
             //   (c) Check if triggers already exist for this asset (final safety net)
+            // v5.8 FIX (2026-04-22): Add a fresh on-exchange trigger fetch immediately
+            //   before placement. Reason: 12 duplicate SL/TPs piled up on a single SP500
+            //   manual position because (i) .manual_seen.json never persisted (silent
+            //   writeFileSync failure or missing working dir), so `alreadyAlerted` reset
+            //   on every restart, AND (ii) the cached `trig` map (from start of this
+            //   syncPositions cycle) was stale — orders placed by a parallel process or
+            //   a prior cycle in the last few seconds weren't reflected. The fresh fetch
+            //   right before placement closes both holes. If fresh check fails, SKIP
+            //   placement (safer than current behavior which placed unconditionally).
             const hasTriggers = trig.sl || trig.tp;
             if (!alreadyAlerted && !hasTriggers) {
-              // Mark seen IMMEDIATELY + persist to disk, before any async work
-              this.manualInheritedSeen[seenKey] = Date.now();
-              this.saveManualSeen();
-
-              console.log(`HL INHERIT PROTECT: ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — placing protective SL/TP only (no trailing)`);
-
-              // Calculate a reasonable SL: 2% for standard assets, 1.5% for HIP-3
-              const slPct = coinCfg.isHIP3 ? 0.015 : 0.02;
-              const isLong = side === 'LONG';
-              const protectSl = isLong ? entry * (1 - slPct) : entry * (1 + slPct);
-              const protectTp = isLong ? entry * (1 + slPct * 2) : entry * (1 - slPct * 2);  // 2R target
-
+              // v5.8: Fresh re-check immediately before placement. Catches duplicates
+              // from concurrent bot processes, just-placed orders not yet visible at
+              // start-of-cycle, and lost in-memory dedup state.
+              let freshHasTriggers = false;
+              let freshCheckOk = false;
               try {
-                const slPx = isLong ? protectSl * 0.98 : protectSl * 1.02;
-                const slRes = await this.placeOrder(pos.coin, !isLong, Math.abs(szi), slPx,
-                  { trigger: { isMarket: true, triggerPx: protectSl, tpsl: 'sl' } }, true);
-                const slOk = slRes && slRes.status !== 'err';
+                const freshTrigOrders = await this.fetchTriggerOrders();
+                if (Array.isArray(freshTrigOrders)) {
+                  freshCheckOk = true;
+                  freshHasTriggers = freshTrigOrders.some(o => {
+                    if (o.coin !== pos.coin) return false;
+                    if (!o.reduceOnly) return false;
+                    const ot = (o.orderType || '').toLowerCase();
+                    return o.isTrigger === true || ot.includes('stop') || ot.includes('take profit') || o.tpsl === 'sl' || o.tpsl === 'tp';
+                  });
+                }
+              } catch (preErr) {
+                console.warn(`HL INHERIT PROTECT: fresh trigger check failed for ${pos.coin}:`, preErr.message);
+              }
 
-                const tpPx = isLong ? protectTp * 1.02 : protectTp * 0.98;
-                const tpRes = await this.placeOrder(pos.coin, !isLong, Math.abs(szi), tpPx,
-                  { trigger: { isMarket: true, triggerPx: protectTp, tpsl: 'tp' } }, true);
-                const tpOk = tpRes && tpRes.status !== 'err';
+              if (!freshCheckOk) {
+                // Fresh check failed — skip placement to avoid spamming duplicates on transient API errors
+                console.warn(`HL INHERIT PROTECT: ${pos.coin} ${side} SKIPPING placement — fresh trigger fetch failed, will retry next cycle`);
+              } else if (freshHasTriggers) {
+                // Orders already exist on-exchange (placed by another process / prior cycle / manually). Mark seen, don't duplicate.
+                this.manualInheritedSeen[seenKey] = Date.now();
+                this.saveManualSeen();
+                console.log(`HL INHERIT PROTECT: ${pos.coin} ${side} found existing reduce-only triggers on-exchange (fresh check) — marking seen, no new orders`);
+              } else {
+                // Mark seen IMMEDIATELY + persist to disk, before any async work
+                this.manualInheritedSeen[seenKey] = Date.now();
+                this.saveManualSeen();
 
-                const statusMsg = `SL ${slOk ? '✅' : '❌'} $${fmt(protectSl)} (${(slPct*100).toFixed(1)}%) | TP ${tpOk ? '✅' : '❌'} $${fmt(protectTp)} (${(slPct*200).toFixed(1)}%)`;
-                console.log(`HL INHERIT PROTECT: ${pos.coin} ${statusMsg}`);
-                sendTelegram(`🛡 <b>MANUAL POSITION PROTECTED: ${pos.coin} ${side}</b>\nSize: ${Math.abs(szi)}\nEntry: $${fmt(entry)}\nNotional: $${notional.toFixed(0)} (${ratio}× cap $${capBase})\n\n${statusMsg}\n\n<i>One-time protection only — bot will NOT trail or adjust these orders.</i>`).catch(()=>{});
-              } catch (e) {
-                console.error(`HL INHERIT PROTECT: failed to place SL/TP for ${pos.coin}:`, e.message);
-                sendTelegram(`⚠️ <b>MANUAL POSITION DETECTED: ${pos.coin} ${side}</b>\nSize: ${Math.abs(szi)}\nEntry: $${fmt(entry)}\nNotional: $${notional.toFixed(0)} (${ratio}× cap $${capBase})\n\n❌ <b>FAILED to place protective SL/TP</b> — place manually!\nError: ${e.message}`).catch(()=>{});
+                console.log(`HL INHERIT PROTECT: ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — placing protective SL/TP only (no trailing)`);
+
+                // Calculate a reasonable SL: 2% for standard assets, 1.5% for HIP-3
+                const slPct = coinCfg.isHIP3 ? 0.015 : 0.02;
+                const isLong = side === 'LONG';
+                const protectSl = isLong ? entry * (1 - slPct) : entry * (1 + slPct);
+                const protectTp = isLong ? entry * (1 + slPct * 2) : entry * (1 - slPct * 2);  // 2R target
+
+                try {
+                  const slPx = isLong ? protectSl * 0.98 : protectSl * 1.02;
+                  const slRes = await this.placeOrder(pos.coin, !isLong, Math.abs(szi), slPx,
+                    { trigger: { isMarket: true, triggerPx: protectSl, tpsl: 'sl' } }, true);
+                  const slOk = slRes && slRes.status !== 'err';
+
+                  const tpPx = isLong ? protectTp * 1.02 : protectTp * 0.98;
+                  const tpRes = await this.placeOrder(pos.coin, !isLong, Math.abs(szi), tpPx,
+                    { trigger: { isMarket: true, triggerPx: protectTp, tpsl: 'tp' } }, true);
+                  const tpOk = tpRes && tpRes.status !== 'err';
+
+                  const statusMsg = `SL ${slOk ? '✅' : '❌'} $${fmt(protectSl)} (${(slPct*100).toFixed(1)}%) | TP ${tpOk ? '✅' : '❌'} $${fmt(protectTp)} (${(slPct*200).toFixed(1)}%)`;
+                  console.log(`HL INHERIT PROTECT: ${pos.coin} ${statusMsg}`);
+                  sendTelegram(`🛡 <b>MANUAL POSITION PROTECTED: ${pos.coin} ${side}</b>\nSize: ${Math.abs(szi)}\nEntry: $${fmt(entry)}\nNotional: $${notional.toFixed(0)} (${ratio}× cap $${capBase})\n\n${statusMsg}\n\n<i>One-time protection only — bot will NOT trail or adjust these orders.</i>`).catch(()=>{});
+                } catch (e) {
+                  console.error(`HL INHERIT PROTECT: failed to place SL/TP for ${pos.coin}:`, e.message);
+                  sendTelegram(`⚠️ <b>MANUAL POSITION DETECTED: ${pos.coin} ${side}</b>\nSize: ${Math.abs(szi)}\nEntry: $${fmt(entry)}\nNotional: $${notional.toFixed(0)} (${ratio}× cap $${capBase})\n\n❌ <b>FAILED to place protective SL/TP</b> — place manually!\nError: ${e.message}`).catch(()=>{});
+                }
               }
             } else if (hasTriggers && !alreadyAlerted) {
               // Triggers exist (placed manually or from a previous bot run) — just mark as seen, don't re-place
