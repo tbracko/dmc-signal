@@ -4344,43 +4344,11 @@ const HL = {
           const side = szi > 0 ? 'LONG' : 'SHORT';
           const ratio = (notional / capBase).toFixed(2);
           if (_inheritMode === 'ignore') {
-            // v5.6: "ignore" now places one-time protective SL/TP, then hands off (synced w/ bot.js).
+            // v5.9 EMERGENCY KILL SWITCH (2026-04-22): inherit-protect placement
+            //   disabled — repeatedly placed duplicate SL/TPs and spammed telegrams
+            //   despite multiple guard layers. User manages SL/TP for manual trades.
             if (!alreadyAlerted) {
-              console.log(`HL INHERIT PROTECT: ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — placing protective SL/TP only (no trailing) [v5.6]`);
-              showToast(`🛡 PROTECT ${pos.coin} ${side}`, `$${notional.toFixed(0)} = ${ratio}× cap — placing SL/TP`, side === 'SHORT');
-
-              // Calculate a reasonable SL: 2% for standard assets, 1.5% for HIP-3
-              const slPct = coinCfg.isHIP3 ? 0.015 : 0.02;
-              const _isLong = side === 'LONG';
-              const protectSl = _isLong ? entry * (1 - slPct) : entry * (1 + slPct);
-              const protectTp = _isLong ? entry * (1 + slPct * 2) : entry * (1 - slPct * 2);
-
-              try {
-                await this.cancelTriggerOrders(pos.coin);
-                await new Promise(r => setTimeout(r, 300));
-
-                const _slPx = _isLong ? protectSl * 0.98 : protectSl * 1.02;
-                const slRes = await this.placeOrder(pos.coin, !_isLong, Math.abs(szi), _slPx,
-                  { trigger: { isMarket: true, triggerPx: protectSl, tpsl: 'sl' } }, true);
-                const slOk = slRes && slRes.status !== 'err';
-
-                const _tpPx = _isLong ? protectTp * 1.02 : protectTp * 0.98;
-                const tpRes = await this.placeOrder(pos.coin, !_isLong, Math.abs(szi), _tpPx,
-                  { trigger: { isMarket: true, triggerPx: protectTp, tpsl: 'tp' } }, true);
-                const tpOk = tpRes && tpRes.status !== 'err';
-
-                const statusMsg = `SL ${slOk ? '✅' : '❌'} $${fmt(protectSl)} (${(slPct*100).toFixed(1)}%) | TP ${tpOk ? '✅' : '❌'} $${fmt(protectTp)} (${(slPct*200).toFixed(1)}%)`;
-                console.log(`HL INHERIT PROTECT: ${pos.coin} ${statusMsg}`);
-                if (typeof sendTelegram === 'function') {
-                  sendTelegram(`🛡 <b>MANUAL POSITION PROTECTED: ${pos.coin} ${side}</b>\nSize: ${Math.abs(szi)}\nEntry: $${fmt(entry)}\nNotional: $${notional.toFixed(0)} (${ratio}× cap $${capBase})\n\n${statusMsg}\n\n<i>One-time protection only — bot will NOT trail or adjust.</i>`).catch(()=>{});
-                }
-              } catch (e) {
-                console.error(`HL INHERIT PROTECT failed for ${pos.coin}:`, e.message);
-                if (typeof sendTelegram === 'function') {
-                  sendTelegram(`⚠️ <b>MANUAL POSITION DETECTED: ${pos.coin} ${side}</b>\nSize: ${Math.abs(szi)}\nEntry: $${fmt(entry)}\nNotional: $${notional.toFixed(0)} (${ratio}× cap $${capBase})\n\n❌ <b>FAILED to place SL/TP</b> — place manually!`).catch(()=>{});
-                }
-              }
-
+              console.log(`HL INHERIT IGNORE (v5.9 kill-switch): ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — manual position detected, NO orders placed, NO telegram. User manages SL/TP.`);
               this.manualInheritedSeen[seenKey] = Date.now();
             }
             continue; // skip — don't add to activeTrades (no trailing/management)
