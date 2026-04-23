@@ -1,4 +1,4 @@
-// DMS Signal Bot v5.9 -- AUTO-TRADE edition (v5.9 = inherit-protect KILL SWITCH 2026-04-22)
+// DMS Signal Bot v5.10 -- AUTO-TRADE edition (v5.10 = missed-signals log + BTC regime cap 2026-04-23)
 // Mirrors the DMS algorithm from index.html exactly -- same levels, same scoring, same signals
 // Now also executes trades on Hyperliquid with TP/SL/trailing stops
 // Node 18+ required (uses built-in fetch)
@@ -93,6 +93,22 @@
 //   - Bot/Manual P&L split: closed trades now carry a `source` field (`bot` | `manual` | `unknown`)
 //     inferred at close time from the *opening* fill's notional. Daily report generator
 //     (tools/daily-report.js) reads this and produces the split.
+//
+// v5.10 changelog (2026-04-23):
+//   - Missed-signals diagnostic log: every signal that is evaluated but filtered (regime block,
+//     counter-trend, cooldown, circuit breaker, exposure cap, exhaustion, low confidence, majority
+//     mismatch, session filter, whipsaw protection, manual position, stacking, max positions) is
+//     now recorded to .missed_signals.json with timestamp, coin, signal direction, confidence, and
+//     the specific filter reason. Entries auto-prune after 48h. daily-report.js can read this file
+//     to diagnose why the bot was inactive on any given day.
+//   - BTC regime-scaled effective cap (btcEffectiveCap): mirrors sp500EffectiveCap() pattern.
+//     Manual BTC longs at 3× the $200 cap have been consistently profitable (Apr 22: +$4.53).
+//     New tiered LONG caps:
+//       . STRONG UP (1W+1D both LONG, conf >= 70%): $400 (2× base)
+//       . UP (1W+1D both LONG):                     $200 (unchanged)
+//       . PARTIAL UP (one LONG, other neutral):      $150
+//       . Default / SHORT:                           $200 (unchanged)
+//     SHORT entries: always $200 (no regime scaling). BTC has no session filter.
 
 const fs    = require('fs');
 const path  = require('path');
@@ -172,6 +188,34 @@ const coinState = {};  // coinId -> { price, htfDir, results: { tf: dmsResult } 
 const ACTIVE_TRADES_FILE = path.join(__dirname, '.active_trades.json');
 const CLOSED_TRADES_FILE = path.join(__dirname, '.closed_trades.json');
 const MANUAL_SEEN_FILE   = path.join(__dirname, '.manual_seen.json');  // v5.7: persist manual-position detection across restarts
+const MISSED_SIGNALS_FILE = path.join(__dirname, '.missed_signals.json');  // v5.10: diagnostic log of filtered signals
+
+// -- MISSED SIGNALS LOG (v5.10) -----------------------------------------------
+// Records every signal that was evaluated but filtered, with the reason.
+// Persists to disk so daily-report.js can read it and diagnose bot inactivity.
+function loadMissedSignals() {
+  try { return JSON.parse(fs.readFileSync(MISSED_SIGNALS_FILE, 'utf8')); } catch { return []; }
+}
+function saveMissedSignals(arr) {
+  fs.writeFileSync(MISSED_SIGNALS_FILE, JSON.stringify(arr, null, 2));
+}
+function logMissedSignal(coinId, sig, conf, reason, details) {
+  const missed = loadMissedSignals();
+  // Prune entries older than 48h to prevent unbounded growth
+  const cutoff = Date.now() - 48 * 3600000;
+  const pruned = missed.filter(m => m.ts > cutoff);
+  pruned.push({
+    ts: Date.now(),
+    time: new Date().toISOString(),
+    coin: COINS[coinId] ? COINS[coinId].label : coinId,
+    coinId,
+    signal: sig,
+    confidence: conf,
+    reason,
+    details: details || null,
+  });
+  saveMissedSignals(pruned);
+}
 
 // -- DEDUP ---------------------------------------------------------------------
 function loadDedup(){
@@ -1963,6 +2007,7 @@ const HL = {
     if (lastSl && (Date.now() - lastSl) < this.COOLDOWN_MS) {
       const remaining = Math.round((this.COOLDOWN_MS - (Date.now() - lastSl)) / 1000);
       console.warn(`HL: ${coinId} on post-loss cooldown (${remaining}s remaining), skipping`);
+      logMissedSignal(coinId, signal.sig, confidence, 'post-loss-cooldown', { remainingSec: remaining, filter: `cooldown ${remaining}s remaining` });
       return null;
     }
 
@@ -1970,6 +2015,7 @@ const HL = {
     const consecLosses = this.consecutiveLosses[coinId] || 0;
     if (consecLosses >= this.MAX_CONSEC_LOSSES) {
       console.warn(`HL CIRCUIT BREAKER: ${coinId} blocked -- ${consecLosses} consecutive losses (max ${this.MAX_CONSEC_LOSSES}). Manual review needed.`);
+      logMissedSignal(coinId, signal.sig, confidence, 'circuit-breaker', { consecLosses, maxConsecLosses: this.MAX_CONSEC_LOSSES, filter: 'consecutive loss circuit breaker' });
       await sendTelegram(`⏸ <b>${coin.label} PAUSED</b>\n${consecLosses} consecutive losses -- trading paused until a manual reset or profitable close.`);
       return null;
     }
@@ -1984,6 +2030,7 @@ const HL = {
         const requiredConf = MIN_CONFIDENCE + this.COUNTER_TREND_CONF_BOOST;
         if (confidence < requiredConf) {
           console.warn(`HL COUNTER-TREND BLOCK: ${coinId} -- last win was ${recentWinDir} ${((Date.now()-recentWinTime)/3600000).toFixed(1)}h ago, ${signal.sig} needs conf ${requiredConf}% (has ${confidence}%)`);
+          logMissedSignal(coinId, signal.sig, confidence, 'counter-trend-block', { lastWinDir: recentWinDir, requiredConf, filter: `last win ${recentWinDir}, needs ${requiredConf}% conf` });
           return null;
         }
         console.log(`HL: ${coinId} counter-trend ${signal.sig} allowed -- conf ${confidence}% >= ${requiredConf}% (last win ${recentWinDir})`);
@@ -2005,6 +2052,7 @@ const HL = {
       const estimatedNewNotional = effectiveMaxNotional > 0 ? effectiveMaxNotional : (this.cachedEquity || 100) * 2;
       if (totalOpenNotional + estimatedNewNotional > maxTotalNotional) {
         console.warn(`HL EXPOSURE CAP: ${coinId} blocked — open notional $${totalOpenNotional.toFixed(0)} + est. $${estimatedNewNotional.toFixed(0)} > max $${maxTotalNotional.toFixed(0)} (8× equity) (v5.3)`);
+        logMissedSignal(coinId, signal.sig, confidence, 'exposure-cap', { openNotional: totalOpenNotional, estNewNotional: estimatedNewNotional, maxTotalNotional, filter: '8× equity exposure cap (v5.3)' });
         await sendTelegram(`🛡 <b>EXPOSURE CAP: ${coin.label}</b>\nOpen notional: $${totalOpenNotional.toFixed(0)}\nMax allowed: $${maxTotalNotional.toFixed(0)} (8× equity)\nTrade skipped.`);
         return null;
       }
@@ -2782,6 +2830,29 @@ function sp500EffectiveCap(sig, conf, allResults) {
   return { cap: 0, tier: `regime-not-UP (1W=${wk||'n/a'}, 1D=${dy||'n/a'}, US=${inUSSession})` };
 }
 
+// v5.10: BTC regime-scaled effective cap — mirrors sp500EffectiveCap() pattern.
+// Manual BTC longs at 3× cap ($600) have been consistently profitable (Apr 22: +$4.53,
+// Apr 14: +$3.12). The bot's static $200 cap is leaving money on the table.
+// For LONG entries:
+//   STRONG UP (1W+1D long, conf ≥ 70%): $400 (2× base)
+//   UP (1W+1D long):                     $200 (unchanged)
+//   PARTIAL UP (one long, other neutral): $150
+//   Otherwise:                            $200 (default — BTC has no session filter)
+// SHORT entries: always $200 (default cap, no regime scaling).
+function btcEffectiveCap(sig, conf, allResults) {
+  const defaultCap = (COINS.bitcoin && COINS.bitcoin.maxNotional) || 200;
+  if (sig !== 'LONG') return { cap: defaultCap, tier: 'SHORT/default' };
+  const wk = allResults && allResults['1W'] && allResults['1W'].sig;
+  const dy = allResults && allResults['1D'] && allResults['1D'].sig;
+  const regimeUp = wk === 'LONG' && dy === 'LONG';
+  const partialUp = (wk === 'LONG' || dy === 'LONG') && wk !== 'SHORT' && dy !== 'SHORT';
+  const strongUp = regimeUp && (typeof conf === 'number' && conf >= 70);
+  if (strongUp)    return { cap: 400, tier: 'STRONG UP (v5.10)' };
+  if (regimeUp)    return { cap: 200, tier: 'UP (v5.10)' };
+  if (partialUp)   return { cap: 150, tier: 'PARTIAL UP (v5.10)' };
+  return { cap: defaultCap, tier: `default (1W=${wk||'n/a'}, 1D=${dy||'n/a'})` };
+}
+
 async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
   if (!HL.enabled || !HL.wallet) return;
   const d = dmsResult;
@@ -2816,10 +2887,12 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
 
   if (counterTrend) {
     console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: counter-trend (HTF ${htfDir}) -- hard block v4.9`);
+    logMissedSignal(coinId, d.sig, conf, 'counter-trend', { htfDir, storyDir, filter: 'v4.9 hard block' });
     return;
   }
   if (storyConflicts && htfDir === 'UNCLEAR') {
     console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: story ${storyDir} conflicts, HTF unclear -- counter-structure`);
+    logMissedSignal(coinId, d.sig, conf, 'counter-structure', { htfDir, storyDir, filter: 'story conflicts + HTF unclear' });
     return;
   }
 
@@ -2834,6 +2907,7 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
       const { cap, tier } = sp500EffectiveCap('LONG', conf, allResults);
       if (cap <= 0) {
         console.log(`HL auto-trade BLOCKED ${sym} LONG: ${tier} -- v5.4 session-scaled sizing`);
+        logMissedSignal(coinId, d.sig, conf, 'sp500-session-cap', { tier, cap, filter: 'v5.4 session-scaled sizing' });
         return;
       }
       if (!coinState[coinId]) coinState[coinId] = {};
@@ -2848,12 +2922,28 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
     }
   }
 
+  // v5.10: BTC regime-scaled sizing — mirrors SP500 tiered cap pattern.
+  // Manual BTC longs at 3× cap have been consistently profitable. This lets the bot
+  // scale up during STRONG UP regime (1W+1D long, conf ≥ 70%) to $400 (2× base).
+  if (coinId === 'bitcoin') {
+    if (d.sig === 'LONG') {
+      const { cap, tier } = btcEffectiveCap('LONG', conf, allResults);
+      if (!coinState[coinId]) coinState[coinId] = {};
+      coinState[coinId].effectiveMaxNotional = cap;
+      console.log(`HL: ${sym} LONG sizing tier '${tier}' -> maxNotional=$${cap} (conf ${conf}%) [v5.10]`);
+    } else {
+      // SHORT: clear any stale override
+      if (coinState[coinId]) delete coinState[coinId].effectiveMaxNotional;
+    }
+  }
+
   // v5.1: GOLD session filter (synced w/ app)
   if (coinId === 'gold') {
     const utcHour = new Date().getUTCHours();
     const inGoldSession = utcHour >= 13 && utcHour < 20;
     if (!inGoldSession && d.sig === 'LONG') {
       console.log(`HL auto-trade BLOCKED ${sym} LONG: outside gold session (${utcHour}:00 UTC, allowed 13:00-20:00) -- session filter`);
+      logMissedSignal(coinId, d.sig, conf, 'gold-session-filter', { utcHour, filter: 'outside gold session 13-20 UTC' });
       return;
     }
   }
@@ -2874,6 +2964,7 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
         const oldestTs = new Date(recentCoinTrades[2].ts).getTime();
         if (Date.now() - oldestTs < 86400000) {
           console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: ranging market detected (${dirs.join('->')} in 24h) -- whipsaw protection`);
+          logMissedSignal(coinId, d.sig, conf, 'whipsaw-protection', { recentDirs: dirs.join('->'), filter: 'ranging market, 3 alternating trades in 24h' });
           await sendTelegram(`⚠️ <b>RANGING MARKET: ${sym}</b>\nLast 3 trades alternated direction (${dirs.join(' → ')})\nSkipping ${d.sig} signal until clear trend`);
           return;
         }
@@ -2894,6 +2985,7 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
       const regimeDir = weeklyDir;  // 'LONG' or 'SHORT'
       if (d.sig !== regimeDir && conf < 80) {
         console.log(`HL REGIME BLOCK: ${sym} ${d.sig} blocked — 1W+1D both ${regimeDir}, conf ${conf}% < 80% (v5.3)`);
+        logMissedSignal(coinId, d.sig, conf, 'regime-block', { regimeDir, requiredConf: 80, filter: 'v5.3 counter-regime conf < 80%' });
         await sendTelegram(`🛡 <b>REGIME BLOCK: ${sym} ${d.sig}</b>\n1W + 1D both ${regimeDir === 'LONG' ? 'bullish' : 'bearish'}\nConf ${conf}% < 80% threshold\nSignal-only, no trade.`);
         return;
       }
@@ -2922,6 +3014,7 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
 
     if (effectiveMove >= thresholds.skipPct) {
       console.log(`HL EXHAUSTION SKIP: ${sym} ${d.sig} blocked — 48h move ${directionalMove.toFixed(1)}% (excursion ${excursion.toFixed(1)}%, effective ${effectiveMove.toFixed(1)}%) >= skip threshold ${thresholds.skipPct}% (v5.7)`);
+      logMissedSignal(coinId, d.sig, conf, 'exhaustion-skip', { movePct: directionalMove, excursionPct: excursion, effectiveMove, skipPct: thresholds.skipPct, filter: 'v5.7 trend exhaustion' });
       await sendTelegram(`🔋 <b>EXHAUSTION SKIP: ${sym} ${d.sig}</b>\n48h move: ${directionalMove.toFixed(1)}% in signal direction\nExcursion: ${excursion.toFixed(1)}%\nThreshold: ${thresholds.skipPct}% (skip)\nTrend likely exhausted — entry blocked.`);
       return;
     }
@@ -2946,10 +3039,12 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
 
   if (conf < minConf) {
     console.log(`HL auto-trade SKIP ${sym} ${d.sig}: conf ${conf}% < ${minConf}% (${trendLabel})`);
+    logMissedSignal(coinId, d.sig, conf, 'low-confidence', { minConf, trendLabel, filter: `conf ${conf}% < ${minConf}%` });
     return;
   }
   if (d.sig !== majorSig) {
     console.log(`HL auto-trade SKIP ${sym}: signal ${d.sig} != majority ${majorSig}`);
+    logMissedSignal(coinId, d.sig, conf, 'majority-mismatch', { majorSig, filter: `signal ${d.sig} != majority ${majorSig}` });
     return;
   }
 
@@ -2959,11 +3054,13 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
     // The user is managing this position themselves — bot must not interfere.
     if (existing.source === 'manual-ignored' || existing.trailState === 'manual') {
       console.log(`HL auto-trade SKIP ${sym}: manual position active (${existing.side}, source=${existing.source}) — hands off`);
+      logMissedSignal(coinId, d.sig, conf, 'manual-position-active', { existingSide: existing.side, source: existing.source, filter: 'hands off manual position' });
       return;
     }
     if (existing.side === d.sig) {
       // Same direction -- SKIP (max 1 position per coin to limit exposure)
       console.log(`HL auto-trade SKIP ${sym}: already in ${existing.side} (no stacking)`);
+      logMissedSignal(coinId, d.sig, conf, 'no-stacking', { existingSide: existing.side, filter: 'already in same direction' });
     } else {
       // Opposite direction -- close and reverse
       console.log(`HL REVERSE: close ${existing.side} ${sym}, open ${d.sig} (${TFS[tfIdx].l}, conf ${conf}%)`);
@@ -2979,6 +3076,7 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
     const openCount = Object.keys(HL.activeTrades).length;
     if (openCount >= MAX_POSITIONS) {
       console.log(`HL auto-trade SKIP ${sym}: max ${MAX_POSITIONS} positions reached (${openCount} open)`);
+      logMissedSignal(coinId, d.sig, conf, 'max-positions', { maxPositions: MAX_POSITIONS, openCount, filter: `${openCount}/${MAX_POSITIONS} positions open` });
       return;
     }
     console.log(`HL AUTO-TRADE FIRE ${sym} ${d.sig} | conf: ${conf}% (min: ${minConf}%, ${trendLabel}) | SL: ${d.stopPrice} | positions: ${openCount+1}/${MAX_POSITIONS}`);
