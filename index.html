@@ -268,7 +268,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <body>
 
 <div class="topbar">
-  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v5.5</span></span>
+  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v5.11</span></span>
   <select id="coin-sel" onchange="switchCoin(this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:4px 8px;cursor:pointer;letter-spacing:.04em">
     <option value="bitcoin" data-sym="BTCUSDT" data-label="BTC/USD" selected>BTC/USD</option>
     <option value="hyperliquid" data-sym="HYPEUSDT" data-label="HYPE/USD">HYPE/USD</option>
@@ -1982,453 +1982,226 @@ function hasLTFAlignment(direction, lowerCandles) {
   return { aligned: true };
 }
 
-// ── DMS ENGINE (v4.9 — confirmed follow-through + momentum + HTF + LTF align) ─
-// 1W/1D/4H/1H: require rejection candle + follow-through to fire entries.
-// 15m: existing trap logic (FAIL_GAIN/FAIL_LOSE) is unchanged.
+// -- RETEST STRATEGY DETECTION (v5.11) -----------------------------------------
+// "Retest" pattern (highest conviction per Tomaž, 2026-04-24):
+//   1) Price BREAKS a level (up or down) — at least one recent close beyond level.
+//   2) Price returns to the level and RETESTS it WITHOUT closing through — wicks
+//      across the level are allowed, but no candle since the break closed back
+//      on the original side of the level.
+//   3) A CONVICTION candle (current bar) closes in the continuation direction
+//      with a body >= 0.5 × ATR. This is the entry trigger.
+function detectRetest(c, levelPrice, atrVal, coinMinStopPct){
+  const n = c.length;
+  if(n < 10) return { confirmed:false, reason:'insufficient candles' };
+  if(!atrVal || atrVal <= 0) return { confirmed:false, reason:'no ATR' };
+
+  const breakDist  = Math.max(atrVal * 0.3, levelPrice * 0.0015);
+  const retestTol  = Math.max(atrVal * 0.4, levelPrice * 0.002);
+  const closeBuf   = atrVal * 0.1;
+  const minBodyATR = 0.5;
+  const LOOKBACK   = Math.min(25, n - 1);
+  const RETEST_WIN = 5;
+
+  const cur = c[n - 1];
+
+  // Step 1: conviction direction from CURRENT candle
+  const bullBody = cur.c - cur.o;
+  const bearBody = cur.o - cur.c;
+  let direction = null, convictionBody = 0;
+  if(bullBody >= atrVal * minBodyATR && cur.c > levelPrice + closeBuf){
+    direction = 'LONG';  convictionBody = bullBody;
+  } else if(bearBody >= atrVal * minBodyATR && cur.c < levelPrice - closeBuf){
+    direction = 'SHORT'; convictionBody = bearBody;
+  } else {
+    return { confirmed:false, reason:'no conviction candle (body < 0.5 ATR or wrong side of level)' };
+  }
+
+  // Step 2: find retest bar in last RETEST_WIN bars (wick touches level, close on continuation side)
+  let retestBarsAgo = -1, retestExtreme = null;
+  for(let i = 1; i <= RETEST_WIN; i++){
+    if(n - 1 - i < 0) break;
+    const k = c[n - 1 - i];
+    if(direction === 'LONG'){
+      const touched = k.l <= levelPrice + retestTol && k.l >= levelPrice - retestTol;
+      const closedAbove = k.c >= levelPrice - closeBuf;
+      if(touched && closedAbove){ retestBarsAgo = i; retestExtreme = k.l; break; }
+    } else {
+      const touched = k.h >= levelPrice - retestTol && k.h <= levelPrice + retestTol;
+      const closedBelow = k.c <= levelPrice + closeBuf;
+      if(touched && closedBelow){ retestBarsAgo = i; retestExtreme = k.h; break; }
+    }
+  }
+  if(retestBarsAgo === -1){
+    return { confirmed:false, reason:'no retest touch in last ' + RETEST_WIN + ' bars' };
+  }
+
+  // Step 3: between retest and current, NO closes through the level
+  for(let i = 0; i < retestBarsAgo; i++){
+    const k = c[n - 1 - i];
+    if(direction === 'LONG' && k.c < levelPrice - closeBuf){
+      return { confirmed:false, reason:`closed through level ${i} bars ago (failed retest)` };
+    }
+    if(direction === 'SHORT' && k.c > levelPrice + closeBuf){
+      return { confirmed:false, reason:`closed through level ${i} bars ago (failed retest)` };
+    }
+  }
+
+  // Step 4: verify an earlier BREAK of the level
+  let breakBarsAgo = -1;
+  for(let i = retestBarsAgo + 1; i <= LOOKBACK; i++){
+    if(n - 1 - i < 0) break;
+    const k = c[n - 1 - i];
+    const brokeBeyond = direction === 'LONG'
+      ? k.c >= levelPrice + breakDist
+      : k.c <= levelPrice - breakDist;
+    if(!brokeBeyond) continue;
+    const deepLookEnd = Math.min(i + 10, n - 1);
+    let oppositeFound = false;
+    for(let j = i + 1; j <= deepLookEnd; j++){
+      if(n - 1 - j < 0) break;
+      const kk = c[n - 1 - j];
+      if(direction === 'LONG' && kk.c < levelPrice - closeBuf){ oppositeFound = true; break; }
+      if(direction === 'SHORT' && kk.c > levelPrice + closeBuf){ oppositeFound = true; break; }
+    }
+    if(oppositeFound){ breakBarsAgo = i; break; }
+  }
+  if(breakBarsAgo === -1){
+    return { confirmed:false, reason:'no prior break of level within lookback' };
+  }
+
+  return {
+    confirmed: true,
+    direction,
+    breakBarsAgo,
+    retestBarsAgo,
+    retestExtreme,
+    convictionBodyATR: +(convictionBody / atrVal).toFixed(2),
+    reason: `break ${breakBarsAgo}b ago, retest ${retestBarsAgo}b ago, body ${(convictionBody/atrVal).toFixed(2)} ATR`
+  };
+}
+
+// ── DMS SIGNAL ENGINE (v5.11 — RETEST STRATEGY, replaces v4.9 trap/bounce/breakout) ─
+// Retest = only pattern we trade. Runs on every TF (15m, 1H, 4H, 1D, 1W); signals
+// aggregate into multi-TF confidence the same way as before. HTF direction still
+// blocks counter-trend retests via the auto-trade gate.
 function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR, coinMinStopPct, feeEst){
   coinMinRR = coinMinRR || 1.0;
   coinMinStopPct = coinMinStopPct || 0.005;
   feeEst = feeEst || 0.05;
   const n = c.length;
-  const minCandles = (tf==='1W'||tf==='1D') ? 10 : 20;
-  if(n < minCandles) return {sig:'NEUTRAL',type:'NONE',reason:'Insufficient data ('+n+' candles)'};
+  const minCandles = (tf==='1W'||tf==='1D') ? 12 : 20;
+  if(n < minCandles) return { sig:'NEUTRAL', type:'NONE', reason:'Insufficient data' };
 
-  // v4.9: Extract htfDir as primitive string (fixes String object === comparison bug)
   const htfDir = (htfBias && htfBias.dir) ? htfBias.dir : (typeof htfBias === 'string' ? htfBias : 'UNCLEAR');
-  const usePDHL = (tf !== '1W');
+  const usePDHL  = (tf !== '1W');
   const asiaLvls = (tf === '15m') ? (htfBias.__asiaLevels || []) : [];
-  const levels = findDMCLevels(c, usePDHL ? dCandles : null, tf, asiaLvls);
-  const cur    = c[n-1];
-  const tol    = a * 0.10;
+  const levels   = findDMCLevels(c, usePDHL ? dCandles : null, tf, asiaLvls);
+  const cur      = c[n-1];
 
+  // Candidate levels: decent score, within ATR range. Closest first.
   const nearby = levels
-    .filter(l=>Math.abs(l.price-cur.c) < a*30)  // wide window: ATR×30
-    .sort((a,b)=>Math.abs(a.price-cur.c)-Math.abs(b.price-cur.c));
+    .filter(l => Math.abs(l.price - cur.c) < a * 30 && l.score >= 15)
+    .sort((x, y) => Math.abs(x.price - cur.c) - Math.abs(y.price - cur.c));
 
-  // ── 1W / 1D / 4H / 1H: CONTEXT + BLIND ENTRY ────────
-  // These timeframes show AT_LEVEL, BLIND_ENTRY or NO SETUP only.
-  // BLIND ENTRY: untested strong HTF level — Chris Hunter says these
-  // "pretty much always get some sort of reaction" and you can enter without
-  // waiting for a 15m trap. Best on 1D/1W only (too noisy on 4H/1H).
-  // AT LEVEL: tested or lower-score level — wait for 15m confirmation.
-  // The actual trap (FAIL_GAIN / FAIL_LOSE) always comes from the 15m card.
-  if(tf !== '15m'){
-    const isHTF = (tf === '1W' || tf === '1D' || tf === '4H' || tf === '1H');
+  if(nearby.length === 0){
+    return { sig:'NEUTRAL', type:'NONE', level:null, target:null, reason:'No qualifying levels within range' };
+  }
 
-    // BLIND ENTRY: untested, strong, price is touching it right now
-    // Enabled on all HTF (1W/1D/4H/1H) — with 500 candles, 4H/1H have quality levels
-    //
-    // DIRECTIONAL APPROACH CHECK (key fix):
-    // For a SHORT blind entry at resistance → price must be approaching FROM BELOW
-    //   (cur.c < level) — price has come up to the level but not yet wicked through
-    // For a LONG blind entry at support → price must be approaching FROM ABOVE
-    //   (cur.c > level) — price has come down to the level
-    // If price is already on the wrong side, it's not a valid blind entry setup
-    const blindCandidate = isHTF ? nearby.find(l=>{
-      if(!l.tested || l.tested===false){} else return false; // untested only
-      if(l.strength !== 'strong') return false;
-      if(Math.abs(l.price - cur.c) > a * 0.8) return false; // must be close
+  // -- RETEST DETECTION (v5.11) --------------------------------------------
+  // Try up to 5 nearest levels; first confirmed retest wins.
+  const maxToTest = Math.min(nearby.length, 5);
+  let atLevelFallback = null;
 
-      // Determine effective direction for approach check
-      const eft = l.flippedType;
-      const effType = eft === 'flipped_support' ? 'support'
-                    : eft === 'flipped_resistance' ? 'resistance'
-                    : l.type;
+  for(let li = 0; li < maxToTest; li++){
+    const lv = nearby[li];
+    const result = detectRetest(c, lv.price, a, coinMinStopPct);
 
-      // Directional approach: price must be on the correct side for the EFFECTIVE type
-      // For SHORT (resistance): price must be BELOW the level, approaching from below
-      // For LONG (support): price must be ABOVE the level, approaching from above
-      if(effType === 'resistance' && cur.c >= l.price) return false;
-      if(effType === 'support'    && cur.c <= l.price) return false;
+    if(result.confirmed){
+      const sig = result.direction;
+      const dirLower = sig === 'LONG' ? 'long' : 'short';
 
-      // Note: we do NOT require price to be moving toward the level on this candle —
-      // on 1D/1W a single pullback candle doesn't negate the overall approach
-      // The directional side check above is sufficient
-      return true;
-    }) : null;
+      // Local HTF counter-trend gate: block on lower TFs when HTF clearly opposes.
+      // HTF TFs (1W/1D) may fire against htfDir — they are often what turns it.
+      const isHTF = (tf === '1W' || tf === '1D');
+      const counterTrend = (sig === 'LONG' && htfDir === 'DOWN') ||
+                           (sig === 'SHORT' && htfDir === 'UP');
+      if(counterTrend && !isHTF){
+        if(!atLevelFallback) atLevelFallback = { ...lv, _retestReason: 'counter-trend, waiting for HTF flip' };
+        continue;
+      }
 
-    if(blindCandidate){
-      // Determine effective signal direction — flipped levels trade the NEW direction
-      // flipped_support = was resistance, broke above = now support → LONG when retesting
-      // flipped_resistance = was support, broke below = now resistance → SHORT when retesting
-      const ft = blindCandidate.flippedType;
-      const effectiveType = ft === 'flipped_support' ? 'support'
-                          : ft === 'flipped_resistance' ? 'resistance'
-                          : blindCandidate.type;
-      const isRes = effectiveType === 'resistance';
-      const blindSig = isRes ? 'SHORT' : 'LONG';
-      const isFlipped = ft === 'flipped_support' || ft === 'flipped_resistance';
-      // v4.5: HTF ALWAYS takes precedence — Chris Hunter rule: "higher time frames
-      // take more precedent than the lower time frames" — no exceptions, even for strong levels
-      const htfBlocks = (isRes && htfDir==='UP') || (!isRes && htfDir==='DOWN');
-      if(!htfBlocks){
-        const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
-        const stop = findStopLevel(levels, blindCandidate.price, isRes?'short':'long', a, coinMinStopPct);
-        const rr   = calcRR(cur.c, tgt.price, blindCandidate.price, stop, feeEst);
-        // Require minimum R:R (coin-specific: GOLD needs 2.0+ due to ~0.9% fees)
-        if(!rr || parseFloat(rr) < coinMinRR) {
-          // Fall through to AT_LEVEL instead of firing a bad-RR blind entry
-        } else {
-          const dist = ((blindCandidate.price - cur.c)/cur.c*100).toFixed(2);
-          const htfNote = htfDir!=='UNCLEAR' ? ` · ✓ HTF ${htfDir} aligns` : '';
-          const typeLabel = isFlipped ? `PASS-THROUGH (flipped to ${effectiveType})` : `UNTESTED ${tf} level`;
-          // v4.9: Require rejection + follow-through + momentum check
-          const rejection = hasRejection(c, blindCandidate.price, blindSig, a);
-          if(rejection.confirmed){
-            // v4.9: LTF alignment — 1W/1D signals must not conflict with lower-TF momentum
-            // Only applies to HTF signals (1W/1D) — 4H/1H left untouched to avoid over-filtering
-            if((tf === '1W' || tf === '1D') && lowerCandles){
-              const ltfCheck = hasLTFAlignment(blindSig, lowerCandles);
-              if(!ltfCheck.aligned){
-                const dir = isRes ? 'RESISTANCE — lower TF opposing' : 'SUPPORT — lower TF opposing';
-                return {
-                  sig:'NEUTRAL', type:'AT_LEVEL',
-                  level:blindCandidate.price, target:tgt.price,
-                  strength:blindCandidate.strength, score:blindCandidate.score,
-                  reason:`WAIT: ${blindCandidate.source} $${fmt(blindCandidate.price)} · rejection confirmed BUT ${ltfCheck.reason} · ${dir}`,
-                  detail:`Rejection found but lower TFs moving against — waiting for alignment`,
-                  untested: true
-                };
-              }
-            }
-            return {
-              sig: blindSig, type: 'BLIND_ENTRY',
-              level: blindCandidate.price, target: tgt.price, rr, stopPrice: stop,
-              strength: blindCandidate.strength, score: blindCandidate.score,
-              reason: `CONFIRMED: ${blindCandidate.source} $${fmt(blindCandidate.price)} · ${dist>0?'+':''}${dist}% · ${typeLabel} · rejection ${rejection.barsAgo} bars ago · follow-through confirmed${htfNote} · R:R ${rr} → $${fmt(tgt.price)}`,
-              detail: `${isFlipped?'Pass-through level':'Untested body level'} — rejection + follow-through confirmed | SL: $${fmt(stop)}`,
-              untested: true
-            };
-          }
-          // No confirmed rejection → downgrade to AT_LEVEL (alert only, no auto-trade)
-          const waitReason = rejection.reason || 'no confirmed rejection + follow-through';
-          const dir = isRes ? 'RESISTANCE — waiting for confirmation' : 'SUPPORT — waiting for confirmation';
-          return {
-            sig:'NEUTRAL', type:'AT_LEVEL',
-            level:blindCandidate.price, target:tgt.price,
-            strength:blindCandidate.strength, score:blindCandidate.score,
-            reason:`PENDING: ${blindCandidate.source} $${fmt(blindCandidate.price)} · ${dist>0?'+':''}${dist}% · ${typeLabel} · ${waitReason} · ${dir}`,
-            detail:`Level valid but no confirmed bounce yet — watching | SL would be: $${fmt(stop)}`,
-            untested: true
-          };
+      // LTF alignment: on HTF signals only, respect lower-TF momentum
+      if(isHTF && lowerCandles){
+        const ltfCheck = hasLTFAlignment(sig, lowerCandles);
+        if(!ltfCheck.aligned){
+          if(!atLevelFallback) atLevelFallback = { ...lv, _retestReason: `LTF opposing: ${ltfCheck.reason}` };
+          continue;
         }
       }
-    }
 
-    // AT LEVEL: price must be genuinely close — tighter window for HTF
-    // 1W/1D: within 0.4 ATR (roughly 1-2% on daily, prevents 13% false positives)
-    // 4H/1H: within 1.0 ATR (reasonable for intraday)
-    const atLevelWindow = isHTF ? a * 0.4 : a * 1.0;
-    const atLevel = nearby.find(l=>
-      Math.abs(l.price-cur.c) < atLevelWindow && l.score >= 20
-    );
-    if(atLevel){
-      const isRes = atLevel.type === 'resistance';
-      const confSig = isRes ? 'SHORT' : 'LONG';
-      const htfBlocks = (isRes && htfDir==='UP') || (!isRes && htfDir==='DOWN');
-      const dist = ((atLevel.price - cur.c)/cur.c*100).toFixed(2);
-      const testedNote = atLevel.testCount >= 2 ? ` · ⚠ tested ×${atLevel.testCount} — weaker`
-        : atLevel.testCount === 1 ? ' · tested ×1'
-        : ' · UNTESTED';
-      const htfNote = (isRes && htfDir==='UP')
-        ? ' · ⚠ HTF UP — short here is counter-trend'
-        : (!isRes && htfDir==='DOWN')
-          ? ' · ⚠ HTF DOWN — long here is counter-trend'
-          : (isRes && htfDir==='DOWN')
-            ? ' · ✓ HTF DOWN aligns'
-            : (!isRes && htfDir==='UP')
-              ? ' · ✓ HTF UP aligns'
-              : '';
-      // 4H/1H: check for confirmed rejection + follow-through → upgrade to trade
-      if((tf === '4H' || tf === '1H') && !htfBlocks){
-        const rejection = hasRejection(c, atLevel.price, confSig, a);
-        if(rejection.confirmed){
-          const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
-          const stop = findStopLevel(levels, atLevel.price, isRes?'short':'long', a, coinMinStopPct);
-          const rr   = calcRR(cur.c, tgt.price, atLevel.price, stop, feeEst);
-          if(rr && parseFloat(rr) >= coinMinRR){
-            return {
-              sig:confSig, type:'BLIND_ENTRY',
-              level:atLevel.price, target:tgt.price, rr, stopPrice:stop,
-              strength:atLevel.strength, score:atLevel.score,
-              reason:`CONFIRMED ${tf}: ${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · rejection ${rejection.barsAgo} bars ago · follow-through confirmed${testedNote}${htfNote} · R:R ${rr} → $${fmt(tgt.price)}`,
-              detail:`${tf} rejection + follow-through confirmed at level | SL: $${fmt(stop)}`,
-              untested:!atLevel.tested
-            };
-          }
-        }
+      // TP = next level in continuation direction
+      const tgt = findNextLevel(levels, cur.c, dirLower);
 
-        // v4.9: STRONG BODY BOUNCE — catches V-bounces without strict wick pattern
-        if(!rejection.confirmed){
-          const bounce = hasStrongBodyBounce(c, atLevel.price, confSig, a);
-          if(bounce.confirmed){
-            const tgt  = findNextLevel(levels, cur.c, isRes?'short':'long');
-            const stop = findStopLevel(levels, atLevel.price, isRes?'short':'long', a, coinMinStopPct);
-            const rr   = calcRR(cur.c, tgt.price, atLevel.price, stop, feeEst);
-            if(rr && parseFloat(rr) >= coinMinRR){
-              return {
-                sig:confSig, type:'BLIND_ENTRY',
-                level:atLevel.price, target:tgt.price, rr, stopPrice:stop,
-                strength:atLevel.strength, score:atLevel.score,
-                reason:`CONFIRMED ${tf}: ${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · strong bounce ${bounce.barsAgo} bars ago · body ${bounce.bodyATR} ATR${testedNote}${htfNote} · R:R ${rr} → $${fmt(tgt.price)}`,
-                detail:`${tf} strong body bounce at level | SL: $${fmt(stop)}`,
-                untested:!atLevel.tested
-              };
-            }
-          }
-        }
+      // SL = far side of the tested level + ATR buffer; enforce per-coin minStopPct from entry
+      const stopBuf = Math.max(a * 0.3, lv.price * 0.002);
+      let stop;
+      if(sig === 'LONG'){
+        stop = lv.price - stopBuf;
+        const entryFloor = cur.c * (1 - coinMinStopPct);
+        stop = Math.min(stop, entryFloor);
+      } else {
+        stop = lv.price + stopBuf;
+        const entryCeil = cur.c * (1 + coinMinStopPct);
+        stop = Math.max(stop, entryCeil);
       }
-      const dir = isRes
-        ? 'RESISTANCE — watch for rejection + follow-through'
-        : 'SUPPORT — watch for rejection + follow-through';
+
+      const rr = calcRR(cur.c, tgt.price, lv.price, stop, feeEst);
+      if(!rr || parseFloat(rr) < coinMinRR){
+        if(!atLevelFallback) atLevelFallback = { ...lv, _retestReason: `R:R ${rr || 'n/a'} < ${coinMinRR}` };
+        continue;
+      }
+
+      const dist    = ((lv.price - cur.c) / cur.c * 100).toFixed(2);
+      const htfNote = ((htfDir === 'UP' && sig === 'LONG') || (htfDir === 'DOWN' && sig === 'SHORT'))
+        ? ` · HTF ${htfDir} aligns` : '';
       return {
-        sig:'NEUTRAL', type:'AT_LEVEL',
-        level:atLevel.price, target:null,
-        strength:atLevel.strength, score:atLevel.score,
-        reason:`${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · ${dir}${testedNote}${htfNote}`,
-        detail:`Score: ${atLevel.score} · ${atLevel.strength}${atLevel.testCount?` · tested ×${atLevel.testCount}`:''}`,
-        untested:!atLevel.tested
+        sig,
+        type: 'BLIND_ENTRY',
+        level: lv.price,
+        target: tgt.price,
+        rr,
+        stopPrice: stop,
+        strength: lv.strength,
+        score: lv.score,
+        reason: `RETEST ${tf} ${sig}: ${lv.source} $${fmt(lv.price)} · ${dist>0?'+':''}${dist}% · ${result.reason} · conviction ${result.convictionBodyATR} ATR${htfNote} · R:R ${rr} → $${fmt(tgt.price)}`,
+        detail: `Retest entry — SL: $${fmt(stop)}`,
+        untested: false
       };
+    } else if(!atLevelFallback){
+      atLevelFallback = { ...lv, _retestReason: result.reason };
     }
-    // ── BREAKDOWN / BREAKOUT DETECTION (v4.9) ───────────────────────────
-    // Detects when price breaks THROUGH a key level convincingly:
-    // - Breakdown SHORT: price was above/near support, now body closes below it
-    // - Breakout LONG: price was below/near resistance, now body closes above it
-    // Requires: strong body candle, recent proximity to the level, HTF alignment
-    if(isHTF){
-      const breakLookback = Math.min(5, n - 1);
-      for(const lv of nearby.filter(l => l.score >= 25)){
-        const distFromLevel = (cur.c - lv.price) / lv.price;
-        const isSup = lv.type === 'support' || lv.flippedType === 'flipped_support';
-        const isRes = lv.type === 'resistance' || lv.flippedType === 'flipped_resistance';
+  }
 
-        // BREAKDOWN SHORT: price broke below support
-        // - Current body closes below level by at least 0.15% (not just a wick poke)
-        // - At least 2 of last 5 candles were above or near the level (proves it was support)
-        // - Current candle has a real bearish body (not a doji)
-        if(isSup && distFromLevel < -0.0015 && cur.c < cur.o){
-          const curBody = cur.o - cur.c;
-          if(curBody < a * 0.08) continue; // skip weak/doji candles
-          let aboveCount = 0;
-          for(let bi = 1; bi <= breakLookback; bi++){
-            const bk = c[n - 1 - bi];
-            if(bk && bk.c >= lv.price - a * 0.1) aboveCount++;
-          }
-          if(aboveCount < 2) continue; // wasn't really acting as support recently
-
-          const breakSig = 'SHORT';
-          // v5.0 FIX #7: Also block breakdowns when HTF is UNCLEAR
-          const htfBlocks = htfDir === 'UP' || htfDir === 'UNCLEAR';
-          if(htfBlocks) continue;
-
-          const tgt  = findNextLevel(levels, cur.c, 'short');
-          const stop = lv.price + a * 0.3; // SL above the broken level
-          const rr   = calcRR(cur.c, tgt.price, lv.price, stop, feeEst);
-          if(!rr || parseFloat(rr) < coinMinRR) continue;
-
-          const breakDist = (distFromLevel * 100).toFixed(2);
-          const htfNote = htfDir === 'DOWN' ? ' · ✓ HTF DOWN aligns' : '';
-          return {
-            sig: breakSig, type: 'BLIND_ENTRY',
-            level: lv.price, target: tgt.price, rr, stopPrice: stop,
-            strength: lv.strength, score: lv.score,
-            reason: `BREAKDOWN ${tf}: ${lv.source} $${fmt(lv.price)} broken · price ${breakDist}% below · ${aboveCount}/${breakLookback} candles were above · body $${fmt(curBody)}${htfNote} · R:R ${rr} → $${fmt(tgt.price)}`,
-            detail: `Support broken — old support becomes resistance | SL: $${fmt(stop)}`,
-            untested: false
-          };
-        }
-
-        // BREAKOUT LONG: price broke above resistance
-        if(isRes && distFromLevel > 0.0015 && cur.c > cur.o){
-          const curBody = cur.c - cur.o;
-          if(curBody < a * 0.08) continue;
-          let belowCount = 0;
-          for(let bi = 1; bi <= breakLookback; bi++){
-            const bk = c[n - 1 - bi];
-            if(bk && bk.c <= lv.price + a * 0.1) belowCount++;
-          }
-          if(belowCount < 2) continue;
-
-          const breakSig = 'LONG';
-          // v5.0 FIX #7: Also block breakouts when HTF is UNCLEAR
-          const htfBlocks = htfDir === 'DOWN' || htfDir === 'UNCLEAR';
-          if(htfBlocks) continue;
-
-          const tgt  = findNextLevel(levels, cur.c, 'long');
-          const stop = lv.price - a * 0.3;
-          const rr   = calcRR(cur.c, tgt.price, lv.price, stop, feeEst);
-          if(!rr || parseFloat(rr) < coinMinRR) continue;
-
-          const breakDist = (distFromLevel * 100).toFixed(2);
-          const htfNote = htfDir === 'UP' ? ' · ✓ HTF UP aligns' : '';
-          return {
-            sig: breakSig, type: 'BLIND_ENTRY',
-            level: lv.price, target: tgt.price, rr, stopPrice: stop,
-            strength: lv.strength, score: lv.score,
-            reason: `BREAKOUT ${tf}: ${lv.source} $${fmt(lv.price)} broken · price +${breakDist}% above · ${belowCount}/${breakLookback} candles were below · body $${fmt(curBody)}${htfNote} · R:R ${rr} → $${fmt(tgt.price)}`,
-            detail: `Resistance broken — old resistance becomes support | SL: $${fmt(stop)}`,
-            untested: false
-          };
-        }
-      }
-    }
-
-    // NO SETUP — show nearest levels above/below as context
-    // Use all levels if nearby is empty (wide fallback for context display)
-    const pool = nearby.length > 0 ? nearby : levels;
-    const above = pool.filter(l=>l.price > cur.c).sort((a,b)=>a.price-b.price)[0];
-    const below = pool.filter(l=>l.price < cur.c).sort((a,b)=>b.price-a.price)[0];
-    const ctx = [
-      above ? `R $${fmt(above.price)}` : null,
-      below ? `S $${fmt(below.price)}` : null
-    ].filter(Boolean).join(' / ') || '—';
+  // -- NO CONFIRMED RETEST: emit AT_LEVEL if price is hugging a level ------
+  if(atLevelFallback && Math.abs(atLevelFallback.price - cur.c) < a * 1.5){
+    const lv = atLevelFallback;
+    const dist = ((lv.price - cur.c) / cur.c * 100).toFixed(2);
+    const dir = lv.type === 'resistance'
+      ? 'RESISTANCE — watching for retest + conviction'
+      : 'SUPPORT — watching for retest + conviction';
+    const why = lv._retestReason ? ` · ${lv._retestReason}` : '';
     return {
-      sig:'NEUTRAL', type:'NONE',
-      level:null, target:null,
-      reason:`Between levels — ${ctx}${levels.length===0?' (no levels detected)':''}`,
-      detail:`${levels.length} levels detected · Wait for price to reach a key level`
+      sig: 'NEUTRAL',
+      type: 'AT_LEVEL',
+      level: lv.price,
+      target: null,
+      strength: lv.strength,
+      score: lv.score,
+      reason: `${lv.source} $${fmt(lv.price)} · ${dist>0?'+':''}${dist}% · ${dir}${why}`
     };
   }
 
-  // ── 15m ONLY: TRAP DETECTION ──────────────────────────
-  // This is Phase 3 execution. We look for:
-  // FAIL TO GAIN → SHORT: wick above resistance, 15m body closes back below
-  // FAIL TO LOSE → LONG:  wick below support, 15m body closes back above
-  // Max lookback: 3 bars (45 min) — traps older than that are stale
-  const maxLB = 3;
-
-  // HTF hard block — Chris Hunter: counter-trend 15m setups are low probability
-  // If HTF story is clearly UP, suppress 15m SHORTs entirely (and vice versa)
-  // UNCLEAR = no block, let both directions fire
-  const htfBlockShort = htfDir === 'UP';   // HTF up = no 15m shorts
-  const htfBlockLong  = htfDir === 'DOWN'; // HTF down = no 15m longs
-
-  // ── FAIL TO GAIN → SHORT ──────────────────────────────
-  for(const lv of nearby.filter(l=>l.type==='resistance')){
-    for(let lb=1; lb<=maxLB; lb++){
-      if(n-1-lb < 0) break;
-      const trap    = c[n-1-lb];
-      const confirm = c[n-1];
-
-      // Trap: 15m wick pierced resistance, body closed CONVINCINGLY back below
-      const wickedThrough  = trap.h  > lv.price + (tol * 0.5);  // wick must reach meaningfully above
-      const bodyBelow      = trap.bh < lv.price - (lv.price * 0.004); // body closes 0.4% below level (not just barely)
-      const wickSize       = trap.h - trap.bh; // wick above body
-      const bodyRange      = trap.bh - trap.bl;
-      const strongReject   = wickSize > bodyRange * 0.5; // wick at least 50% of body — clear rejection
-      if(!wickedThrough || !bodyBelow || !strongReject) continue;
-
-      // Invalidation checks
-      const priceRallied   = confirm.bh > trap.bh + a * 0.7;
-      const levelReclaimed = c.slice(n-lb, n).some(k => k.bh > lv.price);
-      const currentAbove   = confirm.bh > lv.price;
-      // Confirming candle must show follow-through — close in lower half of trap range
-      const trapMid        = (trap.bh + trap.bl) / 2;
-      const confirmFollows = confirm.c <= trapMid; // confirm closed at or below trap midpoint
-
-      if(priceRallied || levelReclaimed || currentAbove || !confirmFollows) continue;
-      if(htfBlockShort) continue;
-
-      const tgt  = findNextLevel(levels, confirm.c, 'short');
-      const stop = findStopLevel(levels, lv.price, 'short', a, coinMinStopPct);
-      const rr   = calcRR(confirm.c, tgt.price, lv.price, stop, feeEst);
-      if(rr && parseFloat(rr) < 1.0) continue; // Skip low R:R setups -- min 1.0 on 15m (widened for ATR stops)
-      const dist = ((lv.price - confirm.c)/confirm.c*100).toFixed(2);
-      return {
-        sig:'SHORT', type:'FAIL_GAIN',
-        level:lv.price, target:tgt.price, rr, stopPrice:stop,
-        strength:lv.strength, score:lv.score,
-        reason:`${lv.source} $${fmt(lv.price)} · ${dist}% above · ${lb===1?'just now':lb+' bars ago'}${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)}`,
-        detail:`Wick: $${fmt(trap.h)} | Body: $${fmt(trap.bh)} | Resistance: $${fmt(lv.price)} | SL: $${fmt(stop)}`,
-        untested:!lv.tested
-      };
-    }
-  }
-
-  // ── FAIL TO LOSE → LONG ───────────────────────────────
-  for(const lv of nearby.filter(l=>l.type==='support')){
-    for(let lb=1; lb<=maxLB; lb++){
-      if(n-1-lb < 0) break;
-      const trap    = c[n-1-lb];
-      const confirm = c[n-1];
-
-      const wickedThrough  = trap.l  < lv.price - (tol * 0.5);  // wick must reach meaningfully below
-      const bodyAbove      = trap.bl > lv.price + (lv.price * 0.004); // body closes 0.4% above level
-      const wickSize       = trap.bl - trap.l; // wick below body
-      const bodyRange      = trap.bh - trap.bl;
-      const strongReject   = wickSize > bodyRange * 0.5; // wick at least 50% of body — clear rejection
-      if(!wickedThrough || !bodyAbove || !strongReject) continue;
-
-      const priceDropped   = confirm.bl < trap.bl - a * 0.7;
-      const levelReclaimed = c.slice(n-lb, n).some(k => k.bl < lv.price);
-      const currentBelow   = confirm.bl < lv.price;
-      // Confirming candle must show follow-through — close in upper half of trap range
-      const trapMid        = (trap.bh + trap.bl) / 2;
-      const confirmFollows = confirm.c >= trapMid; // confirm closed at or above trap midpoint
-
-      if(priceDropped || levelReclaimed || currentBelow || !confirmFollows) continue;
-      if(htfBlockLong) continue;
-
-      const tgt  = findNextLevel(levels, confirm.c, 'long');
-      const stop = findStopLevel(levels, lv.price, 'long', a, coinMinStopPct);
-      const rr   = calcRR(confirm.c, tgt.price, lv.price, stop, feeEst);
-      if(rr && parseFloat(rr) < 1.0) continue; // Skip low R:R setups -- min 1.0 on 15m (widened for ATR stops)
-      const dist = ((confirm.c - lv.price)/confirm.c*100).toFixed(2);
-      return {
-        sig:'LONG', type:'FAIL_LOSE',
-        level:lv.price, target:tgt.price, rr, stopPrice:stop,
-        strength:lv.strength, score:lv.score,
-        reason:`${lv.source} $${fmt(lv.price)} · ${dist}% below · ${lb===1?'just now':lb+' bars ago'}${rr?` · R:R ${rr}`:''} → $${fmt(tgt.price)}`,
-        detail:`Wick: $${fmt(trap.l)} | Body: $${fmt(trap.bl)} | Support: $${fmt(lv.price)} | SL: $${fmt(stop)}`,
-        untested:!lv.tested
-      };
-    }
-  }
-
-  // ── 15m: BREAKOUT removed from 15m signals ───────────
-  // Chris Hunter's primary 15m signals are trap-based (FAIL TO GAIN/LOSE only)
-  // BREAKOUT = chasing a move that already happened → lower probability, often faded
-  // Breakout context is still shown on 1D/4H/1H as AT_LEVEL with GAINED note
-
-  // ── 15m: AT LEVEL (approaching key zone) ─────────────
-  const atLevel = nearby.find(l=>
-    Math.abs(l.price-cur.c) < a * 1.5 && l.score >= 20
-  );
-  if(atLevel){
-    const dir = atLevel.type==='resistance'
-      ? 'RESISTANCE — watch for wick + body close back below'
-      : 'SUPPORT — watch for wick + body close back above';
-    const dist = ((atLevel.price - cur.c)/cur.c*100).toFixed(2);
-    const testedNote = atLevel.testCount >= 2 ? ` · ⚠ tested ×${atLevel.testCount}`
-      : atLevel.testCount === 1 ? ' · tested ×1' : ' · UNTESTED';
-    const htfNote = (atLevel.type==='resistance' && htfDir==='DOWN') ? ' · ✓ HTF aligns SHORT'
-      : (atLevel.type==='support' && htfDir==='UP') ? ' · ✓ HTF aligns LONG'
-      : (atLevel.type==='resistance' && htfDir==='UP') ? ' · ⚠ HTF says UP'
-      : (atLevel.type==='support' && htfDir==='DOWN') ? ' · ⚠ HTF says DOWN'
-      : '';
-    return {
-      sig:'NEUTRAL', type:'AT_LEVEL',
-      level:atLevel.price, target:null,
-      strength:atLevel.strength, score:atLevel.score,
-      reason:`${atLevel.source} $${fmt(atLevel.price)} · ${dist>0?'+':''}${dist}% · ${dir}${testedNote}${htfNote}`,
-      detail:`Score: ${atLevel.score} · ${atLevel.strength}${atLevel.testCount?` · tested ×${atLevel.testCount}`:''}`,
-      untested:!atLevel.tested
-    };
-  }
-
-  // ── 15m: NO SETUP ────────────────────────────────────
-  const above = nearby.filter(l=>l.price > cur.c).sort((a,b)=>a.price-b.price)[0];
-  const below = nearby.filter(l=>l.price < cur.c).sort((a,b)=>b.price-a.price)[0];
-  const ctx = [
-    above ? `R $${fmt(above.price)}` : null,
-    below ? `S $${fmt(below.price)}` : null
-  ].filter(Boolean).join(' / ') || '—';
-  return {
-    sig:'NEUTRAL', type:'NONE',
-    level:null, target:null,
-    reason:`Between levels — ${ctx}`,
-    detail:'Wait for price to reach a key level'
-  };
+  return { sig:'NEUTRAL', type:'NONE', level:null, target:null, reason:'No retest pattern' };
 }
 
 // ── HTF STORY (1H + 4H analysis) ─────────────────────────
@@ -3643,16 +3416,20 @@ function processTF(i, candles, dCandles, coinId, lowerCandles){
         const SYM = { bitcoin:'BTC', hyperliquid:'HYPE', sp500:'SPX', gold:'GOLD' };
         const sym = SYM[coinId] || coinId;
 
-        // v4.9 Phase 3: Hard-block counter-trend auto-trades
+        // v5.11: Counter-trend gate loosened from v4.9 hard block.
+        // Retest signals can catch regime reversals; allow counter-trend
+        // when confidence is strong enough (multi-TF backing).
         const htfDir = s.htfDir || 'UNCLEAR';
         const storyDir = s.lastStory?.storyDir || 'UNCLEAR';
         const withTrend = (d.sig === 'LONG' && htfDir === 'UP') || (d.sig === 'SHORT' && htfDir === 'DOWN');
         const counterTrend = (d.sig === 'LONG' && htfDir === 'DOWN') || (d.sig === 'SHORT' && htfDir === 'UP');
         const storyAgrees = (d.sig === 'LONG' && storyDir === 'UP') || (d.sig === 'SHORT' && storyDir === 'DOWN');
         const storyConflicts = (d.sig === 'LONG' && storyDir === 'DOWN') || (d.sig === 'SHORT' && storyDir === 'UP');
+        const COUNTER_CONF_MIN = 40;
+        const counterTrendBlock = counterTrend && conf < COUNTER_CONF_MIN;
 
-        if(counterTrend){
-          console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: counter-trend (HTF ${htfDir}) — hard block v4.9`);
+        if(counterTrendBlock){
+          console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: counter-trend (HTF ${htfDir}), conf ${conf}% < ${COUNTER_CONF_MIN}% (v5.11 retest gate)`);
         } else if(storyConflicts && htfDir === 'UNCLEAR'){
           // Scenario A: HTF unclear but story says opposite — block
           console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: story ${storyDir} conflicts, HTF unclear — counter-structure`);
@@ -3695,11 +3472,15 @@ function processTF(i, candles, dCandles, coinId, lowerCandles){
         })()){
           // blocked by regime filter above
         } else {
+        // v5.11: log when counter-trend is allowed through (conf >= COUNTER_CONF_MIN)
+        if(counterTrend){
+          console.log(`HL: ${sym} ${d.sig} counter-trend ALLOWED — conf ${conf}% >= ${COUNTER_CONF_MIN}% (v5.11 retest gate, HTF ${htfDir})`);
+        }
         // Scenario B: story conflicts but HTF agrees — remove with-trend bonus
         // Scenario C: both agree — keep with-trend bonus
         const effectiveWithTrend = withTrend && !storyConflicts;
         const minConf = effectiveWithTrend ? Math.max(baseMinConf - 15, 25) : storyConflicts ? Math.min(baseMinConf + 15, 80) : baseMinConf;
-        const trendLabel = effectiveWithTrend ? 'WITH-TREND' : storyConflicts ? 'COUNTER-STORY' : 'NEUTRAL-TREND';
+        const trendLabel = counterTrend ? 'COUNTER-TREND(allowed)' : effectiveWithTrend ? 'WITH-TREND' : storyConflicts ? 'COUNTER-STORY' : 'NEUTRAL-TREND';
 
         if(conf < minConf){
           console.log(`HL auto-trade SKIP ${sym} ${d.sig}: conf ${conf}% < ${minConf}% (${trendLabel}, base ${baseMinConf}%)`);
