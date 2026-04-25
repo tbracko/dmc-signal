@@ -1,4 +1,4 @@
-// DMS Signal Bot v5.11 -- AUTO-TRADE edition (v5.11 = RETEST STRATEGY, replaces v4.9 trap/bounce/breakout 2026-04-24)
+// DMS Signal Bot v5.12 -- AUTO-TRADE edition (v5.12 = ADX chop filter for HYPE, 2026-04-25)
 // Mirrors the DMS algorithm from index.html exactly -- same levels, same scoring, same signals
 // Now also executes trades on Hyperliquid with TP/SL/trailing stops
 // Node 18+ required (uses built-in fetch)
@@ -109,6 +109,19 @@
 //       . PARTIAL UP (one LONG, other neutral):      $150
 //       . Default / SHORT:                           $200 (unchanged)
 //     SHORT entries: always $200 (no regime scaling). BTC has no session filter.
+//
+// v5.12 changelog (2026-04-25):
+//   - ADX CHOP FILTER: Adds calcADX() function and a per-coin range-detection gate
+//     in maybeAutoTrade. When the entry-TF ADX is below threshold (default 20 for HYPE),
+//     the signal is blocked as "range-bound." Only applies to lower TFs (15m/1H/4H);
+//     1W/1D entries are exempt (rarely whipsaw on the same horizon).
+//   - Rationale: Apr 20-24 HYPE produced 4 SL hits in 6 days (-$4.66) in a tight
+//     $40.50-$42.80 range. The Retest pattern correctly identifies level breaks and
+//     retests, but in a ranging market these "breaks" are false and don't carry through
+//     to the next level. ADX < 20 would have filtered 2-3 of these losing entries.
+//   - Configuration: CHOP_FILTER object per coin. Currently enabled for HYPE only.
+//     Expand by setting enabled: true for other coins as needed.
+//   - Sends Telegram alert when a signal is blocked by the chop filter.
 //
 // v5.11 changelog (2026-04-24):
 //   - STRATEGY REPLACEMENT: Retest strategy is now the sole entry engine. The v4.9-v5.10
@@ -400,6 +413,62 @@ function atr(c, p=14){
   const result = slice.reduce((s,v)=>s+v, 0) / slice.length;
   return Number.isFinite(result) ? result : 0;
 }
+
+// v5.12: ADX (Average Directional Index) — measures trend strength regardless of direction.
+// ADX < 20 = weak/ranging market, 20-40 = trending, > 40 = strong trend.
+// Used by the chop filter to skip entries on assets stuck in a range.
+function calcADX(c, p = 14) {
+  if (!Array.isArray(c) || c.length < p + 2) return 0;
+  // +DM / -DM and True Range for each bar
+  const dmPlus = [], dmMinus = [], trArr = [];
+  for (let i = 1; i < c.length; i++) {
+    const h = c[i].h, l = c[i].l, pc = c[i - 1].c, ph = c[i - 1].h, pl = c[i - 1].l;
+    if (!Number.isFinite(h) || !Number.isFinite(l) || !Number.isFinite(pc) ||
+        !Number.isFinite(ph) || !Number.isFinite(pl)) continue;
+    const upMove = h - ph, downMove = pl - l;
+    dmPlus.push(upMove > downMove && upMove > 0 ? upMove : 0);
+    dmMinus.push(downMove > upMove && downMove > 0 ? downMove : 0);
+    trArr.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+  }
+  if (dmPlus.length < p) return 0;
+  // Wilder smoothing (EMA-like with 1/p factor)
+  let smTR = trArr.slice(0, p).reduce((a, b) => a + b, 0);
+  let smDMp = dmPlus.slice(0, p).reduce((a, b) => a + b, 0);
+  let smDMm = dmMinus.slice(0, p).reduce((a, b) => a + b, 0);
+  const dxArr = [];
+  for (let i = p; i < trArr.length; i++) {
+    smTR = smTR - smTR / p + trArr[i];
+    smDMp = smDMp - smDMp / p + dmPlus[i];
+    smDMm = smDMm - smDMm / p + dmMinus[i];
+    if (smTR === 0) continue;
+    const diP = smDMp / smTR * 100;
+    const diM = smDMm / smTR * 100;
+    const diSum = diP + diM;
+    if (diSum === 0) continue;
+    dxArr.push(Math.abs(diP - diM) / diSum * 100);
+  }
+  if (dxArr.length < p) return dxArr.length > 0 ? dxArr[dxArr.length - 1] : 0;
+  // Smooth DX into ADX (first ADX = average of first p DX values, then Wilder smooth)
+  let adx = dxArr.slice(0, p).reduce((a, b) => a + b, 0) / p;
+  for (let i = p; i < dxArr.length; i++) {
+    adx = (adx * (p - 1) + dxArr[i]) / p;
+  }
+  return Number.isFinite(adx) ? adx : 0;
+}
+
+// v5.12: Chop filter configuration per coin.
+// adxThreshold: below this ADX value, market is considered ranging → skip entry.
+// lookbackBars: how many candles to feed into ADX calc (on the ENTRY timeframe).
+// minTFWeight: only apply the chop filter on lower TFs (weight <= this). HTF entries
+//   (1W/1D) are exempt because they rarely whipsaw on the same time horizon.
+// enabled: master switch per coin. Currently only HYPE — expand to others as needed.
+const CHOP_FILTER = {
+  hyperliquid: { enabled: true,  adxThreshold: 20, lookbackBars: 30, minTFWeight: 3 }, // HYPE: 15m/1H/4H
+  bitcoin:     { enabled: false, adxThreshold: 18, lookbackBars: 30, minTFWeight: 3 },
+  sp500:       { enabled: false, adxThreshold: 18, lookbackBars: 30, minTFWeight: 3 },
+  gold:        { enabled: false, adxThreshold: 18, lookbackBars: 30, minTFWeight: 3 },
+};
+
 // v5.7: Trend-exhaustion detector — measures cumulative price move over trailing 48 hours
 // using 4H candles (12 candles = 48h). Returns the signed percentage move from the close
 // 48h ago to the current close. Positive = price went up, negative = price went down.
@@ -2853,7 +2922,7 @@ function btcEffectiveCap(sig, conf, allResults) {
   return { cap: defaultCap, tier: `default (1W=${wk||'n/a'}, 1D=${dy||'n/a'})` };
 }
 
-async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
+async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults, entryCandles) {
   if (!HL.enabled || !HL.wallet) return;
   const d = dmsResult;
   if (d.sig === 'NEUTRAL' || !d.stopPrice) return;
@@ -2979,6 +3048,26 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults) {
           return;
         }
       }
+    }
+  }
+
+  // v5.12: ADX chop filter — skip entries when the entry-TF ADX is below threshold,
+  // indicating a range-bound / choppy market. This is the primary defense against the
+  // HYPE whipsaw pattern (Apr 20-24: 4 SL hits in 6 days in a $40.50-$42.80 range).
+  // Only applies to lower TFs (15m/1H/4H) where chop is most damaging; HTF entries
+  // (1W/1D) are exempt because a weekly retest rarely whipsaws intra-day.
+  {
+    const chopCfg = CHOP_FILTER[coinId];
+    const tfWeight = TFS[tfIdx]?.w || 0;
+    if (chopCfg && chopCfg.enabled && tfWeight <= chopCfg.minTFWeight && entryCandles) {
+      const adxVal = calcADX(entryCandles, 14);
+      if (adxVal < chopCfg.adxThreshold) {
+        console.log(`HL CHOP FILTER: ${sym} ${d.sig} blocked — ADX ${adxVal.toFixed(1)} < ${chopCfg.adxThreshold} on ${TFS[tfIdx].l} (v5.12 range filter)`);
+        logMissedSignal(coinId, d.sig, conf, 'chop-filter', { adx: adxVal.toFixed(1), threshold: chopCfg.adxThreshold, tf: TFS[tfIdx].l, filter: 'v5.12 ADX chop filter' });
+        await sendTelegram(`🔀 <b>CHOP FILTER: ${sym} ${d.sig}</b>\n${TFS[tfIdx].l} ADX: ${adxVal.toFixed(1)} (threshold: ${chopCfg.adxThreshold})\nMarket is range-bound — entry skipped.`);
+        return;
+      }
+      console.log(`HL: ${sym} chop filter OK — ADX ${adxVal.toFixed(1)} >= ${chopCfg.adxThreshold} on ${TFS[tfIdx].l} (v5.12)`);
     }
   }
 
@@ -3245,7 +3334,7 @@ async function scanCoin(coinId){
           if(d.sig !== 'NEUTRAL' && d.type === 'BLIND_ENTRY') firedDirection = d.sig;
           await maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, d.stopPrice, coinId, price, allLevels);
           // Auto-trade execution
-          await maybeAutoTrade(coinId, i, d, allResults);
+          await maybeAutoTrade(coinId, i, d, allResults, c);
         }
       }
     }
