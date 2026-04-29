@@ -1,4 +1,4 @@
-// DMS Signal Bot v5.12 -- AUTO-TRADE edition (v5.12 = ADX chop filter for HYPE, 2026-04-25)
+// DMS Signal Bot v5.13 -- AUTO-TRADE edition (v5.13 = range-awareness + funding amplifier + BTC time-of-day, 2026-04-29)
 // Mirrors the DMS algorithm from index.html exactly -- same levels, same scoring, same signals
 // Now also executes trades on Hyperliquid with TP/SL/trailing stops
 // Node 18+ required (uses built-in fetch)
@@ -122,6 +122,22 @@
 //   - Configuration: CHOP_FILTER object per coin. Currently enabled for HYPE only.
 //     Expand by setting enabled: true for other coins as needed.
 //   - Sends Telegram alert when a signal is blocked by the chop filter.
+//
+// v5.13 changelog (2026-04-29):
+//   - RANGE-AWARENESS FILTER (BTC): Detects where price sits within the 48h high-low range.
+//     Shorts near the bottom 30% or longs near the top 30% get a 12% confidence penalty.
+//     Prevents entries like Apr 28's BTC short at $76,136 (near range support) that got
+//     squeezed to $76,878 for a -$2.13 loss. Computed from existing 4H candle data in runCoin.
+//   - FUNDING RATE SIGNAL AMPLIFIER (HIP-3 assets): Fetches current predicted funding rate
+//     from Hyperliquid metaAndAssetCtxs. When |rate| > 0.01%/8h and funding direction aligns
+//     with the Retest signal (positive rate favors SHORT, negative favors LONG), confidence
+//     gets an 8% boost. Rationale: Apr 28 GOLD shorts collected +$0.107 in funding — structural
+//     carry that amplifies the Retest edge. Applies to SP500 and GOLD (isHIP3 assets).
+//   - BTC TIME-OF-DAY FILTER: 10% confidence penalty during US session (13:00-20:00 UTC).
+//     BTC frequently mean-reverts during these hours due to institutional hedging flows.
+//     Apr 28's losing short entered at 13:09 UTC; the successful Apr 27 short entered at
+//     ~21:45 UTC (low-liquidity Asian hours). Does not hard-block — just makes it harder
+//     for marginal signals to fire during whipsaw-prone hours.
 //
 // v5.11 changelog (2026-04-24):
 //   - STRATEGY REPLACEMENT: Retest strategy is now the sole entry engine. The v4.9-v5.10
@@ -500,6 +516,34 @@ const EXHAUSTION_THRESHOLDS = {
   sp500:       { tightenPct: 2.0, skipPct: 3.5 },
   gold:        { tightenPct: 2.0, skipPct: 3.5 },
 };
+
+// v5.13: Fetch current predicted funding rate from Hyperliquid for HIP-3 (and standard) assets.
+// Returns the per-8h funding rate as a decimal (e.g., 0.0003 = 0.03% per 8h).
+// Positive rate = longs pay shorts; negative rate = shorts pay longs.
+async function hlFundingRate(apiSym) {
+  try {
+    const isHIP3 = apiSym.startsWith('xyz:');
+    const body = { type: 'metaAndAssetCtxs' };
+    if (isHIP3) body.dex = 'xyz';
+    const r = await fetch(HL_API + '/info', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) return null;
+    const data = await r.json();
+    // Response is [meta, assetCtxs[]] — meta.universe[i].name matches assetCtxs[i]
+    const [meta, ctxs] = data;
+    if (!meta || !meta.universe || !Array.isArray(ctxs)) return null;
+    // HIP-3 universe names keep the 'xyz:' prefix (e.g., 'xyz:GOLD', 'xyz:SP500')
+    const assetName = isHIP3 ? apiSym : apiSym.replace('USDT', '');
+    const idx = meta.universe.findIndex(u => u.name === assetName);
+    if (idx < 0 || !ctxs[idx]) return null;
+    return parseFloat(ctxs[idx].funding);
+  } catch (e) {
+    console.warn(`hlFundingRate(${apiSym}):`, e.message);
+    return null;
+  }
+}
 
 function isSwingHigh(c, i, N=3){
   const bh = c[i].bh;
@@ -2940,7 +2984,7 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults, entryCandles
     if (r.sig === 'LONG') wL += t.w;
     if (r.sig === 'SHORT') wS += t.w;
   });
-  const conf = totalW > 0 ? Math.round(Math.max(wL, wS) / totalW * 100) : 0;
+  let conf = totalW > 0 ? Math.round(Math.max(wL, wS) / totalW * 100) : 0;
   const majorSig = wL > wS ? 'LONG' : wS > wL ? 'SHORT' : null;
   const sym = COINS[coinId].label;
 
@@ -3132,6 +3176,67 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults, entryCandles
     }
   }
 
+  // v5.13: Range-awareness filter — downgrade confidence when entering near 48h range extremes.
+  // Shorting near the bottom of a multi-day range (bottom 30%) has poor follow-through because
+  // price tends to bounce off support. Same for longing near range top (top 30%).
+  // Applies to BTC where multi-day consolidation ranges are common.
+  // Penalty: 12% confidence reduction — enough to push marginal signals below threshold
+  // without blocking strong multi-TF consensus entries.
+  if (coinId === 'bitcoin') {
+    const range = s?.range48h;
+    if (range && range.high > range.low) {
+      const rangeSize = range.high - range.low;
+      const currentPx = s.price || 0;
+      if (currentPx > 0 && rangeSize > 0) {
+        const pricePos = (currentPx - range.low) / rangeSize; // 0 = bottom, 1 = top
+        const badEntry = (d.sig === 'SHORT' && pricePos < 0.30) || (d.sig === 'LONG' && pricePos > 0.70);
+        if (badEntry) {
+          const penalty = 12;
+          const oldConf = conf;
+          conf = Math.max(conf - penalty, 0);
+          console.log(`HL RANGE-AWARE: ${sym} ${d.sig} conf ${oldConf}% -> ${conf}% — price $${currentPx.toFixed(0)} at ${(pricePos * 100).toFixed(0)}% of 48h range ($${range.low.toFixed(0)}-$${range.high.toFixed(0)}) [v5.13]`);
+          if (conf < oldConf) {
+            logMissedSignal(coinId, d.sig, conf, 'range-awareness-penalty', { pricePosInRange: +(pricePos * 100).toFixed(1), rangeLow: range.low, rangeHigh: range.high, penalty, filter: `v5.13 range-awareness: ${d.sig} at ${(pricePos*100).toFixed(0)}% of range` });
+          }
+        }
+      }
+    }
+  }
+
+  // v5.13: Funding rate signal amplifier — boost confidence when carry aligns with signal.
+  // Positive funding = longs pay shorts → structural edge for SHORT entries.
+  // Negative funding = shorts pay longs → structural edge for LONG entries.
+  // Threshold: |rate| > 0.0001 per 8h (~0.01%/hr, ~4.4% annualized) — meaningful carry.
+  // Boost: +8% confidence. Stacks with other adjustments but can't exceed 100%.
+  // Applies to all assets that have a funding rate (HIP-3 and Hyperliquid perps).
+  {
+    const fundingRate = s?.fundingRate;
+    if (fundingRate != null && Math.abs(fundingRate) > 0.0001) {
+      const fundingFavors = fundingRate > 0 ? 'SHORT' : 'LONG';
+      if (d.sig === fundingFavors) {
+        const boost = 8;
+        const oldConf = conf;
+        conf = Math.min(conf + boost, 100);
+        console.log(`HL FUNDING BOOST: ${sym} ${d.sig} conf ${oldConf}% -> ${conf}% — funding rate ${(fundingRate * 100).toFixed(4)}%/8h favors ${fundingFavors} [v5.13]`);
+      }
+    }
+  }
+
+  // v5.13: BTC time-of-day filter — reduce confidence during US session whipsaw hours.
+  // BTC frequently mean-reverts between 13:00-20:00 UTC when institutional hedging flows
+  // and US equities correlation create chop. Apr 28's losing short entered at 13:09 UTC
+  // (immediate US-session whipsaw), while the winning Apr 27 short entered at ~21:45 UTC.
+  // Penalty: 10% confidence reduction — does not hard-block, but marginal signals are filtered.
+  if (coinId === 'bitcoin') {
+    const utcHour = new Date().getUTCHours();
+    if (utcHour >= 13 && utcHour < 20) {
+      const penalty = 10;
+      const oldConf = conf;
+      conf = Math.max(conf - penalty, 0);
+      console.log(`HL TIME-OF-DAY: ${sym} ${d.sig} conf ${oldConf}% -> ${conf}% — US session (${utcHour}:00 UTC, 13-20 window) [v5.13]`);
+    }
+  }
+
   const effectiveWithTrend = withTrend && !storyConflicts;
   const minConf = effectiveWithTrend ? Math.max(MIN_CONFIDENCE - 15, 25) : storyConflicts ? Math.min(MIN_CONFIDENCE + 15, 80) : MIN_CONFIDENCE;
   const trendLabel = effectiveWithTrend ? 'WITH-TREND' : storyConflicts ? 'COUNTER-STORY' : 'NEUTRAL-TREND';
@@ -3216,6 +3321,28 @@ async function scanCoin(coinId){
       coinState[coinId].exhaustion48h = trendExhaustion48h(h4C);
     } else {
       coinState[coinId].exhaustion48h = { movePct: 0, highPct: 0, lowPct: 0 };
+    }
+
+    // v5.13: Compute 48h price range for range-awareness filter
+    if (h4C && h4C.length >= 13) {
+      const rangeSlice = h4C.slice(-13);
+      let rangeHigh = -Infinity, rangeLow = Infinity;
+      for (const k of rangeSlice) {
+        if (Number.isFinite(k.h) && k.h > rangeHigh) rangeHigh = k.h;
+        if (Number.isFinite(k.l) && k.l < rangeLow) rangeLow = k.l;
+      }
+      coinState[coinId].range48h = { high: rangeHigh, low: rangeLow };
+    } else {
+      coinState[coinId].range48h = null;
+    }
+
+    // v5.13: Fetch funding rate for all HL-traded assets (funding-aware confidence boost)
+    // All coins execute on Hyperliquid even though BTC/HYPE use Binance/Bybit for candle data.
+    // hlFundingRate strips 'USDT'/'xyz:' from apiSym to match HL universe names.
+    try {
+      coinState[coinId].fundingRate = await hlFundingRate(COINS[coinId].apiSym);
+    } catch (e) {
+      coinState[coinId].fundingRate = null;
     }
 
     // v4.9: Compute storyDir for auto-trade filtering (mirrors HTML buildStory)
