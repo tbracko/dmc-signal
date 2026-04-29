@@ -999,6 +999,31 @@ async function getCandles(tf, coinId){
   return bnKlines(coin.apiSym, iv, limit);
 }
 
+// v5.13: Fetch current predicted funding rate from Hyperliquid.
+// Returns per-8h funding rate as decimal. Positive = longs pay shorts.
+async function hlFundingRate(apiSym) {
+  try {
+    const isHIP3 = apiSym.startsWith('xyz:');
+    const body = { type: 'metaAndAssetCtxs' };
+    if (isHIP3) body.dex = 'xyz';
+    const r = await fetch(HL_INFO.replace('/info','') + '/info', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) return null;
+    const data = await r.json();
+    const [meta, ctxs] = data;
+    if (!meta || !meta.universe || !Array.isArray(ctxs)) return null;
+    const assetName = isHIP3 ? apiSym : apiSym.replace('USDT', '');
+    const idx = meta.universe.findIndex(u => u.name === assetName);
+    if (idx < 0 || !ctxs[idx]) return null;
+    return parseFloat(ctxs[idx].funding);
+  } catch (e) {
+    console.warn(`hlFundingRate(${apiSym}):`, e.message);
+    return null;
+  }
+}
+
 // aggregateCandles kept for any legacy callers (unused but harmless)
 function aggregateCandles(prices, msPerCandle){
   const B={};
@@ -3410,7 +3435,7 @@ function processTF(i, candles, dCandles, coinId, lowerCandles){
         let wL=0, wS=0, aW=0;
         const totalW=TFS.reduce((sum,t)=>sum+t.w,0);
         TFS.forEach(t=>{ const r=s.results[t.l]; if(!r)return; if(r.type!=='NONE')aW+=t.w; if(r.sig==='LONG')wL+=t.w; if(r.sig==='SHORT')wS+=t.w; });
-        const conf = totalW>0 ? Math.round(Math.max(wL,wS)/totalW*100) : 0;
+        let conf = totalW>0 ? Math.round(Math.max(wL,wS)/totalW*100) : 0;
         const baseMinConf = parseInt(localStorage.getItem('hl_min_conf') || '50');
         const majorSig = wL > wS ? 'LONG' : wS > wL ? 'SHORT' : null;
         const SYM = { bitcoin:'BTC', hyperliquid:'HYPE', sp500:'SPX', gold:'GOLD' };
@@ -3476,6 +3501,47 @@ function processTF(i, candles, dCandles, coinId, lowerCandles){
         if(counterTrend){
           console.log(`HL: ${sym} ${d.sig} counter-trend ALLOWED — conf ${conf}% >= ${COUNTER_CONF_MIN}% (v5.11 retest gate, HTF ${htfDir})`);
         }
+        // v5.13: Range-awareness filter — downgrade confidence near 48h range extremes (BTC only)
+        if (coinId === 'bitcoin') {
+          const range = s?.range48h;
+          if (range && range.high > range.low) {
+            const rangeSize = range.high - range.low;
+            const currentPx = s.price || 0;
+            if (currentPx > 0 && rangeSize > 0) {
+              const pricePos = (currentPx - range.low) / rangeSize;
+              const badEntry = (d.sig === 'SHORT' && pricePos < 0.30) || (d.sig === 'LONG' && pricePos > 0.70);
+              if (badEntry) {
+                const oldConf = conf;
+                conf = Math.max(conf - 12, 0);
+                console.log(`HL RANGE-AWARE: ${sym} ${d.sig} conf ${oldConf}% -> ${conf}% — price at ${(pricePos*100).toFixed(0)}% of 48h range [v5.13]`);
+              }
+            }
+          }
+        }
+
+        // v5.13: Funding rate signal amplifier — boost when carry aligns with signal
+        {
+          const fundingRate = s?.fundingRate;
+          if (fundingRate != null && Math.abs(fundingRate) > 0.0001) {
+            const fundingFavors = fundingRate > 0 ? 'SHORT' : 'LONG';
+            if (d.sig === fundingFavors) {
+              const oldConf = conf;
+              conf = Math.min(conf + 8, 100);
+              console.log(`HL FUNDING BOOST: ${sym} ${d.sig} conf ${oldConf}% -> ${conf}% — funding ${(fundingRate*100).toFixed(4)}%/8h [v5.13]`);
+            }
+          }
+        }
+
+        // v5.13: BTC time-of-day filter — reduce confidence during US session (13-20 UTC)
+        if (coinId === 'bitcoin') {
+          const utcHour = new Date().getUTCHours();
+          if (utcHour >= 13 && utcHour < 20) {
+            const oldConf = conf;
+            conf = Math.max(conf - 10, 0);
+            console.log(`HL TIME-OF-DAY: ${sym} ${d.sig} conf ${oldConf}% -> ${conf}% — US session (${utcHour}:00 UTC) [v5.13]`);
+          }
+        }
+
         // Scenario B: story conflicts but HTF agrees — remove with-trend bonus
         // Scenario C: both agree — keep with-trend bonus
         const effectiveWithTrend = withTrend && !storyConflicts;
@@ -3610,6 +3676,22 @@ async function runCoin(coinId){
     if(nm){
       s.htfDir = nm.dir;
     }
+
+    // v5.13: Compute 48h price range for range-awareness filter
+    if (h4Entry?.c && h4Entry.c.length >= 13) {
+      const rangeSlice = h4Entry.c.slice(-13);
+      let rangeHigh = -Infinity, rangeLow = Infinity;
+      for (const k of rangeSlice) {
+        if (Number.isFinite(k.h) && k.h > rangeHigh) rangeHigh = k.h;
+        if (Number.isFinite(k.l) && k.l < rangeLow) rangeLow = k.l;
+      }
+      s.range48h = { high: rangeHigh, low: rangeLow };
+    } else {
+      s.range48h = null;
+    }
+
+    // v5.13: Fetch funding rate for confidence amplifier (non-blocking)
+    hlFundingRate(COINS[coinId].apiSym).then(rate => { s.fundingRate = rate; }).catch(() => { s.fundingRate = null; });
 
     // v4.9: Build lower-TF candle data for LTF alignment checks on 1W/1D only
     // 4H/1H/15m signals are left untouched — working well for BTC/SPX/HYPE
