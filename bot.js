@@ -1,4 +1,4 @@
-// DMS Signal Bot v5.13 -- AUTO-TRADE edition (v5.13 = range-awareness + funding amplifier + BTC time-of-day, 2026-04-29)
+// DMS Signal Bot v5.14 -- AUTO-TRADE edition (v5.14 = GOLD full session filter for shorts, 2026-05-01)
 // Mirrors the DMS algorithm from index.html exactly -- same levels, same scoring, same signals
 // Now also executes trades on Hyperliquid with TP/SL/trailing stops
 // Node 18+ required (uses built-in fetch)
@@ -122,6 +122,15 @@
 //   - Configuration: CHOP_FILTER object per coin. Currently enabled for HYPE only.
 //     Expand by setting enabled: true for other coins as needed.
 //   - Sends Telegram alert when a signal is blocked by the chop filter.
+//
+// v5.14 changelog (2026-05-01):
+//   - GOLD SESSION FILTER EXTENDED TO SHORTS: Previously only LONGs were blocked outside
+//     13:00-20:00 UTC. Now SHORTs are also blocked outside 06:00-17:00 UTC (EU open through
+//     early US afternoon). Evidence: Apr 29 GOLD short entered at 18:33 UTC caught overnight
+//     mean-reversion and hit SL for -$2.65 (closed Apr 30 00:47 UTC at $4,573.9 — a 1% bounce
+//     from the day's lows). Winning GOLD shorts consistently enter during 07:00-15:00 UTC
+//     (EU/US overlap). The 06:00-17:00 window gives a 1-hour buffer on each side.
+//     Applied in both maybeAutoTrade and the multi-TF dedup path.
 //
 // v5.13 changelog (2026-04-29):
 //   - RANGE-AWARENESS FILTER (BTC): Detects where price sits within the 48h high-low range.
@@ -3061,12 +3070,23 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults, entryCandles
   }
 
   // v5.1: GOLD session filter (synced w/ app)
+  // v5.14: Extended to block SHORTs outside 06:00-17:00 UTC.
+  //   LONGs remain blocked outside 13:00-20:00 UTC (unchanged).
+  //   SHORTs now blocked outside 06:00-17:00 UTC (EU open → early US afternoon).
+  //   Rationale: Apr 29 GOLD short at 18:33 UTC hit SL for -$2.65; winning shorts
+  //   consistently enter during EU/US overlap (07:00-15:00). 06-17 gives a buffer.
   if (coinId === 'gold') {
     const utcHour = new Date().getUTCHours();
-    const inGoldSession = utcHour >= 13 && utcHour < 20;
-    if (!inGoldSession && d.sig === 'LONG') {
-      console.log(`HL auto-trade BLOCKED ${sym} LONG: outside gold session (${utcHour}:00 UTC, allowed 13:00-20:00) -- session filter`);
-      logMissedSignal(coinId, d.sig, conf, 'gold-session-filter', { utcHour, filter: 'outside gold session 13-20 UTC' });
+    const inGoldLongSession = utcHour >= 13 && utcHour < 20;
+    const inGoldShortSession = utcHour >= 6 && utcHour < 17;  // v5.14
+    if (!inGoldLongSession && d.sig === 'LONG') {
+      console.log(`HL auto-trade BLOCKED ${sym} LONG: outside gold LONG session (${utcHour}:00 UTC, allowed 13:00-20:00) -- session filter`);
+      logMissedSignal(coinId, d.sig, conf, 'gold-session-filter', { utcHour, filter: 'outside gold LONG session 13-20 UTC' });
+      return;
+    }
+    if (!inGoldShortSession && d.sig === 'SHORT') {
+      console.log(`HL auto-trade BLOCKED ${sym} SHORT: outside gold SHORT session (${utcHour}:00 UTC, allowed 06:00-17:00) -- v5.14 session filter`);
+      logMissedSignal(coinId, d.sig, conf, 'gold-session-filter-short', { utcHour, filter: 'outside gold SHORT session 06-17 UTC (v5.14)' });
       return;
     }
   }
@@ -3519,10 +3539,15 @@ async function scanCoin(coinId){
             console.log(`HL MULTI-TF: ${COINS[coinId].label} LONG sizing tier '${tier}' -> maxNotional=$${cap} [v5.4]`);
           }
           // v5.1: Session filter for GOLD — block longs outside London PM + NY overlap
-          if (coinId === 'gold' && sig === 'LONG') {
+          // v5.14: Also block shorts outside 06:00-17:00 UTC
+          if (coinId === 'gold') {
             const utcHr = new Date().getUTCHours();
-            if (utcHr < 13 || utcHr >= 20) {
-              console.log(`HL MULTI-TF BLOCKED ${COINS[coinId].label} LONG: outside gold session (${utcHr}:00 UTC) -- session filter`);
+            if (sig === 'LONG' && (utcHr < 13 || utcHr >= 20)) {
+              console.log(`HL MULTI-TF BLOCKED ${COINS[coinId].label} LONG: outside gold LONG session (${utcHr}:00 UTC) -- session filter`);
+              break;
+            }
+            if (sig === 'SHORT' && (utcHr < 6 || utcHr >= 17)) {
+              console.log(`HL MULTI-TF BLOCKED ${COINS[coinId].label} SHORT: outside gold SHORT session (${utcHr}:00 UTC) -- v5.14 session filter`);
               break;
             }
           }
