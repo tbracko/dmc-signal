@@ -1,4 +1,4 @@
-// DMS Signal Bot v5.14 -- AUTO-TRADE edition (v5.14 = GOLD full session filter for shorts, 2026-05-01)
+// DMS Signal Bot v5.15 -- AUTO-TRADE edition (v5.15 = post-exhaustion re-entry filter, 2026-05-02)
 // Mirrors the DMS algorithm from index.html exactly -- same levels, same scoring, same signals
 // Now also executes trades on Hyperliquid with TP/SL/trailing stops
 // Node 18+ required (uses built-in fetch)
@@ -122,6 +122,15 @@
 //   - Configuration: CHOP_FILTER object per coin. Currently enabled for HYPE only.
 //     Expand by setting enabled: true for other coins as needed.
 //   - Sends Telegram alert when a signal is blocked by the chop filter.
+//
+// v5.15 changelog (2026-05-02):
+//   - POST-EXHAUSTION RE-ENTRY FILTER: After 2+ TP closes on the same coin+direction
+//     within 4 hours, blocks same-direction re-entry on that asset for 4 hours from the
+//     last TP close. Prevents chasing exhausted moves — directly addresses the Apr 29→30
+//     GOLD SL where the bot re-shorted at $4,529 after 3 profitable TP partials and caught
+//     a mean-reversion bounce to $4,574 (-$2.65). The filter tracks TP closes in a
+//     tpCloseLog map (coinId -> [{ts, side}]) and checks in executeTrade before entry.
+//     Configurable via EXHAUSTION_TP_COUNT (default 2) and EXHAUSTION_COOLDOWN_MS (default 4h).
 //
 // v5.14 changelog (2026-05-01):
 //   - GOLD SESSION FILTER EXTENDED TO SHORTS: Previously only LONGs were blocked outside
@@ -1412,6 +1421,11 @@ const HL = {
   consecutiveLosses: {},  // coinId -> count of consecutive losses
   MAX_CONSEC_LOSSES: parseInt(process.env.MAX_CONSEC_LOSSES || '3'), // pause after N consecutive losses
 
+  // v5.15: Post-exhaustion re-entry filter — blocks same-direction entry after consecutive TPs
+  tpCloseLog: {},  // coinId -> [{ts: ms, side: 'LONG'|'SHORT'}] — recent TP closes
+  EXHAUSTION_TP_COUNT: parseInt(process.env.EXHAUSTION_TP_COUNT || '2'),     // require N+ TP closes to trigger
+  EXHAUSTION_COOLDOWN_MS: parseInt(process.env.EXHAUSTION_COOLDOWN_MS || '14400000'), // 4h cooldown after last TP
+
   // v5.1: Trailing-stop failure tracking (prevents 1000-alert spam)
   trailFailCount: {},     // coinId -> consecutive failure count
   lastTrailFailAlert: {}, // coinId -> ms timestamp of last alert sent
@@ -1912,6 +1926,16 @@ const HL = {
           console.log(`HL COOLDOWN: ${coinId} on cooldown for ${this.COOLDOWN_MS/1000}s after SL hit`);
         }
 
+        // v5.15: Record TP close for exhaustion filter
+        if (reason === 'tp_hit') {
+          if (!this.tpCloseLog[coinId]) this.tpCloseLog[coinId] = [];
+          this.tpCloseLog[coinId].push({ ts: Date.now(), side: old.side });
+          // Prune entries older than EXHAUSTION_COOLDOWN_MS to prevent unbounded growth
+          const cutoff = Date.now() - this.EXHAUSTION_COOLDOWN_MS;
+          this.tpCloseLog[coinId] = this.tpCloseLog[coinId].filter(e => e.ts >= cutoff);
+          console.log(`HL EXHAUSTION LOG: ${coinId} ${old.side} TP recorded (${this.tpCloseLog[coinId].filter(e => e.side === old.side).length} same-dir TPs in window)`);
+        }
+
         // v5.1: Reset trail-failure tracking on position close (new trade starts clean)
         this.trailFailCount[coinId] = 0;
         delete this.lastTrailFailAlert[coinId];
@@ -2156,6 +2180,32 @@ const HL = {
           return null;
         }
         console.log(`HL: ${coinId} counter-trend ${signal.sig} allowed -- conf ${confidence}% >= ${requiredConf}% (last win ${recentWinDir})`);
+      }
+    }
+
+    // v5.15: Post-exhaustion re-entry filter
+    // After 2+ TP closes on the same coin+direction within the cooldown window, block same-direction
+    // re-entry. Prevents chasing exhausted moves (e.g. Apr 29→30 GOLD re-short after 3 TPs → SL).
+    {
+      const tpLog = this.tpCloseLog[coinId];
+      if (tpLog && tpLog.length > 0) {
+        const now = Date.now();
+        const cutoff = now - this.EXHAUSTION_COOLDOWN_MS;
+        // Count same-direction TP closes within the window
+        const sameDirTPs = tpLog.filter(e => e.side === signal.sig && e.ts >= cutoff);
+        if (sameDirTPs.length >= this.EXHAUSTION_TP_COUNT) {
+          const lastTpTs = Math.max(...sameDirTPs.map(e => e.ts));
+          const remaining = Math.round((lastTpTs + this.EXHAUSTION_COOLDOWN_MS - now) / 1000);
+          const hoursAgo = ((now - lastTpTs) / 3600000).toFixed(1);
+          console.warn(`HL EXHAUSTION BLOCK: ${coinId} ${signal.sig} — ${sameDirTPs.length} TP closes in same direction within ${this.EXHAUSTION_COOLDOWN_MS/3600000}h window (last ${hoursAgo}h ago). Cooldown ${remaining}s remaining.`);
+          logMissedSignal(coinId, signal.sig, confidence, 'post-exhaustion-block', {
+            sameDirTpCount: sameDirTPs.length,
+            lastTpHoursAgo: hoursAgo,
+            cooldownRemainingSec: remaining,
+            filter: `${sameDirTPs.length} same-dir TPs, cooldown ${remaining}s`
+          });
+          return null;
+        }
       }
     }
 
