@@ -1756,11 +1756,20 @@ const HL = {
       }
       const posRes = mainSettled.value;
       const hip3PosRes = [];
+      // v5.12 (2026-05-05): Track which HIP-3 dexes failed THIS cycle so we can avoid
+      // false TP/SL closure detection for positions that simply didn't fetch. Prior bug:
+      // a transient 502/timeout on xyz dex made GOLD/SP500 disappear from `positions`,
+      // and the closure loop below then sent phantom "TP HIT"/"SL HIT" Telegrams while
+      // the positions were still very much open on Hyperliquid.
+      const failedHip3Dexes = new Set();
       for (let i = 0; i < hip3Settled.length; i++) {
         const s = hip3Settled[i];
         const dex = this.HIP3_DEXES[i];
         if (s.status === 'fulfilled' && s.value.ok) hip3PosRes.push(s.value);
-        else console.warn(`HL syncPositions: HIP-3 dex "${dex}" fetch failed — positions on that dex may be out of sync:`, s.status === 'fulfilled' ? `HTTP ${s.value.status}` : s.reason?.message);
+        else {
+          failedHip3Dexes.add(dex);
+          console.warn(`HL syncPositions: HIP-3 dex "${dex}" fetch failed — positions on that dex will be PRESERVED (not flagged as closed) this cycle:`, s.status === 'fulfilled' ? `HTTP ${s.value.status}` : s.reason?.message);
+        }
       }
       const trigOrders = await this.fetchTriggerOrders();
       const data = await posRes.json();
@@ -1918,6 +1927,18 @@ const HL = {
       for (const [coinId, old] of Object.entries(oldTrades)) {
         if (nowOpen.has(coinId)) continue;
         if (!old.entry || !old.asset) continue;
+        // v5.12 (2026-05-05): If this position lives on a HIP-3 dex whose fetch
+        // failed THIS cycle, do NOT flag it closed. Preserve the prev activeTrade
+        // entry so trail/exit tracking carries over to the next cycle.
+        if (failedHip3Dexes.size > 0) {
+          const dexFromAsset = (old.asset && old.asset.includes(':')) ? old.asset.split(':')[0] : null;
+          const coinIsHIP3 = COINS[coinId] && COINS[coinId].isHIP3;
+          if (coinIsHIP3 && dexFromAsset && failedHip3Dexes.has(dexFromAsset)) {
+            console.log(`HL syncPositions: PRESERVING ${old.asset} ${old.side} — dex "${dexFromAsset}" did not respond this cycle (no phantom-close alert)`);
+            this.activeTrades[coinId] = old;
+            continue;
+          }
+        }
         const s = coinState[coinId];
         // Use current price if available and valid, otherwise fall back to entry (never $0)
         const exitPx = (s && s.price > 0) ? s.price : old.entry;
