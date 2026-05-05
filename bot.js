@@ -1,4 +1,4 @@
-// DMS Signal Bot v5.15 -- AUTO-TRADE edition (v5.15 = post-exhaustion re-entry filter, 2026-05-02)
+// DMS Signal Bot v5.16 -- AUTO-TRADE edition (v5.16 = time-exit, funding-exit, breakout-quality, GOLD chop, 2026-05-05)
 // Mirrors the DMS algorithm from index.html exactly -- same levels, same scoring, same signals
 // Now also executes trades on Hyperliquid with TP/SL/trailing stops
 // Node 18+ required (uses built-in fetch)
@@ -500,7 +500,30 @@ const CHOP_FILTER = {
   hyperliquid: { enabled: true,  adxThreshold: 20, lookbackBars: 30, minTFWeight: 3 }, // HYPE: 15m/1H/4H
   bitcoin:     { enabled: false, adxThreshold: 18, lookbackBars: 30, minTFWeight: 3 },
   sp500:       { enabled: false, adxThreshold: 18, lookbackBars: 30, minTFWeight: 3 },
-  gold:        { enabled: false, adxThreshold: 18, lookbackBars: 30, minTFWeight: 3 },
+  gold:        { enabled: true,  adxThreshold: 18, lookbackBars: 30, minTFWeight: 3 },
+};
+
+// v5.16: Time-based exit for stalled positions — close at market if no TP1 reached
+// within maxHoldHours AND position is in drawdown. Prevents death-by-funding on
+// range-bound entries (May 4 report: GOLD LONG held 48h, bled $5.61 at SL).
+const MAX_HOLD_HOURS = {
+  bitcoin:     24,  // BTC is volatile; if no TP1 in 24h while underwater, exit
+  hyperliquid: 24,  // HYPE same
+  sp500:       36,  // HIP-3 assets trend slower
+  gold:        36,  // HIP-3 assets trend slower
+};
+
+// v5.16: Funding rate exit signal — if cumulative funding paid on a position exceeds
+// this fraction of the entry notional AND position is in drawdown, close at market.
+// Catches crowded trades bleeding via carry before they reach SL.
+const FUNDING_EXIT_THRESHOLD = 0.0005; // 0.05% of notional
+
+// v5.16: Range breakout quality filter — require the break distance to exceed
+// the 48h range ATR ratio. If the "breakout" is just noise within a range, skip.
+// breakMinRangeATR: break distance must be >= this × range ATR to qualify as genuine.
+const BREAKOUT_QUALITY = {
+  enabled: true,
+  breakMinRangeATR: 0.7, // break must exceed 0.7× the range's size-to-ATR ratio
 };
 
 // v5.7: Trend-exhaustion detector — measures cumulative price move over trailing 48 hours
@@ -2453,7 +2476,8 @@ const HL = {
         tpStage: 3,        // v5.2: 3-stage TP ladder (34% TP1 at 1R, 33% TP2 at 1.8R, 33% trail)
         originalSize: size, // v5.0: track original size for trailing logic
         tp1Detected: false, // v5.3: tracks whether TP1 has filled (forces breakeven SL)
-        tp2Hit: false       // v5.3: tracks whether TP2 has filled (triggers wider trail)
+        tp2Hit: false,      // v5.3: tracks whether TP2 has filled (triggers wider trail)
+        entryTs: Date.now() // v5.16: entry timestamp for time-based exit
       };
       this.saveActiveTrades();
       this.tradesToday++;
@@ -2524,6 +2548,50 @@ const HL = {
         delete this.activeTrades[coinId];
         this.saveActiveTrades();
         continue;
+      }
+
+      // v5.16: Time-based exit — close stalled positions that haven't reached TP1
+      // within maxHoldHours while in drawdown. Prevents death-by-funding.
+      if (!trade.tp1Detected && trade.entryTs && trade.trailState === 'initial') {
+        const holdMs = Date.now() - trade.entryTs;
+        const maxMs = (MAX_HOLD_HOURS[coinId] || 24) * 3600000;
+        const px = coinState[coinId]?.price;
+        if (holdMs >= maxMs && px > 0) {
+          const isLong = trade.side === 'LONG';
+          const inDrawdown = isLong ? (px < trade.entry) : (px > trade.entry);
+          if (inDrawdown) {
+            const holdHrs = (holdMs / 3600000).toFixed(1);
+            const pnlPct = ((isLong ? (px - trade.entry) : (trade.entry - px)) / trade.entry * 100).toFixed(2);
+            console.log(`HL TIME-EXIT: ${trade.asset} ${trade.side} — held ${holdHrs}h (max ${MAX_HOLD_HOURS[coinId] || 24}h), no TP1, drawdown ${pnlPct}% — closing at market (v5.16)`);
+            await sendTelegram(`⏰ <b>TIME-EXIT: ${trade.asset} ${trade.side}</b>\nHeld: ${holdHrs}h (max: ${MAX_HOLD_HOURS[coinId] || 24}h)\nNo TP1 reached, currently ${pnlPct}%\nClosing at market to limit bleed.`);
+            await this.closePosition(coinId);
+            continue;
+          }
+        }
+      }
+
+      // v5.16: Funding rate exit — close positions where cumulative funding exceeds
+      // 0.05% of notional AND position is in drawdown. Catches crowded trades.
+      if (trade.trailState === 'initial' || trade.trailState === 'breakeven') {
+        const cumFunding = parseFloat(stillOpen.position?.cumFunding?.sinceOpen || '0');
+        const entryNotional = trade.entry * trade.originalSize;
+        if (entryNotional > 0 && Math.abs(cumFunding) > 0) {
+          const fundingPct = Math.abs(cumFunding) / entryNotional;
+          const px = coinState[coinId]?.price;
+          if (fundingPct >= FUNDING_EXIT_THRESHOLD && px > 0) {
+            const isLong = trade.side === 'LONG';
+            const inDrawdown = isLong ? (px < trade.entry) : (px > trade.entry);
+            // Only exit if funding is AGAINST us (paying) AND we're in drawdown
+            const fundingAgainstUs = (isLong && cumFunding < 0) || (!isLong && cumFunding > 0);
+            if (inDrawdown && fundingAgainstUs) {
+              const pnlPct = ((isLong ? (px - trade.entry) : (trade.entry - px)) / trade.entry * 100).toFixed(2);
+              console.log(`HL FUNDING-EXIT: ${trade.asset} ${trade.side} — cumFunding $${cumFunding.toFixed(4)} (${(fundingPct * 100).toFixed(3)}% of notional) + drawdown ${pnlPct}% — closing at market (v5.16)`);
+              await sendTelegram(`💸 <b>FUNDING-EXIT: ${trade.asset} ${trade.side}</b>\nCum funding: $${Math.abs(cumFunding).toFixed(4)} (${(fundingPct * 100).toFixed(3)}% of notional)\nThreshold: ${(FUNDING_EXIT_THRESHOLD * 100).toFixed(2)}%\nDrawdown: ${pnlPct}% — closing to stop bleed.`);
+              await this.closePosition(coinId);
+              continue;
+            }
+          }
+        }
       }
 
       // v5.3: Detect TP fills by comparing live position size to original
@@ -3182,6 +3250,41 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults, entryCandles
         return;
       }
       console.log(`HL: ${sym} chop filter OK — ADX ${adxVal.toFixed(1)} >= ${chopCfg.adxThreshold} on ${TFS[tfIdx].l} (v5.12)`);
+    }
+  }
+
+  // v5.16: Range breakout quality filter — verify the "break" in the Retest pattern
+  // exceeds the 48h range boundaries. If entry price is within the trailing 48h high-low
+  // range AND the level being tested is also within the range, the "breakout" is likely
+  // just noise oscillating within consolidation. Require that the break candle closed
+  // beyond the range boundary (for LONG: above range high; for SHORT: below range low)
+  // OR that the entry-TF ATR is large enough relative to range size (trending, not ranging).
+  // This would have filtered the May 3 BTC false breakout ($78.9k entry within $78k-$79.1k range)
+  // while preserving the May 4 genuine breakout ($78.9k entry after range high $79.1k was breached).
+  if (BREAKOUT_QUALITY.enabled) {
+    const range = s?.range48h;
+    if (range && range.high > range.low) {
+      const rangeSize = range.high - range.low;
+      const currentPx = s.price || 0;
+      const levelPx = d.level || 0;
+      if (currentPx > 0 && levelPx > 0 && rangeSize > 0) {
+        // Check if both the entry price AND the tested level are inside the 48h range
+        const pxInRange = currentPx >= range.low && currentPx <= range.high;
+        const levelInRange = levelPx >= range.low && levelPx <= range.high;
+        if (pxInRange && levelInRange) {
+          // The "breakout" is entirely within the range — likely noise.
+          // Allow if ATR shows genuine expansion (trending day) or high multi-TF conf.
+          // Otherwise, apply a confidence penalty that usually blocks marginal signals.
+          const penalty = 15;
+          const oldConf = conf;
+          conf = Math.max(conf - penalty, 0);
+          console.log(`HL BREAKOUT-QUALITY: ${sym} ${d.sig} conf ${oldConf}% -> ${conf}% — entry $${currentPx.toFixed(1)} and level $${levelPx.toFixed(1)} both within 48h range ($${range.low.toFixed(1)}-$${range.high.toFixed(1)}) — likely noise breakout (v5.16)`);
+          logMissedSignal(coinId, d.sig, conf, 'breakout-quality-penalty', {
+            currentPx, levelPx, rangeLow: range.low, rangeHigh: range.high, rangeSize,
+            penalty, filter: `v5.16 breakout quality: price+level both within 48h range`
+          });
+        }
+      }
     }
   }
 
