@@ -4135,11 +4135,17 @@ const HL = {
       }
       const posRes = mainSettled.value;
       const hip3PosRes = [];
+      // v5.12 (2026-05-05): Track HIP-3 dex failures so we don't false-close positions
+      // (see bot.js syncPositions for the full bug write-up).
+      const failedHip3Dexes = new Set();
       for (let i = 1; i < settled.length; i++) {
         const s = settled[i];
         const dex = this.HIP3_DEXES[i - 1];
         if (s.status === 'fulfilled' && s.value.ok) hip3PosRes.push(s.value);
-        else console.warn(`HL syncPositions: HIP-3 dex "${dex}" failed this cycle`);
+        else {
+          failedHip3Dexes.add(dex);
+          console.warn(`HL syncPositions: HIP-3 dex "${dex}" failed this cycle — positions on it will be preserved (no phantom-close alert)`);
+        }
       }
       const trigOrders = await this.fetchTriggerOrders();
       const data = await posRes.json();
@@ -4281,6 +4287,16 @@ const HL = {
       for (const [coinId, old] of Object.entries(oldTrades)) {
         if (nowOpen.has(coinId)) continue; // still open, skip
         if (!old.entry || !old.asset) continue; // no real trade data
+        // v5.12 (2026-05-05): preserve positions whose HIP-3 dex failed this cycle.
+        if (failedHip3Dexes.size > 0) {
+          const dexFromAsset = (old.asset && old.asset.includes(':')) ? old.asset.split(':')[0] : null;
+          const coinIsHIP3 = COINS[coinId] && COINS[coinId].isHIP3;
+          if (coinIsHIP3 && dexFromAsset && failedHip3Dexes.has(dexFromAsset)) {
+            console.log(`HL syncPositions: PRESERVING ${old.asset} ${old.side} — dex "${dexFromAsset}" did not respond this cycle`);
+            this.activeTrades[coinId] = old;
+            continue;
+          }
+        }
         const s = coinState[coinId];
         // Use current price if valid, otherwise fall back to entry (never $0)
         const exitPx = (s && s.price > 0) ? s.price : old.entry;
