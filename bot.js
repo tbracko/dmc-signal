@@ -1,4 +1,4 @@
-// DMS Signal Bot v5.16 -- AUTO-TRADE edition (v5.16 = time-exit, funding-exit, breakout-quality, GOLD chop, 2026-05-05)
+// DMS Signal Bot v5.17 -- AUTO-TRADE edition (v5.17 = post-break confirmation, GOLD notional cap, 2026-05-06)
 // Mirrors the DMS algorithm from index.html exactly -- same levels, same scoring, same signals
 // Now also executes trades on Hyperliquid with TP/SL/trailing stops
 // Node 18+ required (uses built-in fetch)
@@ -123,6 +123,17 @@
 //     Expand by setting enabled: true for other coins as needed.
 //   - Sends Telegram alert when a signal is blocked by the chop filter.
 //
+// v5.17 changelog (2026-05-06):
+//   - POST-BREAK CONFIRMATION FILTER: detectRetest() now counts how many candles between
+//     the break bar and the retest bar closed beyond the level. Requires >= 2 (MIN_BREAK_CLOSES).
+//     Filters single-candle false breakdowns — directly addresses the May 5 GOLD short where
+//     one 1H candle spiked to $4,513.9 (through $4,538 support) and immediately reversed;
+//     the bot shorted the retest and caught a 32h grind higher to SL at $4,591.7 (-$5.60 net).
+//     With this filter, that entry would have been rejected: only 1 candle closed below the level.
+//   - GOLD maxNotional $500→$300: A single GOLD SL (-$5.60) wiped 3 HYPE wins (+$3.21 net).
+//     GOLD's wider stops (minRR 1.5, 0.5% minStopPct) on $500 notional produce outsized losses.
+//     $300 cap limits max single-trade damage to ~$3.36 at 1.12% adverse move.
+//
 // v5.15 changelog (2026-05-02):
 //   - POST-EXHAUSTION RE-ENTRY FILTER: After 2+ TP closes on the same coin+direction
 //     within 4 hours, blocks same-direction re-entry on that asset for 4 hours from the
@@ -227,7 +238,7 @@ const COINS = {
   bitcoin:     { id:'bitcoin',     label:'BTC',    apiSym:'BTCUSDT',      asset:'BTC',        exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.007, maxNotional: 200, isHIP3: false },  // v5.3: re-enabled (was 0), capped at $200 — regime filter + 8× notional cap provide protection
   hyperliquid: { id:'hyperliquid', label:'HYPE',   apiSym:'HYPEUSDT',     asset:'HYPE',       exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, maxNotional: 100, isHIP3: false },  // v5.5: halved $200→$100 after 3 consecutive SL hits (Apr 13/14/16 = -$12.08). Raise back to $200 after 3 consecutive wins at $100.
   sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',   asset:'xyz:SP500', exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, maxNotional: 500, isHIP3: true },  // v5.5: minRR 1.5→1.2 — SP500 tail-carry wins on direction not R:R; 1.5 was filtering valid signals and forcing all entries to be manual
-  gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',    asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.5, feeEst: 0.12, minStopPct: 0.005, maxNotional: 500, isHIP3: true },  // v5.0: feeEst 0.10->0.12 (builder fees ~10bps; 0.15 was too aggressive)
+  gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',    asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.5, feeEst: 0.12, minStopPct: 0.005, maxNotional: 300, isHIP3: true },  // v5.17: maxNotional $500→$300 — single GOLD SL ($5.60 on May 5) wiped 3 HYPE wins; cap damage per trade. feeEst 0.10->0.12 (builder fees ~10bps)
 };
 
 const TFS = [
@@ -1239,14 +1250,31 @@ function detectRetest(c, levelPrice, atrVal, coinMinStopPct){
     return { confirmed:false, reason:'no prior break of level within lookback' };
   }
 
+  // ---- Step 5 (v5.17): post-break confirmation -- require multiple closes beyond level
+  // Filters false breakdowns: e.g. May 5 GOLD short where a single candle spiked through
+  // support ($4,513.9) and immediately reversed. Count candles between the break bar and
+  // the retest bar that closed beyond the level. Require >= 2 to confirm the break held.
+  const MIN_BREAK_CLOSES = 2;
+  let breakCloseCount = 0;
+  for(let i = retestBarsAgo + 1; i <= breakBarsAgo; i++){
+    if(n - 1 - i < 0) break;
+    const k = c[n - 1 - i];
+    if(direction === 'LONG'  && k.c >= levelPrice + closeBuf) breakCloseCount++;
+    if(direction === 'SHORT' && k.c <= levelPrice - closeBuf) breakCloseCount++;
+  }
+  if(breakCloseCount < MIN_BREAK_CLOSES){
+    return { confirmed:false, reason:`only ${breakCloseCount} close(s) beyond level after break (need ${MIN_BREAK_CLOSES}+) — likely false breakdown` };
+  }
+
   return {
     confirmed: true,
     direction,
     breakBarsAgo,
     retestBarsAgo,
     retestExtreme,
+    breakCloseCount,
     convictionBodyATR: +(convictionBody / atrVal).toFixed(2),
-    reason: `break ${breakBarsAgo}b ago, retest ${retestBarsAgo}b ago, body ${(convictionBody/atrVal).toFixed(2)} ATR`
+    reason: `break ${breakBarsAgo}b ago (${breakCloseCount} closes held), retest ${retestBarsAgo}b ago, body ${(convictionBody/atrVal).toFixed(2)} ATR`
   };
 }
 
