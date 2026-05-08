@@ -617,7 +617,7 @@ const {
   getAsiaRange, getAsiaLevels, getNYRange, getNYLevels, getLondonRange, getLondonLevels,
   findFibLevels, findDMCLevels, findNextLevel, findStopLevel, calcRR,
   hasRejection, hasStrongBodyBounce, hasMomentumAgainst, hasLTFAlignment,
-  detectRetest, dms, nextMove,
+  detectRetest, dms, nextMove, scoreSignal,
   CHOP_FILTER, MAX_HOLD_HOURS, FUNDING_EXIT_THRESHOLD, BREAKOUT_QUALITY, EXHAUSTION_THRESHOLDS,
 } = window.DMSSignals;
 
@@ -1670,6 +1670,12 @@ function renderNM(nm){
 }
 
 function renderCards(){
+  // v5.23 (2026-05-08): Strength score per signal. Hand-tuned formula combining
+  // multi-TF confidence, HTF agreement, conviction body, level quality, range,
+  // exhaustion, R:R, and funding alignment. See scoreSignal() in signals.js.
+  // Validation note: tested against 11 reconstructed historical bot trades —
+  // STRONG/SOLID won 100%, MODERATE 80%, WEAK 0%. Small N; pending more data.
+  const s = coinState[activeCoin];
   document.getElementById('tf-cards').innerHTML=TFS.map(tf=>{
     const r=results[tf.l];
     const isCollapsed = tf.l !== '15m' ? ' collapsed' : '';
@@ -1678,7 +1684,19 @@ function renderCards(){
     const tl=r.type==='FAIL_GAIN'?'FAIL TO GAIN':r.type==='FAIL_LOSE'?'FAIL TO LOSE':r.type==='BLIND_ENTRY'?'CONFIRMED ENTRY':r.type==='BREAKOUT'?'BREAKOUT':r.type==='AT_LEVEL'?'AT LEVEL':'NO SETUP';
     const rrBadge=r.rr?`<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:2px 6px;border-radius:4px;background:rgba(255,193,7,.1);color:#ffc107;border:1px solid rgba(255,193,7,.2);margin-left:auto">R:R ${r.rr}</span>`:'';
     const lvlScore=r.score?`<span style="font-family:'IBM Plex Mono',monospace;font-size:8px;color:#3d5068;margin-left:6px">score ${r.score}</span>`:'';
-    return`<div class="tfc ${cls}${isCollapsed}" onclick="this.classList.toggle('collapsed')"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type ${r.type}">${tl}</span><span class="tfc-toggle">▼</span>${rrBadge}</div><div class="tfc-head" style="margin-top:5px;margin-bottom:0">${r.sig!=='NEUTRAL'?`<span class="tfc-sig ${r.sig}">${r.sig}</span>`:''}<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:${r.strength==='strong'?'#00e676':r.strength==='med'?'#ffc107':'#3d5068'};margin-left:4px">${r.strength||''}</span>${lvlScore}</div><div class="tfc-reason" style="margin-top:6px">${r.reason}</div>${r.detail?`<div class="tfc-reason" style="color:#3d5068;margin-top:3px;font-size:8px">${r.detail}</div>`:''
+    // Compute strength score for non-NEUTRAL signals (fires the v5.23 formula).
+    let strengthBadge = '';
+    if (r.sig !== 'NEUTRAL') {
+      const ss = scoreSignal({
+        coinState: { price: s?.price, htfDir: s?.htfDir, range48h: s?.range48h, exhaustion48h: s?.exhaustion48h, fundingRate: s?.fundingRate },
+        dmsResult: r,
+        allResults: results,
+        entryCandles: null,   // ADX bonus skipped on dashboard side; small effect
+      });
+      const tooltip = Object.entries(ss.breakdown).map(([k,v]) => `${k}: ${v>=0?'+':''}${v}`).join('  ·  ');
+      strengthBadge = `<span title="${tooltip}" style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:2px 7px;border-radius:4px;background:${ss.color}22;color:${ss.color};border:1px solid ${ss.color}55;margin-left:6px;font-weight:600">${ss.label} ${ss.score}</span>`;
+    }
+    return`<div class="tfc ${cls}${isCollapsed}" onclick="this.classList.toggle('collapsed')"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type ${r.type}">${tl}</span><span class="tfc-toggle">▼</span>${rrBadge}</div><div class="tfc-head" style="margin-top:5px;margin-bottom:0">${r.sig!=='NEUTRAL'?`<span class="tfc-sig ${r.sig}">${r.sig}</span>`:''}${strengthBadge}<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:${r.strength==='strong'?'#00e676':r.strength==='med'?'#ffc107':'#3d5068'};margin-left:4px">${r.strength||''}</span>${lvlScore}</div><div class="tfc-reason" style="margin-top:6px">${r.reason}</div>${r.detail?`<div class="tfc-reason" style="color:#3d5068;margin-top:3px;font-size:8px">${r.detail}</div>`:''
     }${r.level?`<div class="tfc-prices"><span class="tcp"><span class="tcp-l">LVL</span>$${fmt(r.level)}</span>${r.target?`<span class="tcp"><span class="tcp-l">TP</span><span style="color:${r.sig==='LONG'?'#00e676':'#ff3d5a'}">$${fmt(r.target)}</span></span>`:''  }${r.stopPrice?`<span class="tcp"><span class="tcp-l">SL</span><span style="color:#ff6b6b">$${fmt(r.stopPrice)}</span></span>`:''}</div>`:''}</div>`;
   }).join('');
 }
@@ -2743,6 +2761,12 @@ async function runCoin(coinId){
     } else {
       s.range48h = null;
     }
+
+    // v5.23 (2026-05-08): Compute 48h exhaustion so scoreSignal() can apply the
+    // late-cycle penalty. Already imported from signals.js as part of v5.22.
+    s.exhaustion48h = (h4Entry?.c && h4Entry.c.length >= 13)
+      ? trendExhaustion48h(h4Entry.c)
+      : { movePct: 0, highPct: 0, lowPct: 0 };
 
     // v5.13: Fetch funding rate for confidence amplifier (non-blocking)
     hlFundingRate(COINS[coinId].apiSym).then(rate => { s.fundingRate = rate; }).catch(() => { s.fundingRate = null; });
