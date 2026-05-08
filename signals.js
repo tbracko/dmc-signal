@@ -18,6 +18,15 @@
 //
 // Cross-references in comments (e.g. "v5.7", "v5.12") refer to the bot.js
 // changelog and are preserved for traceability.
+//
+// v5.22.1 (2026-05-08): Wrapped in an IIFE. When this file loads in a browser via
+// <script src="signals.js">, top-level `function fmt`, `function atr` etc. would
+// otherwise become window globals — colliding with the dashboard's destructure
+// `const { fmt } = window.DMSSignals` (same scope = redeclaration error).
+// The IIFE keeps the function declarations private; only the UMD export escapes.
+
+(function () {
+'use strict';
 
 function fmt(n){ return n>=1000 ? n.toLocaleString('en-US',{maximumFractionDigits:0}) : n.toFixed(2); }
 function atr(c, p=14){
@@ -1035,3 +1044,5 @@ if (typeof module !== 'undefined' && module.exports) {
   // Browser
   globalThis.DMSSignals = __DMS_SIGNALS_EXPORTS;
 }
+
+})();  // end IIFE — see v5.22.1 note at the top
