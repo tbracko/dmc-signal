@@ -590,6 +590,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   </button>
 </nav>
 
+<script src="signals.js"></script>
 <script>
 'use strict';
 const BINANCE='https://api.binance.com/api/v3', BYBIT='https://api.bybit.com/v5/market', REFRESH=120000;
@@ -603,6 +604,23 @@ const COINS = {
   sp500:       { id:'sp500',       label:'S&P500',   sym:'OANDA:SPX500USD', shortLabel:'SPX',  apiSym:'xyz:SP500', exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, maxNotional: 500, isHIP3: true },  // v5.5: minRR 1.5→1.2 (synced w/ bot.js)
   gold:        { id:'gold',        label:'GOLD/USD', sym:'OANDA:XAUUSD',    shortLabel:'GOLD', apiSym:'xyz:GOLD', exchange:'hyperliquid', minRR: 1.5, feeEst: 0.12, minStopPct: 0.005, maxNotional: 300, isHIP3: true },  // v5.17: maxNotional $500→$300 (synced w/ bot.js — single GOLD SL wiped 3 HYPE wins)
 };
+
+// v5.22 (2026-05-08): Pure signal-engine functions imported from /signals.js (UMD).
+// Plan item #6 of the May 8 health-check — eliminates the duplicate-bug class
+// where dms/detectRetest/atr/calcADX/levels/sessions had to be edited in both
+// bot.js (now signals.js) AND this file. Inline duplicates removed below.
+const {
+  fmt, atr, calcADX, trendExhaustion48h,
+  isSwingHigh, isSwingLow, detectFlippedLevel, scoreLevel, classifyStrength,
+  countLevelTests, findVPeaks, findPDHL,
+  getSessionBoundaries, getCurrentSession,
+  getAsiaRange, getAsiaLevels, getNYRange, getNYLevels, getLondonRange, getLondonLevels,
+  findFibLevels, findDMCLevels, findNextLevel, findStopLevel, calcRR,
+  hasRejection, hasStrongBodyBounce, hasMomentumAgainst, hasLTFAlignment,
+  detectRetest, dms, nextMove,
+  CHOP_FILTER, MAX_HOLD_HOURS, FUNDING_EXIT_THRESHOLD, BREAKOUT_QUALITY, EXHAUSTION_THRESHOLDS,
+} = window.DMSSignals;
+
 
 // v5.5 changelog (2026-04-16, synced w/ bot.js):
 //   - Inherited-manual-position policy (localStorage 'hl_inherit_manual_positions').
@@ -1041,187 +1059,26 @@ function aggregateCandles(prices, msPerCandle){
 // Signal = wick through level, 15m BODY closes back inside = The Trap
 
 // ── UTILITIES ─────────────────────────────────────────────
-function atr(c, p=14){
-  const tr = c.slice(1).map((x,i)=>Math.max(x.h-x.l, Math.abs(x.h-c[i].c), Math.abs(x.l-c[i].c)));
-  return tr.slice(-p).reduce((s,v)=>s+v, 0) / p;
-}
 
 // Candle body size
 function bodySize(k){ return Math.abs(k.bh - k.bl); }
 
 // Is this a significant swing high? Pure body-based, N bars lookback each side
-function isSwingHigh(c, i, N=3){
-  const bh = c[i].bh;
-  for(let j=i-N; j<=i+N; j++){
-    if(j===i || j<0 || j>=c.length) continue;
-    if(c[j].bh >= bh) return false;
-  }
-  return true;
-}
-function isSwingLow(c, i, N=3){
-  const bl = c[i].bl;
-  for(let j=i-N; j<=i+N; j++){
-    if(j===i || j<0 || j>=c.length) continue;
-    if(c[j].bl <= bl) return false;
-  }
-  return true;
-}
 
 // ── V-PEAK DETECTION ──────────────────────────────────────
 // Requires: local body extreme AND rejection wick (price wicked past but body rejected)
 // This is the core "Dumb Money" landmark — so obvious a beginner can see it
 // Detect if a level has been flipped by a clean body close on the other side
 // Returns: 'resistance' | 'support' | original type (if no flip detected)
-function detectFlippedLevel(c, formationIdx, originalType, levelPrice){
-  // Look at all candles after the level was formed
-  const subsequent = c.slice(formationIdx + 1);
-  const tol = levelPrice * 0.003; // 0.3% tolerance
-  
-  if(originalType === 'resistance'){
-    // Flips to support if: a candle body cleanly closed ABOVE the level
-    const broke = subsequent.some(k => k.bl > levelPrice - tol && k.bh > levelPrice + tol);
-    if(broke) return 'flipped_support'; // was resistance, now acts as support
-  } else {
-    // Flips to resistance if: a candle body cleanly closed BELOW the level
-    const broke = subsequent.some(k => k.bh < levelPrice + tol && k.bl < levelPrice - tol);
-    if(broke) return 'flipped_resistance'; // was support, now acts as resistance
-  }
-  return originalType; // no flip
-}
 
-function findVPeaks(c, tf){
-  const n = c.length, L = [];
-  // Lower TFs: use lookback=2 for more levels; HTF: lookback=2 for key levels
-  const lookback = 2;
-  const wickRatio = 0.25;
-
-  for(let i=lookback; i<n-lookback; i++){
-    const x = c[i];
-    const range = x.h - x.l;
-    if(range < x.c * 0.0001) continue; // skip near-flat candles (relative threshold)
-
-    const wickUp   = x.h  - x.bh;
-    const wickDown = x.bl - x.l;
-
-    // V-HIGH: body high is local swing high AND upper wick shows rejection
-    if(isSwingHigh(c, i, lookback)){
-      let score = scoreLevel(c, i, 'resistance');
-      const testCount = countLevelTests(c, i+1, x.bh, x.bl, 'resistance');
-      const tested = testCount > 0;
-      // Decay: each test reduces reliability (Chris Hunter rule)
-      if(testCount >= 2) score = Math.round(score * 0.5);
-      else if(testCount === 1) score = Math.round(score * 0.75);
-      const strength = classifyStrength(score, range, wickUp);
-      // Include all levels — weak ones still useful when nearby; strength shown to user
-      const flippedTypeR = detectFlippedLevel(c, i, 'resistance', x.bh);
-      L.push({
-        price: x.bh,
-        bh: x.bh, bl: x.bh * 0.999,
-        type: 'resistance',
-        flippedType: flippedTypeR,
-        wickSize: wickUp,
-        score, strength, tested, testCount,
-        idx: i, tf,
-        source: `V-High${wickUp > range*wickRatio ? ' (wick reject)' : ''}`
-      });
-    }
-
-    // V-LOW: body low is local swing low AND lower wick shows rejection
-    if(isSwingLow(c, i, lookback)){
-      let score = scoreLevel(c, i, 'support');
-      const testCount = countLevelTests(c, i+1, x.bh, x.bl, 'support');
-      const tested = testCount > 0;
-      if(testCount >= 2) score = Math.round(score * 0.5);
-      else if(testCount === 1) score = Math.round(score * 0.75);
-      const strength = classifyStrength(score, range, wickDown);
-      const flippedTypeS = detectFlippedLevel(c, i, 'support', x.bl);
-      L.push({
-        price: x.bl,
-        bh: x.bl * 1.001, bl: x.bl,
-        type: 'support',
-        flippedType: flippedTypeS,
-        wickSize: wickDown,
-        score, strength, tested, testCount,
-        idx: i, tf,
-        source: `V-Low${wickDown > range*wickRatio ? ' (wick reject)' : ''}`
-      });
-    }
-  }
-  return L;
-}
 
 // Score a level: higher = more obvious = better DMC level
 // Considers: sharpness of reversal, how fast price left, # times respected
-function scoreLevel(c, i, type){
-  let score = 0;
-  const x = c[i];
-  const range = x.h - x.l;
 
-  // 1. Velocity of departure (how fast price left = strong rejection)
-  const nextCandles = c.slice(i+1, i+4);
-  if(type==='resistance'){
-    // Did price close lower on the next candles? Score up to 30pts
-    const closedLower = nextCandles.filter(k => k.c < x.bh).length;
-    score += closedLower * 10; // 10pts per candle that closed below level
-    // Bonus: did price move away fast (> 0.5% from level)?
-    const fastDrop = nextCandles.some(k => k.c < x.bh * 0.995);
-    if(fastDrop) score += 10;
-  } else {
-    const closedHigher = nextCandles.filter(k => k.c > x.bl).length;
-    score += closedHigher * 10;
-    const fastRise = nextCandles.some(k => k.c > x.bl * 1.005);
-    if(fastRise) score += 10;
-  }
-
-  // 2. Wick rejection at the level
-  const wickUp = x.h - x.bh, wickDown = x.bl - x.l;
-  const rejection = type==='resistance' ? wickUp : wickDown;
-  score += Math.min(rejection/range, 1) * 20;
-
-  // 3. Prior touches without breaking (confluence)
-  const prevCandles = c.slice(Math.max(0,i-20), i);
-  const zone = range * 0.15;
-  const touches = prevCandles.filter(k=>
-    type==='resistance'
-      ? (k.h >= x.bh - zone && k.h <= x.bh + zone)
-      : (k.l <= x.bl + zone && k.l >= x.bl - zone)
-  ).length;
-  score += Math.min(touches, 3) * 15;
-
-  // 4. Clean approach (no consolidation = clear level)
-  const approach = c.slice(Math.max(0,i-3),i);
-  const directional = type==='resistance'
-    ? approach.every((k,j)=>j===0||k.bh>approach[j-1].bh)
-    : approach.every((k,j)=>j===0||k.bl<approach[j-1].bl);
-  if(directional) score += 10;
-
-  return Math.round(score);
-}
-
-function classifyStrength(score, range, wick){
-  if(score >= 40) return 'strong';
-  if(score >= 12) return 'med';   // much lower threshold — catch more DMC levels
-  return 'weak';
-}
 
 // Has this level been revisited by a body after it was formed?
 // Returns count of times tested (0 = fresh/untested)
 // Chris Hunter: "once tested, unlikely to hold unless a new level formed there"
-function countLevelTests(c, startIdx, bh, bl, type){
-  // Chris Hunter: a level is only TESTED when a candle BODY approaches it closely
-  // A wick through does NOT count as testing the level
-  // For resistance (bh): body high must get within 1.0% of the level price
-  // For support (bl): body low must get within 1.0% of the level price
-  // Using 1% not 0.3% — BTC ATR is $500-1500/day, 0.3% is too tight
-  const levelPrice = type==='resistance' ? bh : bl;
-  const zone = levelPrice * 0.010; // 1.0% approach zone
-  const raw = c.slice(startIdx).filter(k =>
-    type==='resistance'
-      ? k.bh >= levelPrice - zone  // body got close to resistance from below
-      : k.bl <= levelPrice + zone  // body got close to support from above
-  ).length;
-  return Math.min(raw, 10); // cap at 10 — prevents "tested ×70" display noise
-}
 function isLevelTested(c, startIdx, bh, bl, type){
   return countLevelTests(c, startIdx, bh, bl, type) > 0;
 }
@@ -1231,238 +1088,29 @@ function isLevelTested(c, startIdx, bh, bl, type){
 // ── SESSION CONTEXT ───────────────────────────────────────
 // Three sessions: Asia (00:00–08:00 UTC), London (07:00–16:00 UTC), NY (13:00–21:00 UTC)
 // Uses Intl API for DST-correct UTC offsets (London +1 in summer, NY -4 in summer)
-function getSessionBoundaries(){
-  const now = new Date();
-  // Get current UTC offset for London and New York using Intl
-  const londonOffset = (() => {
-    const s = now.toLocaleString('en-GB', {timeZone:'Europe/London', hour:'numeric', hour12:false, timeZoneName:'short'});
-    // Check if BST (UTC+1) or GMT (UTC+0)
-    return s.includes('BST') || new Date().toLocaleString('en',{timeZone:'Europe/London',timeZoneName:'short'}).includes('BST') ? 1 : 0;
-  })();
-  const nyOffset = (() => {
-    const s = new Date().toLocaleString('en',{timeZone:'America/New_York',timeZoneName:'short'});
-    return s.includes('EDT') ? -4 : -5; // EDT = summer, EST = winter
-  })();
 
-  // Session boundaries in UTC hours
-  const asiaOpen  = 0;   const asiaClose  = 8;
-  const londonOpen  = 8  - londonOffset; // UTC equivalent of 08:00 London
-  const londonClose = 16 - londonOffset;
-  const nyOpen    = 9  - nyOffset - 5;   // 9:30am NY = 14:30 UTC in winter, 13:30 in summer
-  const nyClose   = 16 - nyOffset - 5;   // 4pm NY close
-
-  return { asiaOpen, asiaClose, londonOpen, londonClose, nyOpen, nyClose, londonOffset, nyOffset };
-}
-
-function getCurrentSession(){
-  const now = new Date();
-  const h = now.getUTCHours() + now.getUTCMinutes()/60;
-  const b = getSessionBoundaries();
-
-  if(h >= b.asiaOpen && h < b.asiaClose)  return 'ASIA';
-  if(h >= b.londonOpen && h < b.londonClose) return 'LONDON';
-  if(h >= b.nyOpen && h < b.nyClose)      return 'NY';
-  return 'AFTER_HOURS';
-}
 
 // Compute Asia session high/low from 15m candles (00:00–08:00 UTC today)
 // Returns { high, low, complete } — complete=true once Asia session has closed
-function getAsiaRange(candles15m){
-  if(!candles15m || candles15m.length < 4) return null;
-  const now = new Date();
-  const todayMidnightUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  const asiaCloseUTC = todayMidnightUTC + 8 * 3600000; // 08:00 UTC today
-
-  // Filter to candles in today's Asia session (00:00–08:00 UTC)
-  const asiaCandles = candles15m.filter(k => k.t >= todayMidnightUTC && k.t < asiaCloseUTC);
-
-  if(asiaCandles.length < 2){
-    // Try yesterday's Asia session if today's hasn't started yet or too few candles
-    const yestMidnightUTC = todayMidnightUTC - 86400000;
-    const yestAsiaClose = yestMidnightUTC + 8 * 3600000;
-    const yestAsia = candles15m.filter(k => k.t >= yestMidnightUTC && k.t < yestAsiaClose);
-    if(yestAsia.length < 2) return null;
-    return {
-      high: Math.max(...yestAsia.map(k=>k.bh)),
-      low:  Math.min(...yestAsia.map(k=>k.bl)),
-      highWick: Math.max(...yestAsia.map(k=>k.h)),
-      lowWick:  Math.min(...yestAsia.map(k=>k.l)),
-      complete: true, source:'yesterday'
-    };
-  }
-
-  const curSession = getCurrentSession();
-  return {
-    high: Math.max(...asiaCandles.map(k=>k.bh)),
-    low:  Math.min(...asiaCandles.map(k=>k.bl)),
-    highWick: Math.max(...asiaCandles.map(k=>k.h)),
-    lowWick:  Math.min(...asiaCandles.map(k=>k.l)),
-    complete: curSession !== 'ASIA',
-    source: 'today'
-  };
-}
 
 // Build Asia session levels — these become high-priority trap targets
 // Only add if Asia session is complete (range is set)
-function getAsiaLevels(candles15m){
-  const asia = getAsiaRange(candles15m);
-  if(!asia || !asia.complete) return [];
-  const levels = [];
-  levels.push({
-    price: asia.high,
-    bh: asia.high, bl: asia.high * 0.999,
-    type: 'resistance', strength: 'strong',
-    tested: false, score: 75, tf: 'SESSION',
-    source: 'Asia High', isAsiaLevel: true,
-    asiaRange: { high: asia.high, low: asia.low }
-  });
-  levels.push({
-    price: asia.low,
-    bh: asia.low * 1.001, bl: asia.low,
-    type: 'support', strength: 'strong',
-    tested: false, score: 75, tf: 'SESSION',
-    source: 'Asia Low', isAsiaLevel: true,
-    asiaRange: { high: asia.high, low: asia.low }
-  });
-  return levels;
-}
 
 // Compute NY session high/low from 15m candles
 // NY: 9:30am–4pm NY time (DST-correct)
 // Used by the following Asia session as key hunt targets
 // Score 60 (below PDH/PDL 70) — dedupes gracefully when near daily highs
-function getNYRange(candles15m){
-  if(!candles15m || candles15m.length < 4) return null;
-  const b = getSessionBoundaries();
-  const now = new Date();
-  const todayMidnightUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-
-  const nyOpenUTC  = todayMidnightUTC + b.nyOpen  * 3600000;
-  const nyCloseUTC = todayMidnightUTC + b.nyClose * 3600000;
-
-  const nyCandles = candles15m.filter(k => k.t >= nyOpenUTC && k.t < nyCloseUTC);
-
-  if(nyCandles.length < 2){
-    // Try yesterday's NY session
-    const yestMidnightUTC = todayMidnightUTC - 86400000;
-    const yestNYOpen  = yestMidnightUTC + b.nyOpen  * 3600000;
-    const yestNYClose = yestMidnightUTC + b.nyClose * 3600000;
-    const yestNY = candles15m.filter(k => k.t >= yestNYOpen && k.t < yestNYClose);
-    if(yestNY.length < 2) return null;
-    return {
-      high: Math.max(...yestNY.map(k=>k.bh)),
-      low:  Math.min(...yestNY.map(k=>k.bl)),
-      highWick: Math.max(...yestNY.map(k=>k.h)),
-      lowWick:  Math.min(...yestNY.map(k=>k.l)),
-      complete: true, source: 'yesterday',
-      candleCount: yestNY.length
-    };
-  }
-
-  const curSession = getCurrentSession();
-  const isComplete = curSession === 'AFTER_HOURS' || curSession === 'ASIA';
-  return {
-    high: Math.max(...nyCandles.map(k=>k.bh)),
-    low:  Math.min(...nyCandles.map(k=>k.bl)),
-    highWick: Math.max(...nyCandles.map(k=>k.h)),
-    lowWick:  Math.min(...nyCandles.map(k=>k.l)),
-    complete: isComplete,
-    source: 'today',
-    candleCount: nyCandles.length
-  };
-}
 
 // NY levels — active during Asia session (next morning hunts above/below NY range)
 // Score 60 — lower than PDH/PDL so they lose dedupe battle when coincident
-function getNYLevels(candles15m){
-  const ny = getNYRange(candles15m);
-  if(!ny || !ny.complete) return [];
-  return [
-    {
-      price: ny.high,
-      bh: ny.high, bl: ny.high * 0.999,
-      type: 'resistance', strength: 'strong',
-      tested: false, score: 60, tf: 'SESSION',
-      source: 'NY High', isSessionLevel: true
-    },
-    {
-      price: ny.low,
-      bh: ny.low * 1.001, bl: ny.low,
-      type: 'support', strength: 'strong',
-      tested: false, score: 60, tf: 'SESSION',
-      source: 'NY Low', isSessionLevel: true
-    }
-  ];
-}
 
 // Compute London session high/low from 15m candles
 // London: 08:00–16:00 London time (DST-correct)
 // During NY session, London range is complete and acts as key level
 // During London session, range is live (updates as session progresses)
-function getLondonRange(candles15m){
-  if(!candles15m || candles15m.length < 4) return null;
-  const b = getSessionBoundaries();
-  const now = new Date();
-  const todayMidnightUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-
-  // London boundaries in ms UTC
-  const londonOpenUTC  = todayMidnightUTC + b.londonOpen  * 3600000;
-  const londonCloseUTC = todayMidnightUTC + b.londonClose * 3600000;
-
-  const londonCandles = candles15m.filter(k => k.t >= londonOpenUTC && k.t < londonCloseUTC);
-
-  if(londonCandles.length < 2){
-    // Try yesterday's London session
-    const yestMidnightUTC = todayMidnightUTC - 86400000;
-    const yestLondonOpen  = yestMidnightUTC + b.londonOpen  * 3600000;
-    const yestLondonClose = yestMidnightUTC + b.londonClose * 3600000;
-    const yestLondon = candles15m.filter(k => k.t >= yestLondonOpen && k.t < yestLondonClose);
-    if(yestLondon.length < 2) return null;
-    return {
-      high: Math.max(...yestLondon.map(k=>k.bh)),
-      low:  Math.min(...yestLondon.map(k=>k.bl)),
-      highWick: Math.max(...yestLondon.map(k=>k.h)),
-      lowWick:  Math.min(...yestLondon.map(k=>k.l)),
-      complete: true, source: 'yesterday',
-      candleCount: yestLondon.length
-    };
-  }
-
-  const curSession = getCurrentSession();
-  const isComplete = curSession === 'NY' || curSession === 'AFTER_HOURS';
-  return {
-    high: Math.max(...londonCandles.map(k=>k.bh)),
-    low:  Math.min(...londonCandles.map(k=>k.bl)),
-    highWick: Math.max(...londonCandles.map(k=>k.h)),
-    lowWick:  Math.min(...londonCandles.map(k=>k.l)),
-    complete: isComplete,
-    source: 'today',
-    candleCount: londonCandles.length
-  };
-}
 
 // Build London levels — only meaningful when London session is complete (NY session active)
 // During London session these are live/building — show in banner but not as firm levels
-function getLondonLevels(candles15m){
-  const london = getLondonRange(candles15m);
-  if(!london || !london.complete) return [];
-  return [
-    {
-      price: london.high,
-      bh: london.high, bl: london.high * 0.999,
-      type: 'resistance', strength: 'strong',
-      tested: false, score: 72, tf: 'SESSION',
-      source: 'London High', isSessionLevel: true
-    },
-    {
-      price: london.low,
-      bh: london.low * 1.001, bl: london.low,
-      type: 'support', strength: 'strong',
-      tested: false, score: 72, tf: 'SESSION',
-      source: 'London Low', isSessionLevel: true
-    }
-  ];
-}
 
 // Render the session banner on the Signal tab
 function renderSessionBanner(candles15m, coinId){
@@ -1622,213 +1270,24 @@ function renderSessionBanner(candles15m, coinId){
   el.style.gap = '4px';
 }
 
-function findPDHL(dCandles){
-  if(!dCandles || dCandles.length < 3) return [];
-  const prev = dCandles[dCandles.length-2];
-  const prev2 = dCandles[dCandles.length-3];
-  const levels = [];
-
-  // PDH — previous day HIGH (body high, not wick)
-  // bh and bl define the zone used for testing/approach checks — use bodies only
-  levels.push({
-    price: prev.bh, bh: prev.bh, bl: prev.bh * 0.999,
-    type: 'resistance', strength: 'strong',
-    tested: false, source: 'PDH', score: 70, tf: 'PDH/PDL'
-  });
-
-  // PDL — previous day LOW (body low)
-  levels.push({
-    price: prev.bl, bh: prev.bl * 1.001, bl: prev.bl,
-    type: 'support', strength: 'strong',
-    tested: false, source: 'PDL', score: 70, tf: 'PDH/PDL'
-  });
-
-  // Also add the day before if it formed a clear swing
-  if(Math.abs(prev2.bh - prev.bh)/prev.bh > 0.005){
-    levels.push({
-      price: prev2.bh, bh: prev2.h, bl: prev2.bh,
-      type: 'resistance', strength: 'med',
-      tested: false, source: 'PDH-2', score: 50, tf: 'PDH/PDL'
-    });
-  }
-  if(Math.abs(prev2.bl - prev.bl)/prev.bl > 0.005){
-    levels.push({
-      price: prev2.bl, bh: prev2.bl, bl: prev2.l,
-      type: 'support', strength: 'med',
-      tested: false, source: 'PDL-2', score: 50, tf: 'PDH/PDL'
-    });
-  }
-  return levels;
-}
 
 // ── FIBONACCI RETRACEMENT LEVELS (v4.9) ────────────────
 // When there's a big gap between nearest support and resistance (>8% of price),
 // generate fib retracements from the recent major swing to fill the void.
 // Uses 4H or 1D candles for swing detection to catch the macro move.
-function findFibLevels(candles, existingLevels, currentPrice){
-  if(!candles || candles.length < 20) return [];
-  const n = candles.length;
-
-  // Find recent significant swing high and swing low
-  // Look back up to 120 candles for the major swing points
-  const lookback = Math.min(120, n);
-  let swingHigh = -Infinity, swingLow = Infinity;
-  let hiIdx = -1, loIdx = -1;
-  for(let i = n - lookback; i < n; i++){
-    if(candles[i].h > swingHigh){ swingHigh = candles[i].h; hiIdx = i; }
-    if(candles[i].l < swingLow){ swingLow = candles[i].l; loIdx = i; }
-  }
-
-  // Need a meaningful range (at least 8% between high and low)
-  const range = swingHigh - swingLow;
-  if(range / currentPrice < 0.08) return [];
-
-  // Check if there's actually a gap in existing levels near price
-  const aboveLevels = existingLevels.filter(l => l.price > currentPrice);
-  const belowLevels = existingLevels.filter(l => l.price < currentPrice);
-  const nearestAbove = aboveLevels.length ? Math.min(...aboveLevels.map(l => l.price)) : swingHigh;
-  const nearestBelow = belowLevels.length ? Math.max(...belowLevels.map(l => l.price)) : swingLow;
-  const gapAbove = (nearestAbove - currentPrice) / currentPrice;
-  const gapBelow = (currentPrice - nearestBelow) / currentPrice;
-
-  // Only generate fibs if there's a significant gap (>8%) on either side
-  if(gapAbove < 0.08 && gapBelow < 0.08) return [];
-
-  // Determine fib direction: if swing high came AFTER swing low = uptrend retracement
-  // if swing low came AFTER swing high = downtrend retracement (crash recovery)
-  const isDowntrend = loIdx > hiIdx;
-  const fibRatios = [0.236, 0.382, 0.5, 0.618, 0.786];
-  const fibs = [];
-
-  for(const ratio of fibRatios){
-    let price;
-    if(isDowntrend){
-      // Retracement of the drop: measured from high down to low, levels are above current
-      price = swingLow + range * ratio;
-    } else {
-      // Retracement of a rally: measured from low up to high, levels are below current
-      price = swingHigh - range * ratio;
-    }
-
-    // Skip fibs that are too far from current price (>20%) or too close (<1%)
-    const dist = Math.abs(price - currentPrice) / currentPrice;
-    if(dist > 0.20 || dist < 0.01) continue;
-
-    // Skip fibs that duplicate existing levels (within 0.5%)
-    const dupExists = existingLevels.some(l => Math.abs(l.price - price) / price < 0.005);
-    if(dupExists) continue;
-
-    const pctLabel = (ratio * 100).toFixed(1);
-    const isAbove = price > currentPrice;
-    fibs.push({
-      price: Math.round(price * 100) / 100,
-      bh: price * 1.001, bl: price * 0.999,
-      type: isAbove ? 'resistance' : 'support',
-      strength: ratio === 0.5 || ratio === 0.618 ? 'strong' : 'med',
-      score: ratio === 0.618 ? 55 : ratio === 0.5 ? 50 : 40,
-      tested: false, testCount: 0,
-      source: `Fib ${pctLabel}%`,
-      tf: 'FIB',
-      isFib: true
-    });
-  }
-  return fibs;
-}
 
 // ── COMBINE + DEDUPE + RANK ───────────────────────────────
-function findDMCLevels(c, dCandles, tf, asiaLevels){
-  const vp = findVPeaks(c, tf);
-  const pdhl = dCandles ? findPDHL(dCandles) : [];
-  const asia = (tf === '15m' && asiaLevels) ? asiaLevels : [];
-  const all = [...vp, ...pdhl, ...asia];
-
-  // Dedupe: merge levels within 0.3% of each other, keep highest score
-  const merged = [];
-  for(const l of all.sort((a,b)=>b.score-a.score)){
-    const dup = merged.find(m=>Math.abs(m.price-l.price)/l.price < 0.003);
-    if(!dup) merged.push(l);
-    else if(l.score > dup.score) Object.assign(dup, l); // upgrade with higher score
-  }
-
-  // v4.9: Add fib levels when there's a large gap in structure
-  // Use 4H/1D candles (whichever is available) for fib swing detection
-  if(tf !== '15m'){
-    const curPrice = c[c.length-1].c;
-    const fibs = findFibLevels(c, merged, curPrice);
-    merged.push(...fibs);
-  }
-
-  return merged;
-}
 
 // ── TARGET: next obvious level in opposite direction ──────
-function findNextLevel(levels, currentPrice, direction){
-  // Use all levels with score >= 10 — lower threshold catches more 4H/1H levels
-  const qualityLevels = levels.filter(l => l.score >= 10);
-  const pool = qualityLevels.length >= 2 ? qualityLevels : levels;
-  const sorted = [...pool].sort((a,b)=>a.price-b.price);
-  // Max target distance: 5% from current price — beyond this, targets are unrealistic
-  const maxDist = currentPrice * 0.05;
-  if(direction==='long'){
-    const candidates = sorted.filter(l=>l.price > currentPrice * 1.002 && l.price < currentPrice + maxDist);
-    if(candidates.length) return {price:candidates[0].price, source:candidates[0].source};
-  } else {
-    const candidates = sorted.filter(l=>l.price < currentPrice * 0.998 && l.price > currentPrice - maxDist);
-    if(candidates.length) return {price:candidates[candidates.length-1].price, source:candidates[candidates.length-1].source};
-  }
-  // Fallback: 2.5% move from entry — conservative but realistic
-  return {price: direction==='long' ? currentPrice*1.025 : currentPrice*0.975, source:'ATR est.'};
-}
 
 // ── RR RATIO ──────────────────────────────────────────────
 // Chris Hunter: "Put your stop behind the NEXT level behind the entry"
 // stopLevel = the level beyond which the trade thesis is broken
-function calcRR(entry, target, trapLevel, stopLevel, feeEst){
-  // If stopLevel provided (next level behind), use it; else fallback to trap + buffer
-  const stopRef = stopLevel || trapLevel;
-  // v5.0 FIX #4: Fee-adjusted R:R with correct asymmetric exit fee
-  const feePct = feeEst || 0.05; // basis points as % (0.05 = 5bps)
-  const entryFee = entry * (feePct / 100);
-  const exitFee  = target * (feePct / 100);
-  const roundTripFee = entryFee + exitFee;
-  const risk    = Math.abs(entry - stopRef) * 1.05 + roundTripFee;
-  const reward  = Math.abs(entry - target) - roundTripFee;
-  if(risk < 1 || reward <= 0) return null;
-  const rr = reward / risk;
-  // Cap R:R at 2.5 — beyond this, targets are unrealistically far
-  return Math.min(rr, 2.5).toFixed(1);
-}
 
 // Find the next level BEHIND the entry (for stop placement)
 // For SHORT: next level ABOVE the trap resistance (where shorts are wrong)
 // For LONG:  next level BELOW the trap support (where longs are wrong)
 // v4.9: ATR-aware — enforces minimum 1.0 ATR distance to avoid noise wicks
-function findStopLevel(levels, trapPrice, direction, atrVal, coinMinStopPct){
-  // Use levels with score >= 10 for stop placement
-  const qualityLevels = levels.filter(l => l.score >= 10);
-  const pool = qualityLevels.length >= 2 ? qualityLevels : levels;
-  const sorted = [...pool].sort((a,b)=>a.price-b.price);
-  // ATR-based minimum distance: at least 1.0 ATR from trap, floor uses per-coin minStopPct (synced w/ bot.js)
-  const stopFloor = coinMinStopPct || 0.005;
-  const minDist = atrVal ? Math.max(atrVal * 1.0, trapPrice * stopFloor) : trapPrice * stopFloor;
-  // Max stop distance: 4% from trap — prevents absurdly wide stops
-  const maxStopDist = trapPrice * 0.04;
-  if(direction==='short'){
-    const candidates = sorted.filter(l=>l.price > trapPrice + minDist && l.price < trapPrice + maxStopDist);
-    const levelStop = candidates.length ? candidates[0].price : null;
-    // Fallback: 2% above trap (was 1.5%)
-    const fallback = trapPrice * 1.02;
-    // Use structural level if found, but enforce ATR floor
-    if(levelStop) return Math.max(levelStop, trapPrice + minDist);
-    return Math.max(fallback, trapPrice + minDist);
-  } else {
-    const candidates = sorted.filter(l=>l.price < trapPrice - minDist && l.price > trapPrice - maxStopDist);
-    const levelStop = candidates.length ? candidates[candidates.length-1].price : null;
-    const fallback = trapPrice * 0.98;
-    if(levelStop) return Math.min(levelStop, trapPrice - minDist);
-    return Math.min(fallback, trapPrice - minDist);
-  }
-}
 
 // ── MAIN DMS SIGNAL ───────────────────────────────────────
 // Fixed bugs:
@@ -1842,127 +1301,12 @@ function findStopLevel(levels, trapPrice, direction, atrVal, coinMinStopPct){
 //          one follow-through candle that confirms the bounce direction.
 // Phase 2: Momentum filter — if last 3-5 candles show strong directional
 //          momentum AGAINST the signal, suppress it.
-function hasRejection(candles, levelPrice, direction, atrVal) {
-  const n = candles.length;
-  if (n < 3) return { confirmed: false };
-
-  const cur = candles[n - 1]; // current candle = follow-through
-
-  for (let i = 1; i < Math.min(4, n); i++) {
-    const k = candles[n - 1 - i];  // rejection candidate (must be PREVIOUS candle)
-    const body = k.bh - k.bl;
-    const totalRange = k.h - k.l;
-    if (totalRange < atrVal * 0.05) continue;  // skip doji/tiny candles
-
-    if (direction === 'LONG') {
-      const lowerWick = k.bl - k.l;
-      const wickRatio = totalRange > 0 ? lowerWick / totalRange : 0;
-      if (k.l <= levelPrice + atrVal * 0.3
-        && lowerWick >= body * 0.5
-        && wickRatio >= 0.25
-        && k.c >= levelPrice - atrVal * 0.15)
-      {
-        const followOk = cur.c > k.bl && cur.c >= levelPrice - atrVal * 0.1;
-        if (followOk) {
-          // Check follow-through strength — a strong candle overrides momentum
-          const curBody = cur.c - cur.o; // positive = bullish
-          const strongFollow = curBody > atrVal * 0.15;
-          // Momentum filter — only blocks if follow-through is weak
-          if (!strongFollow) {
-            const mom = hasMomentumAgainst(candles, direction, atrVal);
-            if (mom.blocked) return { confirmed: false, reason: mom.reason };
-          }
-          return { confirmed: true, barsAgo: i, wickRatio, followThrough: true, strongFollow };
-        }
-      }
-    } else {
-      const upperWick = k.h - k.bh;
-      const wickRatio = totalRange > 0 ? upperWick / totalRange : 0;
-      if (k.h >= levelPrice - atrVal * 0.3
-        && upperWick >= body * 0.5
-        && wickRatio >= 0.25
-        && k.c <= levelPrice + atrVal * 0.15)
-      {
-        const followOk = cur.c < k.bh && cur.c <= levelPrice + atrVal * 0.1;
-        if (followOk) {
-          const curBody = cur.o - cur.c; // positive = bearish
-          const strongFollow = curBody > atrVal * 0.15;
-          if (!strongFollow) {
-            const mom = hasMomentumAgainst(candles, direction, atrVal);
-            if (mom.blocked) return { confirmed: false, reason: mom.reason };
-          }
-          return { confirmed: true, barsAgo: i, wickRatio, followThrough: true, strongFollow };
-        }
-      }
-    }
-  }
-  return { confirmed: false };
-}
 
 // ── STRONG BODY BOUNCE (v4.9) ─────────────────────────
 // Catches V-bounces where price hits a level and reverses with a strong body
 // candle, even if there's no classic wick rejection pattern.
-function hasStrongBodyBounce(candles, levelPrice, direction, atrVal) {
-  const n = candles.length;
-  if (n < 4) return { confirmed: false };
-
-  let touchBar = -1;
-  for (let i = 1; i < Math.min(4, n); i++) {
-    const k = candles[n - 1 - i];
-    if (direction === 'LONG' && k.l <= levelPrice + atrVal * 0.5) { touchBar = i; break; }
-    if (direction === 'SHORT' && k.h >= levelPrice - atrVal * 0.5) { touchBar = i; break; }
-  }
-  const cur = candles[n - 1];
-  if (touchBar === -1) {
-    if (direction === 'LONG' && cur.l <= levelPrice + atrVal * 0.5) touchBar = 0;
-    if (direction === 'SHORT' && cur.h >= levelPrice - atrVal * 0.5) touchBar = 0;
-  }
-  if (touchBar === -1) return { confirmed: false };
-
-  const curBody = direction === 'LONG' ? (cur.c - cur.o) : (cur.o - cur.c);
-  if (curBody < atrVal * 0.20) return { confirmed: false };
-
-  if (direction === 'LONG' && cur.c < levelPrice + atrVal * 0.1) return { confirmed: false };
-  if (direction === 'SHORT' && cur.c > levelPrice - atrVal * 0.1) return { confirmed: false };
-
-  let withDir = 0;
-  for (let i = 0; i < Math.min(3, n); i++) {
-    const k = candles[n - 1 - i];
-    const bd = k.c - k.o;
-    if (direction === 'LONG' && bd > 0) withDir++;
-    if (direction === 'SHORT' && bd < 0) withDir++;
-  }
-  if (withDir < 2) return { confirmed: false };
-
-  const bodyATR = (curBody / atrVal).toFixed(2);
-  return { confirmed: true, barsAgo: touchBar, bodyATR };
-}
 
 // ── MOMENTUM FILTER (v4.9) ──────────────────────────────
-function hasMomentumAgainst(candles, direction, atrVal) {
-  const n = candles.length;
-  if (n < 4) return { blocked: false };
-
-  const lookback = Math.min(5, n - 1);
-  let againstCount = 0;
-  let totalMove = 0;
-
-  for (let i = 1; i <= lookback; i++) {
-    const k = candles[n - 1 - i];
-    const bodyDir = k.c - k.o;
-    if (direction === 'LONG' && bodyDir < -atrVal * 0.05) againstCount++;
-    if (direction === 'SHORT' && bodyDir > atrVal * 0.05) againstCount++;
-    totalMove += bodyDir;
-  }
-
-  const netAgainst = (direction === 'LONG' && totalMove < -atrVal * 0.5)
-                  || (direction === 'SHORT' && totalMove > atrVal * 0.5);
-
-  if (againstCount >= 3 && netAgainst) {
-    return { blocked: true, reason: `${againstCount}/${lookback} candles against ${direction}, net move ${(totalMove/atrVal).toFixed(1)} ATR` };
-  }
-  return { blocked: false };
-}
 
 // ── LOWER-TF ALIGNMENT CHECK (v4.9) ───────────────────
 // Before ANY signal fires, check if lower-TF candles are moving WITH the signal.
@@ -1970,42 +1314,6 @@ function hasMomentumAgainst(candles, direction, atrVal) {
 // Two independent blocking conditions (either one blocks):
 //   A) Candle count: 2+ of last 5 candles are against direction
 //   B) Net move: last 5 candles net move > 0.3 ATR against direction
-function hasLTFAlignment(direction, lowerCandles) {
-  if (!lowerCandles) return { aligned: true };
-  const checks = [];
-  for (const [label, candles] of Object.entries(lowerCandles)) {
-    if (!candles || candles.length < 6) continue;
-    const n = candles.length;
-    const a = atr(candles);
-    const lookback = 5;
-    let againstCount = 0, withCount = 0, netMove = 0;
-    for (let i = 0; i < lookback; i++) {
-      const k = candles[n - 1 - i];
-      const bodyDir = k.c - k.o;
-      netMove += bodyDir;
-      if (direction === 'LONG' && bodyDir < -a * 0.02) againstCount++;
-      else if (direction === 'LONG' && bodyDir > a * 0.02) withCount++;
-      else if (direction === 'SHORT' && bodyDir > a * 0.02) againstCount++;
-      else if (direction === 'SHORT' && bodyDir < -a * 0.02) withCount++;
-    }
-    // Net move direction: positive = bullish
-    const netAgainst = (direction === 'SHORT' && netMove > a * 0.3)
-                    || (direction === 'LONG' && netMove < -a * 0.3);
-    const netMoveATR = (netMove / a).toFixed(2);
-    checks.push({ label, againstCount, withCount, lookback, netAgainst, netMoveATR });
-  }
-  for (const ch of checks) {
-    // Block A: majority of candles moving against signal
-    if (ch.againstCount >= 3) {
-      return { aligned: false, reason: `${ch.label}: ${ch.againstCount}/${ch.lookback} candles against ${direction} (net ${ch.netMoveATR} ATR)` };
-    }
-    // Block B: strong net move against even if individual candles are mixed
-    if (ch.netAgainst && ch.againstCount >= 2) {
-      return { aligned: false, reason: `${ch.label}: net move ${ch.netMoveATR} ATR against ${direction} (${ch.againstCount}/${ch.lookback} candles)` };
-    }
-  }
-  return { aligned: true };
-}
 
 // -- RETEST STRATEGY DETECTION (v5.11) -----------------------------------------
 // "Retest" pattern (highest conviction per Tomaž, 2026-04-24):
@@ -2015,234 +1323,11 @@ function hasLTFAlignment(direction, lowerCandles) {
 //      on the original side of the level.
 //   3) A CONVICTION candle (current bar) closes in the continuation direction
 //      with a body >= 0.5 × ATR. This is the entry trigger.
-function detectRetest(c, levelPrice, atrVal, coinMinStopPct){
-  const n = c.length;
-  if(n < 10) return { confirmed:false, reason:'insufficient candles' };
-  if(!atrVal || atrVal <= 0) return { confirmed:false, reason:'no ATR' };
-
-  const breakDist  = Math.max(atrVal * 0.3, levelPrice * 0.0015);
-  const retestTol  = Math.max(atrVal * 0.4, levelPrice * 0.002);
-  const closeBuf   = atrVal * 0.1;
-  const minBodyATR = 0.5;
-  const LOOKBACK   = Math.min(25, n - 1);
-  const RETEST_WIN = 5;
-
-  const cur = c[n - 1];
-
-  // Step 1: conviction direction from CURRENT candle
-  const bullBody = cur.c - cur.o;
-  const bearBody = cur.o - cur.c;
-  let direction = null, convictionBody = 0;
-  if(bullBody >= atrVal * minBodyATR && cur.c > levelPrice + closeBuf){
-    direction = 'LONG';  convictionBody = bullBody;
-  } else if(bearBody >= atrVal * minBodyATR && cur.c < levelPrice - closeBuf){
-    direction = 'SHORT'; convictionBody = bearBody;
-  } else {
-    return { confirmed:false, reason:'no conviction candle (body < 0.5 ATR or wrong side of level)' };
-  }
-
-  // Step 2: find retest bar in last RETEST_WIN bars (wick touches level, close on continuation side)
-  let retestBarsAgo = -1, retestExtreme = null;
-  for(let i = 1; i <= RETEST_WIN; i++){
-    if(n - 1 - i < 0) break;
-    const k = c[n - 1 - i];
-    if(direction === 'LONG'){
-      const touched = k.l <= levelPrice + retestTol && k.l >= levelPrice - retestTol;
-      const closedAbove = k.c >= levelPrice - closeBuf;
-      if(touched && closedAbove){ retestBarsAgo = i; retestExtreme = k.l; break; }
-    } else {
-      const touched = k.h >= levelPrice - retestTol && k.h <= levelPrice + retestTol;
-      const closedBelow = k.c <= levelPrice + closeBuf;
-      if(touched && closedBelow){ retestBarsAgo = i; retestExtreme = k.h; break; }
-    }
-  }
-  if(retestBarsAgo === -1){
-    return { confirmed:false, reason:'no retest touch in last ' + RETEST_WIN + ' bars' };
-  }
-
-  // Step 3: between retest and current, NO closes through the level
-  for(let i = 0; i < retestBarsAgo; i++){
-    const k = c[n - 1 - i];
-    if(direction === 'LONG' && k.c < levelPrice - closeBuf){
-      return { confirmed:false, reason:`closed through level ${i} bars ago (failed retest)` };
-    }
-    if(direction === 'SHORT' && k.c > levelPrice + closeBuf){
-      return { confirmed:false, reason:`closed through level ${i} bars ago (failed retest)` };
-    }
-  }
-
-  // Step 4: verify an earlier BREAK of the level
-  let breakBarsAgo = -1;
-  for(let i = retestBarsAgo + 1; i <= LOOKBACK; i++){
-    if(n - 1 - i < 0) break;
-    const k = c[n - 1 - i];
-    const brokeBeyond = direction === 'LONG'
-      ? k.c >= levelPrice + breakDist
-      : k.c <= levelPrice - breakDist;
-    if(!brokeBeyond) continue;
-    const deepLookEnd = Math.min(i + 10, n - 1);
-    let oppositeFound = false;
-    for(let j = i + 1; j <= deepLookEnd; j++){
-      if(n - 1 - j < 0) break;
-      const kk = c[n - 1 - j];
-      if(direction === 'LONG' && kk.c < levelPrice - closeBuf){ oppositeFound = true; break; }
-      if(direction === 'SHORT' && kk.c > levelPrice + closeBuf){ oppositeFound = true; break; }
-    }
-    if(oppositeFound){ breakBarsAgo = i; break; }
-  }
-  if(breakBarsAgo === -1){
-    return { confirmed:false, reason:'no prior break of level within lookback' };
-  }
-
-  // Step 5 (v5.17): post-break confirmation -- require multiple closes beyond level
-  // Filters single-candle false breakdowns (e.g. May 5 GOLD short).
-  const MIN_BREAK_CLOSES = 2;
-  let breakCloseCount = 0;
-  for(let i = retestBarsAgo + 1; i <= breakBarsAgo; i++){
-    if(n - 1 - i < 0) break;
-    const k = c[n - 1 - i];
-    if(direction === 'LONG'  && k.c >= levelPrice + closeBuf) breakCloseCount++;
-    if(direction === 'SHORT' && k.c <= levelPrice - closeBuf) breakCloseCount++;
-  }
-  if(breakCloseCount < MIN_BREAK_CLOSES){
-    return { confirmed:false, reason:`only ${breakCloseCount} close(s) beyond level after break (need ${MIN_BREAK_CLOSES}+) — likely false breakdown` };
-  }
-
-  return {
-    confirmed: true,
-    direction,
-    breakBarsAgo,
-    retestBarsAgo,
-    retestExtreme,
-    breakCloseCount,
-    convictionBodyATR: +(convictionBody / atrVal).toFixed(2),
-    reason: `break ${breakBarsAgo}b ago (${breakCloseCount} closes held), retest ${retestBarsAgo}b ago, body ${(convictionBody/atrVal).toFixed(2)} ATR`
-  };
-}
 
 // ── DMS SIGNAL ENGINE (v5.11 — RETEST STRATEGY, replaces v4.9 trap/bounce/breakout) ─
 // Retest = only pattern we trade. Runs on every TF (15m, 1H, 4H, 1D, 1W); signals
 // aggregate into multi-TF confidence the same way as before. HTF direction still
 // blocks counter-trend retests via the auto-trade gate.
-function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR, coinMinStopPct, feeEst){
-  coinMinRR = coinMinRR || 1.0;
-  coinMinStopPct = coinMinStopPct || 0.005;
-  feeEst = feeEst || 0.05;
-  const n = c.length;
-  const minCandles = (tf==='1W'||tf==='1D') ? 12 : 20;
-  if(n < minCandles) return { sig:'NEUTRAL', type:'NONE', reason:'Insufficient data' };
-
-  const htfDir = (htfBias && htfBias.dir) ? htfBias.dir : (typeof htfBias === 'string' ? htfBias : 'UNCLEAR');
-  const usePDHL  = (tf !== '1W');
-  const asiaLvls = (tf === '15m') ? (htfBias.__asiaLevels || []) : [];
-  const levels   = findDMCLevels(c, usePDHL ? dCandles : null, tf, asiaLvls);
-  const cur      = c[n-1];
-
-  // Candidate levels: decent score, within ATR range. Closest first.
-  const nearby = levels
-    .filter(l => Math.abs(l.price - cur.c) < a * 30 && l.score >= 15)
-    .sort((x, y) => Math.abs(x.price - cur.c) - Math.abs(y.price - cur.c));
-
-  if(nearby.length === 0){
-    return { sig:'NEUTRAL', type:'NONE', level:null, target:null, reason:'No qualifying levels within range' };
-  }
-
-  // -- RETEST DETECTION (v5.11) --------------------------------------------
-  // Try up to 5 nearest levels; first confirmed retest wins.
-  const maxToTest = Math.min(nearby.length, 5);
-  let atLevelFallback = null;
-
-  for(let li = 0; li < maxToTest; li++){
-    const lv = nearby[li];
-    const result = detectRetest(c, lv.price, a, coinMinStopPct);
-
-    if(result.confirmed){
-      const sig = result.direction;
-      const dirLower = sig === 'LONG' ? 'long' : 'short';
-
-      // Local HTF counter-trend gate: block on lower TFs when HTF clearly opposes.
-      // HTF TFs (1W/1D) may fire against htfDir — they are often what turns it.
-      const isHTF = (tf === '1W' || tf === '1D');
-      const counterTrend = (sig === 'LONG' && htfDir === 'DOWN') ||
-                           (sig === 'SHORT' && htfDir === 'UP');
-      if(counterTrend && !isHTF){
-        if(!atLevelFallback) atLevelFallback = { ...lv, _retestReason: 'counter-trend, waiting for HTF flip' };
-        continue;
-      }
-
-      // LTF alignment: on HTF signals only, respect lower-TF momentum
-      if(isHTF && lowerCandles){
-        const ltfCheck = hasLTFAlignment(sig, lowerCandles);
-        if(!ltfCheck.aligned){
-          if(!atLevelFallback) atLevelFallback = { ...lv, _retestReason: `LTF opposing: ${ltfCheck.reason}` };
-          continue;
-        }
-      }
-
-      // TP = next level in continuation direction
-      const tgt = findNextLevel(levels, cur.c, dirLower);
-
-      // SL = far side of the tested level + ATR buffer; enforce per-coin minStopPct from entry
-      const stopBuf = Math.max(a * 0.3, lv.price * 0.002);
-      let stop;
-      if(sig === 'LONG'){
-        stop = lv.price - stopBuf;
-        const entryFloor = cur.c * (1 - coinMinStopPct);
-        stop = Math.min(stop, entryFloor);
-      } else {
-        stop = lv.price + stopBuf;
-        const entryCeil = cur.c * (1 + coinMinStopPct);
-        stop = Math.max(stop, entryCeil);
-      }
-
-      const rr = calcRR(cur.c, tgt.price, lv.price, stop, feeEst);
-      if(!rr || parseFloat(rr) < coinMinRR){
-        if(!atLevelFallback) atLevelFallback = { ...lv, _retestReason: `R:R ${rr || 'n/a'} < ${coinMinRR}` };
-        continue;
-      }
-
-      const dist    = ((lv.price - cur.c) / cur.c * 100).toFixed(2);
-      const htfNote = ((htfDir === 'UP' && sig === 'LONG') || (htfDir === 'DOWN' && sig === 'SHORT'))
-        ? ` · HTF ${htfDir} aligns` : '';
-      return {
-        sig,
-        type: 'BLIND_ENTRY',
-        level: lv.price,
-        target: tgt.price,
-        rr,
-        stopPrice: stop,
-        strength: lv.strength,
-        score: lv.score,
-        reason: `RETEST ${tf} ${sig}: ${lv.source} $${fmt(lv.price)} · ${dist>0?'+':''}${dist}% · ${result.reason} · conviction ${result.convictionBodyATR} ATR${htfNote} · R:R ${rr} → $${fmt(tgt.price)}`,
-        detail: `Retest entry — SL: $${fmt(stop)}`,
-        untested: false
-      };
-    } else if(!atLevelFallback){
-      atLevelFallback = { ...lv, _retestReason: result.reason };
-    }
-  }
-
-  // -- NO CONFIRMED RETEST: emit AT_LEVEL if price is hugging a level ------
-  if(atLevelFallback && Math.abs(atLevelFallback.price - cur.c) < a * 1.5){
-    const lv = atLevelFallback;
-    const dist = ((lv.price - cur.c) / cur.c * 100).toFixed(2);
-    const dir = lv.type === 'resistance'
-      ? 'RESISTANCE — watching for retest + conviction'
-      : 'SUPPORT — watching for retest + conviction';
-    const why = lv._retestReason ? ` · ${lv._retestReason}` : '';
-    return {
-      sig: 'NEUTRAL',
-      type: 'AT_LEVEL',
-      level: lv.price,
-      target: null,
-      strength: lv.strength,
-      score: lv.score,
-      reason: `${lv.source} $${fmt(lv.price)} · ${dist>0?'+':''}${dist}% · ${dir}${why}`
-    };
-  }
-
-  return { sig:'NEUTRAL', type:'NONE', level:null, target:null, reason:'No retest pattern' };
-}
 
 // ── HTF STORY (1H + 4H analysis) ─────────────────────────
 // Determines if market is "gaining" or "failing" at key levels
@@ -2424,51 +1509,6 @@ function buildStory(levels, h4C, h1C, currentPrice){
   return { rows: topRows, conclusion, storyDir, bullPoints, bearPoints };
 }
 
-function nextMove(h4C, h1C){
-  const n4=h4C.length, n1=h1C.length;
-  if(n4<8||n1<8) return {dir:'UNCLEAR',reason:'Insufficient 4H/1H data'};
-
-  // ── 4H analysis: is price making higher body highs / lower body lows? ──
-  const h4 = h4C.slice(-6);
-  let bull4=0, bear4=0;
-  for(let i=1;i<h4.length;i++){
-    if(h4[i].bh > h4[i-1].bh && h4[i].bl > h4[i-1].bl) bull4++;
-    else if(h4[i].bh < h4[i-1].bh && h4[i].bl < h4[i-1].bl) bear4++;
-  }
-  // 4H failed to gain resistance = bearish story
-  const h4n=h4C[n4-1], h4p=h4C[n4-2], h4pp=h4C[n4-3];
-  const h4FailedHigh = h4n.bh < h4p.bh && h4p.bh > h4pp.bh; // prior bar was swing high, now rejected
-  const h4FailedLow  = h4n.bl > h4p.bl && h4p.bl < h4pp.bl;
-
-  // ── 1H analysis: recent 8 bars momentum ──────────────────────────────
-  const h1 = h1C.slice(-8);
-  let bull1=0, bear1=0;
-  for(let i=1;i<h1.length;i++){
-    if(h1[i].bh > h1[i-1].bh) bull1++;
-    else bear1++;
-  }
-  // 1H fail to gain or lose: last bar vs 2 bars ago
-  const h1n=h1C[n1-1], h1p=h1C[n1-2];
-  const h1Bearish = h1n.bh < h1p.bh && h1n.bl < h1p.bl;
-  const h1Bullish = h1n.bh > h1p.bh && h1n.bl > h1p.bl;
-
-  // ── Score: 4H is the story, 1H is the confirmation ───────────────────
-  const bearScore = bear4 + (h4FailedHigh?2:0) + (bear1>=5?1:0) + (h1Bearish?1:0);
-  const bullScore = bull4 + (h4FailedLow?2:0)  + (bull1>=5?1:0) + (h1Bullish?1:0);
-
-  // v5.1: Raised threshold from 2→3 and require gap>1 to prevent marginal/noisy reads
-  // Removed single-candle tiebreaker that declared trend from 1 bar (synced w/ bot.js)
-  const threshold = 3;
-  if(bullScore >= threshold && bullScore > bearScore + 1)
-    return {dir:'UP',   reason:`4H gaining (${bull4}/5 bars up) · 1H confirming (${bull1}/7 bullish) [score ${bullScore}>${bearScore}]`};
-  if(bearScore >= threshold && bearScore > bullScore + 1)
-    return {dir:'DOWN', reason:`4H failing (${bear4}/5 bars down) · 1H confirming (${bear1}/7 bearish) [score ${bearScore}>${bullScore}]`};
-  if(h4FailedHigh && h1Bearish)
-    return {dir:'DOWN', reason:`4H failed to gain last high · 1H trending down`};
-  if(h4FailedLow && h1Bullish)
-    return {dir:'UP',   reason:`4H failed to lose last low · 1H trending up`};
-  return {dir:'UNCLEAR',reason:'No clear 4H/1H direction — both sides contested'};
-}
 
 // ── COLLECT ALL LEVELS FOR LEVELS PAGE ───────────────────
 function collectLevels(wC, dC, p, c15m, h4C, h1C){
@@ -2513,7 +1553,6 @@ function collectLevels(wC, dC, p, c15m, h4C, h1C){
 }
 
 // ── RENDER ────────────────────────────────────────────────
-function fmt(n){return n>=1000?n.toLocaleString('en-US',{maximumFractionDigits:0}):n.toFixed(2);}
 
 function renderTop(t){
   price=t.price;
