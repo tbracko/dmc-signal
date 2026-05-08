@@ -13,6 +13,9 @@
 //   - isHIP3 flag
 //
 // Version notes (mirror bot.js changelog for the values most likely to drift):
+//   v5.19 (2026-05-08): GOLD maxNotional 300 → 200. May 1-7 GOLD lost $10.10 vs $1.75
+//                       wins (59% of the week's losses on 1 asset). Match BTC's $200 cap
+//                       until GOLD shows a green week. Cuts per-SL damage from ~$5 to ~$3.3.
 //   v5.17 (2026-05-06): GOLD maxNotional 500 → 300, feeEst 0.10 → 0.12.
 //   v5.5  (2026-04-16): HYPE maxNotional 200 → 100; SP500 minRR 1.5 → 1.2.
 //   v5.3  (2026-04-13): BTC re-enabled at $200 (was 0).
@@ -21,7 +24,7 @@ const COINS = {
   bitcoin:     { id:'bitcoin',     label:'BTC',    apiSym:'BTCUSDT',    asset:'BTC',        exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.007, maxNotional: 200, isHIP3: false },
   hyperliquid: { id:'hyperliquid', label:'HYPE',   apiSym:'HYPEUSDT',   asset:'HYPE',       exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, maxNotional: 100, isHIP3: false },
   sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',  asset:'xyz:SP500',  exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, maxNotional: 500, isHIP3: true  },
-  gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',   asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.5, feeEst: 0.12, minStopPct: 0.005, maxNotional: 300, isHIP3: true  },
+  gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',   asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.5, feeEst: 0.12, minStopPct: 0.005, maxNotional: 200, isHIP3: true  },
 };
 
 // Tag a fill as MANUAL when its opening notional > maxNotional × this multiplier.
