@@ -1012,7 +1012,12 @@ function nextMove(h4C, h1C){
 }
 
 
-module.exports = {
+// v5.22 (2026-05-08): Dual-mode UMD-style export. Works in both:
+//   - Node CommonJS  (bot.js, daily-report.js, backtester) → module.exports
+//   - Browser <script>  (dms-v53.html / index.html)        → window.DMSSignals
+// This is the entry point that lets the dashboard import the same signal engine
+// as bot.js, eliminating the duplicate-bug class (plan item #6).
+const __DMS_SIGNALS_EXPORTS = {
   fmt, atr, calcADX, trendExhaustion48h,
   isSwingHigh, isSwingLow, detectFlippedLevel, scoreLevel, classifyStrength,
   countLevelTests, findVPeaks, findPDHL,
@@ -1023,3 +1028,10 @@ module.exports = {
   detectRetest, dms, nextMove,
   CHOP_FILTER, MAX_HOLD_HOURS, FUNDING_EXIT_THRESHOLD, BREAKOUT_QUALITY, EXHAUSTION_THRESHOLDS,
 };
+if (typeof module !== 'undefined' && module.exports) {
+  // Node / CommonJS
+  module.exports = __DMS_SIGNALS_EXPORTS;
+} else if (typeof globalThis !== 'undefined') {
+  // Browser
+  globalThis.DMSSignals = __DMS_SIGNALS_EXPORTS;
+}
