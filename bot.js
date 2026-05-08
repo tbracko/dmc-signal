@@ -220,6 +220,11 @@ const RISK_PCT        = parseFloat(process.env.RISK_PCT || '1');      // % of ac
 const MIN_CONFIDENCE  = parseInt(process.env.MIN_CONFIDENCE || '50'); // base min confidence %
 const MAX_TRADES_DAY  = parseInt(process.env.MAX_TRADES_DAY || '10');
 const TRAIL_INTERVAL  = parseInt(process.env.TRAIL_INTERVAL || '30000'); // check trailing every 30s
+// v5.20 (2026-05-08): Hard cap on max-loss-per-trade. If level-based SL implies an
+// adverse move > MAX_LOSS_PCT (default 3%), executeTrade skips the entry. Catches
+// the May 3 HYPE pattern where SL was 4.7% from entry — reward asymmetry too poor
+// after fees. Tunable per-deploy via env var.
+const MAX_LOSS_PCT    = parseFloat(process.env.MAX_LOSS_PCT || '0.03'); // 3% of notional
 
 // v5.5: Inherited-manual-position policy — 'ignore' (default) / 'trim' / 'manage'
 const INHERIT_MANUAL_POSITIONS = (process.env.INHERIT_MANUAL_POSITIONS || 'ignore').toLowerCase();
@@ -2368,6 +2373,17 @@ const HL = {
     // v5.0: Use per-coin minStopPct instead of hard 0.3%
     const minStopDist = currentPrice * (coin.minStopPct || 0.005);
     if (slDistance < minStopDist) { console.warn('HL: SL too tight (' + (slDistance/currentPrice*100).toFixed(3) + '% < ' + ((coin.minStopPct||0.005)*100).toFixed(1) + '%)'); return null; }
+
+    // v5.20 (2026-05-08): Max-loss-per-trade gate. If level-based SL implies > MAX_LOSS_PCT
+    // adverse move (= > MAX_LOSS_PCT loss as fraction of notional), skip the trade. Trusts the
+    // level analysis but passes when reward asymmetry is too poor (the May 3 HYPE pattern).
+    const slDistPct = slDistance / currentPrice;
+    if (slDistPct > MAX_LOSS_PCT) {
+      console.warn(`HL: ${asset} ${sig} SKIP — SL ${(slDistPct*100).toFixed(2)}% > ${(MAX_LOSS_PCT*100).toFixed(1)}% max-loss cap (v5.20)`);
+      logMissedSignal(coinId, signal.sig, confidence, 'max-loss-cap', { slDistPct: +slDistPct.toFixed(4), maxLossPct: MAX_LOSS_PCT, filter: `v5.20 max-loss-per-trade ${(MAX_LOSS_PCT*100).toFixed(1)}%` });
+      await sendTelegram(`📏 <b>SKIP: ${asset} ${sig}</b>\nLevel-based SL ${(slDistPct*100).toFixed(2)}% from entry exceeds ${(MAX_LOSS_PCT*100).toFixed(1)}% max-loss cap.\nReward asymmetry too poor after fees.`);
+      return null;
+    }
 
     let size = riskAmount / slDistance;
 
