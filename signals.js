@@ -958,6 +958,12 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR, coinMinStopPc
         stopPrice: stop,
         strength: lv.strength,
         score: lv.score,
+        // v5.23 (2026-05-08): propagate detectRetest fields so scoreSignal() can use them.
+        // Additive — pre-existing consumers ignore these fields.
+        convictionBodyATR: result.convictionBodyATR,
+        breakCloseCount:   result.breakCloseCount,
+        breakBarsAgo:      result.breakBarsAgo,
+        retestBarsAgo:     result.retestBarsAgo,
         reason: `RETEST ${tf} ${sig}: ${lv.source} $${fmt(lv.price)} . ${dist>0?'+':''}${dist}% . ${result.reason} . conviction ${result.convictionBodyATR} ATR${htfNote} . R:R ${rr} -> $${fmt(tgt.price)}`,
         detail: `Retest entry -- SL: $${fmt(stop)}`,
         untested: false
@@ -1020,6 +1026,132 @@ function nextMove(h4C, h1C){
   return { dir:'UNCLEAR' };
 }
 
+// =============================================================================
+// scoreSignal() — v5.23 (2026-05-08)
+// =============================================================================
+// Combines multi-TF confidence with conviction quality, level quality, market
+// regime alignment, and range/exhaustion penalties into a single 0–100 strength
+// score. Hand-tuned weights as a starting point — validation against real fills
+// happens in counterfactual.js (which buckets historical trades by score and
+// reports per-bucket win rate).
+//
+// Inputs:
+//   coinState     { price, htfDir, range48h, exhaustion48h, fundingRate }
+//   dmsResult     return value from dms() — must have sig, level, score, rr,
+//                 convictionBodyATR, breakCloseCount (v5.23 propagation)
+//   allResults    { '1W': dmsRes, '1D': ..., ... } — for confluence calc
+//   entryCandles  candles on the firing TF (for ADX read)
+//
+// Output: { score: 0–100, label: 'STRONG'|'SOLID'|'MODERATE'|'WEAK'|'NONE',
+//           color: hex, breakdown: { factor: contribution } }
+function scoreSignal({ coinState, dmsResult, allResults, entryCandles } = {}) {
+  if (!dmsResult || dmsResult.sig === 'NEUTRAL') {
+    return { score: 0, label: 'NONE', color: '#5d7a99', breakdown: {} };
+  }
+  const sig = dmsResult.sig;
+  const breakdown = {};
+
+  // --- Base: multi-TF confidence (0–100) ---
+  const SIG_TFS = [{l:'1W',w:5},{l:'1D',w:4},{l:'4H',w:3},{l:'1H',w:2},{l:'15m',w:1}];
+  const totalW = 15;
+  let wL = 0, wS = 0;
+  if (allResults) {
+    for (const tf of SIG_TFS) {
+      const r = allResults[tf.l];
+      if (!r) continue;
+      if (r.sig === 'LONG')  wL += tf.w;
+      if (r.sig === 'SHORT') wS += tf.w;
+    }
+  } else {
+    // Fall back to giving credit to the firing TF only — implies single-TF signal.
+    wL = sig === 'LONG' ? 1 : 0;
+    wS = sig === 'SHORT' ? 1 : 0;
+  }
+  const conf = Math.round(Math.max(wL, wS) / totalW * 100);
+  let score = conf;
+  breakdown.base_confidence = conf;
+
+  // --- HTF agreement (with-trend bonus / counter-trend penalty) ---
+  if (coinState && coinState.htfDir) {
+    const htf = coinState.htfDir;
+    if ((sig === 'LONG' && htf === 'UP') || (sig === 'SHORT' && htf === 'DOWN')) {
+      score += 15; breakdown.htf_with_trend = 15;
+    } else if ((sig === 'LONG' && htf === 'DOWN') || (sig === 'SHORT' && htf === 'UP')) {
+      score -= 15; breakdown.htf_counter_trend = -15;
+    }
+  }
+
+  // --- Conviction body ATR (decisiveness of the entry candle) ---
+  if (typeof dmsResult.convictionBodyATR === 'number') {
+    const cb = Math.min(dmsResult.convictionBodyATR, 2);
+    const bonus = Math.round(cb * 10);   // 0–20
+    score += bonus; breakdown.conviction_body = bonus;
+  }
+
+  // --- Break close count (v5.17: did the break hold?) ---
+  if (typeof dmsResult.breakCloseCount === 'number') {
+    const bcc = Math.min(dmsResult.breakCloseCount, 5);
+    const bonus = Math.round(bcc * 3);   // 0–15
+    score += bonus; breakdown.break_close = bonus;
+  }
+
+  // --- Level quality (scoreLevel output) ---
+  if (typeof dmsResult.score === 'number') {
+    const bonus = Math.round(Math.min(dmsResult.score, 100) * 0.2);  // 0–20
+    score += bonus; breakdown.level_quality = bonus;
+  }
+
+  // --- ADX on entry TF (range vs trend) ---
+  if (entryCandles && entryCandles.length >= 30) {
+    const adx = calcADX(entryCandles);
+    const bonus = Math.round(Math.min(adx, 50) * 0.3);  // 0–15
+    score += bonus; breakdown.adx = bonus;
+  }
+
+  // --- R:R asymmetry ---
+  const rr = parseFloat(dmsResult.rr);
+  if (rr >= 2.0)      { score += 5;  breakdown.rr_high = 5; }
+  else if (rr >= 1.5) { score += 2;  breakdown.rr_decent = 2; }
+
+  // --- Funding rate alignment (HL perp tailwind) ---
+  if (coinState && typeof coinState.fundingRate === 'number' &&
+      Math.abs(coinState.fundingRate) > 0.0001) {
+    const favors = coinState.fundingRate > 0 ? 'SHORT' : 'LONG';
+    if (sig === favors) { score += 5; breakdown.funding_aligned = 5; }
+  }
+
+  // --- Range position penalty (entries at the extreme reverse more often) ---
+  if (coinState && coinState.range48h && coinState.price) {
+    const r = coinState.range48h;
+    const size = r.high - r.low;
+    if (size > 0) {
+      const pos = (coinState.price - r.low) / size;   // 0=bottom, 1=top
+      if (sig === 'LONG' && pos > 0.80)  { score -= 10; breakdown.range_extreme_top = -10; }
+      if (sig === 'SHORT' && pos < 0.20) { score -= 10; breakdown.range_extreme_bot = -10; }
+    }
+  }
+
+  // --- 48h exhaustion penalty (move already played out) ---
+  if (coinState && coinState.exhaustion48h) {
+    const exh = coinState.exhaustion48h;
+    const dirMove = sig === 'LONG' ? (exh.movePct || 0) : -(exh.movePct || 0);
+    if (dirMove > 1) {
+      const pen = Math.min(Math.round(dirMove * 2), 20);
+      score -= pen; breakdown.exhaustion = -pen;
+    }
+  }
+
+  // Clip + label
+  score = Math.max(0, Math.min(100, score));
+  let label, color;
+  if (score >= 80)      { label = 'STRONG';   color = '#00e676'; }
+  else if (score >= 60) { label = 'SOLID';    color = '#7fdb8e'; }
+  else if (score >= 40) { label = 'MODERATE'; color = '#ffc107'; }
+  else                  { label = 'WEAK';     color = '#ff3d5a'; }
+
+  return { score, label, color, breakdown };
+}
+
 
 // v5.22 (2026-05-08): Dual-mode UMD-style export. Works in both:
 //   - Node CommonJS  (bot.js, daily-report.js, backtester) → module.exports
@@ -1034,7 +1166,7 @@ const __DMS_SIGNALS_EXPORTS = {
   getAsiaRange, getAsiaLevels, getNYRange, getNYLevels, getLondonRange, getLondonLevels,
   findFibLevels, findDMCLevels, findNextLevel, findStopLevel, calcRR,
   hasRejection, hasStrongBodyBounce, hasMomentumAgainst, hasLTFAlignment,
-  detectRetest, dms, nextMove,
+  detectRetest, dms, nextMove, scoreSignal,
   CHOP_FILTER, MAX_HOLD_HOURS, FUNDING_EXIT_THRESHOLD, BREAKOUT_QUALITY, EXHAUSTION_THRESHOLDS,
 };
 if (typeof module !== 'undefined' && module.exports) {
