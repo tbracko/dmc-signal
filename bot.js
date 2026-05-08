@@ -234,12 +234,11 @@ if(!TG_TOKEN || !TG_CHATID){
 }
 
 // -- COINS (BTC, HYPE, SPX + GOLD via Hyperliquid HIP-3) ---------------------
-const COINS = {
-  bitcoin:     { id:'bitcoin',     label:'BTC',    apiSym:'BTCUSDT',      asset:'BTC',        exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.007, maxNotional: 200, isHIP3: false },  // v5.3: re-enabled (was 0), capped at $200 — regime filter + 8× notional cap provide protection
-  hyperliquid: { id:'hyperliquid', label:'HYPE',   apiSym:'HYPEUSDT',     asset:'HYPE',       exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, maxNotional: 100, isHIP3: false },  // v5.5: halved $200→$100 after 3 consecutive SL hits (Apr 13/14/16 = -$12.08). Raise back to $200 after 3 consecutive wins at $100.
-  sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',   asset:'xyz:SP500', exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, maxNotional: 500, isHIP3: true },  // v5.5: minRR 1.5→1.2 — SP500 tail-carry wins on direction not R:R; 1.5 was filtering valid signals and forcing all entries to be manual
-  gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',    asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.5, feeEst: 0.12, minStopPct: 0.005, maxNotional: 300, isHIP3: true },  // v5.17: maxNotional $500→$300 — single GOLD SL ($5.60 on May 5) wiped 3 HYPE wins; cap damage per trade. feeEst 0.10->0.12 (builder fees ~10bps)
-};
+// v5.18 (2026-05-08): COINS metadata moved to ./coins-config.js as the single source of
+// truth, shared with daily-report.js and the backtester. Per-coin sizing/fees are edited
+// there now; this file only consumes them. Eliminates the v5.17 GOLD-cap drift bug where
+// daily-report.js had GOLD at $500 while bot.js had reduced it to $300.
+const { COINS } = require('./coins-config');
 
 const TFS = [
   { l:'1W', w:5 },
