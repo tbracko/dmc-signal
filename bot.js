@@ -2549,6 +2549,34 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults, entryCandles
       return;
     }
     console.log(`HL AUTO-TRADE FIRE ${sym} ${d.sig} | conf: ${conf}% (min: ${minConf}%, ${trendLabel}) | SL: ${d.stopPrice} | positions: ${openCount+1}/${MAX_POSITIONS}`);
+    // v5.22 (2026-05-09): structured fire diagnostic — captures the exact state
+    // backtester replay needs to reproduce this trade. Single line, JSON-tagged
+    // with FIRE_DIAG so a tail|grep can extract the corpus from Railway logs.
+    // Used to validate backtester/replay.js against ground-truth live fires.
+    try {
+      const tfSigs = {};
+      for (const t of TFS) {
+        const r = allResults && allResults[t.l];
+        tfSigs[t.l] = r ? { sig: r.sig, type: r.type, level: r.level || null, stop: r.stopPrice || null, rr: r.rr || null } : null;
+      }
+      const diag = {
+        ts: new Date().toISOString(),
+        coin: coinId, sym, side: d.sig,
+        firingTf: TFS[tfIdx].l,
+        conf, minConf, trendLabel,
+        wL, wS, majorSig,
+        htfDir, storyDir,
+        price: s?.price || null,
+        range48h: s?.range48h || null,
+        exhaustion48h: s?.exhaustion48h || null,
+        fundingRate: s?.fundingRate || null,
+        effectiveCap: coinState[coinId]?.effectiveMaxNotional || null,
+        exhaustionMod: coinState[coinId]?.exhaustionModifier || null,
+        signal: { level: d.level, target: d.target, stopPrice: d.stopPrice, rr: d.rr, type: d.type, reason: d.reason },
+        tfSigs,
+      };
+      console.log('FIRE_DIAG ' + JSON.stringify(diag));
+    } catch (e) { console.warn('FIRE_DIAG emit failed:', e.message); }
     await HL.executeTrade(coinId, d, conf);
     await HL.syncPositions();
   }
