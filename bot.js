@@ -191,6 +191,7 @@
 
 const fs    = require('fs');
 const path  = require('path');
+const http  = require('http');                  // v5.22: health-page HTTP server
 const ethers = require('ethers');
 
 // -- CONFIG (env vars or .env file) ------------------------------------------
@@ -2946,6 +2947,12 @@ async function checkDailySummary() {
   }
 }
 
+// v5.22: track last successful scan for health endpoint.
+let lastScanTs = 0;
+let scanCount  = 0;
+const BOT_STARTED_AT = Date.now();
+const BOT_VERSION    = 'v5.22';
+
 async function scanAll(){
   const coins = Object.keys(COINS);
   console.log(`[${new Date().toISOString()}] Scanning ${coins.map(c=>COINS[c].label).join(', ')}...`);
@@ -2953,12 +2960,114 @@ async function scanAll(){
     if(i > 0) await new Promise(r=>setTimeout(r, 2000));
     await scanCoin(coins[i]);
   }
+  lastScanTs = Date.now();
+  scanCount++;
   console.log(`[${new Date().toISOString()}] Scan complete. Next in ${INTERVAL_MS/1000}s.`);
 }
 
+// ==============================================================================
+// ##  v5.22: HEALTH SERVER                                                  ##
+// ==============================================================================
+// Tiny HTTP server so Railway exposes a public URL for the health dashboard.
+// Negative-space proof of life: if the URL won't load, the bot process is down.
+//
+// Routes:
+//   GET /                  -> bot-health.html
+//   GET /health            -> bot-health.html (alias)
+//   GET /dashboard         -> dms-v53.html (full dashboard)
+//   GET /api/status        -> { ok, version, uptime, scanCount, lastScanTs, ... }
+//   GET /api/missed?n=50   -> last N entries from .missed_signals.json
+//
+// CORS: allow * for /api/* so you can hit endpoints from anywhere.
+function startHealthServer() {
+  const PORT = parseInt(process.env.PORT || '3000', 10);
+  const STATIC_FILES = {
+    '/'            : { file: 'bot-health.html', type: 'text/html; charset=utf-8' },
+    '/health'      : { file: 'bot-health.html', type: 'text/html; charset=utf-8' },
+    '/dashboard'   : { file: 'dms-v53.html',    type: 'text/html; charset=utf-8' },
+    '/signals.js'  : { file: 'signals.js',      type: 'application/javascript; charset=utf-8' },
+    '/coins-config.js': { file: 'coins-config.js', type: 'application/javascript; charset=utf-8' },
+  };
+
+  const server = http.createServer(async (req, res) => {
+    try {
+      const url = req.url.split('?')[0];
+
+      // ---- Static file routes ----
+      if (STATIC_FILES[url]) {
+        const { file, type } = STATIC_FILES[url];
+        const fp = path.join(__dirname, file);
+        if (!fs.existsSync(fp)) {
+          res.writeHead(404, { 'Content-Type': 'text/plain' });
+          return res.end('Not found: ' + file);
+        }
+        res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' });
+        return fs.createReadStream(fp).pipe(res);
+      }
+
+      // ---- /api/status ----
+      if (url === '/api/status') {
+        const body = {
+          ok: true,
+          version: BOT_VERSION,
+          startedAt: new Date(BOT_STARTED_AT).toISOString(),
+          uptimeSec: Math.floor((Date.now() - BOT_STARTED_AT) / 1000),
+          lastScanTs: lastScanTs ? new Date(lastScanTs).toISOString() : null,
+          lastScanAgeSec: lastScanTs ? Math.floor((Date.now() - lastScanTs) / 1000) : null,
+          scanCount,
+          autoTradeEnabled: !!(HL && HL.enabled),
+          activePositions: HL && HL.activeTrades ? Object.keys(HL.activeTrades).length : 0,
+          cachedEquity: HL ? (HL.cachedEquity || 0) : 0,
+          coins: Object.keys(COINS).map(c => ({
+            id: c, label: COINS[c].label,
+            price: coinState[c]?.price || null,
+            htfDir: coinState[c]?.htfDir || null,
+            storyDir: coinState[c]?.storyDir || null,
+          })),
+        };
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-cache' });
+        return res.end(JSON.stringify(body, null, 2));
+      }
+
+      // ---- /api/missed ----
+      if (url === '/api/missed') {
+        const n = Math.min(parseInt(new URLSearchParams(req.url.split('?')[1] || '').get('n') || '50', 10), 500);
+        let entries = [];
+        try {
+          if (fs.existsSync(MISSED_SIGNALS_FILE)) {
+            entries = JSON.parse(fs.readFileSync(MISSED_SIGNALS_FILE, 'utf8'));
+          }
+        } catch (_) { /* corrupt or empty — return [] */ }
+        const recent = entries.slice(-n).reverse();
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-cache' });
+        return res.end(JSON.stringify({ count: recent.length, entries: recent }));
+      }
+
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not found');
+    } catch (e) {
+      console.warn('health-server error:', e.message);
+      try {
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Server error: ' + e.message);
+      } catch (_) {}
+    }
+  });
+
+  server.listen(PORT, () => {
+    console.log(`[${new Date().toISOString()}] Health server listening on :${PORT} — / /health /dashboard /api/status /api/missed`);
+  });
+  server.on('error', (e) => console.warn('health-server listen error:', e.message));
+  return server;
+}
+
 async function main(){
-  console.log(`DMS Signal Bot v5.17 started (inherit-protect KILL SWITCH). Interval: ${INTERVAL_MS/1000}s`);
+  console.log(`DMS Signal Bot ${BOT_VERSION} started. Interval: ${INTERVAL_MS/1000}s`);
   console.log(`Coins: BTC, HYPE, SPX, GOLD  |  Token: ...${TG_TOKEN.slice(-6)}  |  Chat: ${TG_CHATID}`);
+
+  // v5.22: start health-page HTTP server BEFORE trading init so Railway sees
+  // a listening port immediately (avoids deploy timeout / "no http response").
+  startHealthServer();
 
   // Initialize Hyperliquid trading module
   if (HL_PRIVATE_KEY && AUTO_TRADE) {
