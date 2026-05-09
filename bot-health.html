@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DMS Bot Health</title>
+<style>
+  :root {
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2128; --line:#30363d;
+    --txt:#e6edf3; --dim:#8b949e; --good:#3fb950; --warn:#d29922; --bad:#f85149;
+    --bot:#58a6ff; --manual:#f0883e;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:14px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif; }
+  header { padding:16px 24px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; }
+  header h1 { margin:0; font-size:18px; font-weight:600; }
+  header .meta { color:var(--dim); font-size:12px; }
+  main { max-width:1100px; margin:0 auto; padding:20px 24px; }
+  .grid { display:grid; gap:16px; }
+  .grid-3 { grid-template-columns:repeat(3,1fr); }
+  .grid-2 { grid-template-columns:repeat(2,1fr); }
+  @media (max-width:780px) { .grid-3,.grid-2 { grid-template-columns:1fr; } }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; }
+  .panel h2 { margin:0 0 12px; font-size:13px; font-weight:600; color:var(--dim); text-transform:uppercase; letter-spacing:0.5px; }
+  .big { font-size:28px; font-weight:600; line-height:1.1; }
+  .small { color:var(--dim); font-size:12px; margin-top:4px; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; }
+  .badge.good { background:rgba(63,185,80,.15); color:var(--good); }
+  .badge.warn { background:rgba(210,153,34,.15); color:var(--warn); }
+  .badge.bad  { background:rgba(248,81,73,.15);  color:var(--bad); }
+  .badge.bot  { background:rgba(88,166,255,.15); color:var(--bot); }
+  .badge.man  { background:rgba(240,136,62,.15); color:var(--manual); }
+  .badge.neu  { background:rgba(139,148,158,.15); color:var(--dim); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); }
+  th { color:var(--dim); font-weight:500; font-size:11px; text-transform:uppercase; letter-spacing:0.4px; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .row-coin td { padding:10px; }
+  .pnl-pos { color:var(--good); }
+  .pnl-neg { color:var(--bad); }
+  .dim { color:var(--dim); }
+  button { background:var(--panel2); border:1px solid var(--line); color:var(--txt); padding:6px 12px; border-radius:6px; font-size:13px; cursor:pointer; }
+  button:hover { border-color:var(--bot); }
+  .err { background:rgba(248,81,73,.1); border:1px solid var(--bad); color:var(--bad); padding:10px 14px; border-radius:6px; margin-bottom:12px; font-size:13px; }
+  .loading { color:var(--dim); padding:20px; text-align:center; }
+  .live-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--good); margin-right:6px; animation:pulse 2s infinite; }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.4; } }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1><span class="live-dot" id="liveDot"></span>DMS Bot Health</h1>
+    <div class="meta" id="walletMeta">—</div>
+  </div>
+  <button onclick="refresh()">Refresh</button>
+</header>
+<main>
+  <div id="err" style="display:none"></div>
+  <div id="loading" class="loading">Loading wallet data…</div>
+  <div id="content" style="display:none">
+
+    <div class="grid grid-3" style="margin-bottom:16px">
+      <div class="panel">
+        <h2>Bot Process</h2>
+        <div class="big" id="botProc">—</div>
+        <div class="small" id="botProcSub">—</div>
+      </div>
+      <div class="panel">
+        <h2>True Equity (spot USDC)</h2>
+        <div class="big" id="equity">—</div>
+        <div class="small" id="equitySub">—</div>
+      </div>
+      <div class="panel">
+        <h2>Last Bot Fire (wallet)</h2>
+        <div class="big" id="lastFireAge">—</div>
+        <div class="small" id="lastFireSub">—</div>
+      </div>
+    </div>
+    <div class="grid grid-2" style="margin-bottom:16px">
+      <div class="panel">
+        <h2>Last Scan</h2>
+        <div class="big" id="lastScanAge">—</div>
+        <div class="small" id="lastScanSub">scan count: <span id="scanCount">—</span></div>
+      </div>
+      <div class="panel">
+        <h2>Last Wallet Fill (any)</h2>
+        <div class="big" id="lastFillAge">—</div>
+        <div class="small" id="lastFillSub">—</div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px">
+      <h2>Per-Coin Status (last 7 days)</h2>
+      <table id="coinTable">
+        <thead>
+          <tr>
+            <th>Coin</th>
+            <th class="num">Open Pos</th>
+            <th class="num">7d Bot Fills</th>
+            <th class="num">7d Manual</th>
+            <th>Last Bot Fire</th>
+            <th>Last Activity</th>
+            <th class="num">Cap</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h2>Recent Fills (last 14)</h2>
+      <table id="fillTable">
+        <thead>
+          <tr>
+            <th>Time (UTC)</th>
+            <th>Coin</th>
+            <th>Direction</th>
+            <th class="num">Px</th>
+            <th class="num">Notional</th>
+            <th class="num">Cap×</th>
+            <th>Source</th>
+            <th class="num">P&amp;L</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+  </div>
+</main>
+
+<script>
+const HL_API = 'https://api.hyperliquid.xyz/info';
+const ADDR = '0x1a41f3Fd141B77aF3A0Ee9dE847328805Cf40C86';
+
+// Mirror coins-config.js — keep in sync if caps change.
+const COIN_CAPS = {
+  'BTC':       { label:'BTC',    cap:200, isHIP3:false },
+  'HYPE':      { label:'HYPE',   cap:100, isHIP3:false },
+  'xyz:SP500': { label:'S&P500', cap:500, isHIP3:true  },
+  'xyz:GOLD':  { label:'GOLD',   cap:200, isHIP3:true  },
+};
+const MANUAL_MULT = 1.05;
+const COIN_ORDER = ['BTC','HYPE','xyz:SP500','xyz:GOLD'];
+
+async function postInfo(body) {
+  const r = await fetch(HL_API, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+  if (!r.ok) throw new Error('HL ' + body.type + ' ' + r.status);
+  return r.json();
+}
+
+function classify(coin, notional) {
+  const def = COIN_CAPS[coin];
+  if (!def) return { source:'unknown', ratio:null };
+  const ratio = notional / def.cap;
+  return { source: ratio > MANUAL_MULT ? 'manual' : 'bot', ratio };
+}
+
+function fmtAge(ms) {
+  if (ms == null) return '—';
+  const h = ms / 3600000;
+  if (h < 1)  return Math.round(h*60) + ' min';
+  if (h < 48) return h.toFixed(1) + ' h';
+  return (h/24).toFixed(1) + ' d';
+}
+
+function ageBadge(ms) {
+  if (ms == null) return 'neu';
+  const h = ms / 3600000;
+  if (h < 24) return 'good';
+  if (h < 72) return 'warn';
+  return 'bad';
+}
+
+function fmtPnl(n) {
+  if (n == null || n === 0) return '<span class="dim">—</span>';
+  const cls = n > 0 ? 'pnl-pos' : 'pnl-neg';
+  const sign = n > 0 ? '+' : '−';
+  return '<span class="'+cls+'">'+sign+'$'+Math.abs(n).toFixed(2)+'</span>';
+}
+
+async function loadAll() {
+  const now = Date.now();
+  const start = now - 7 * 86400000;
+  // /api/status only resolves when the page is served by bot.js itself (gives
+  // bot-process proof of life). Locally opened files get null and degrade.
+  const statusPromise = fetch('/api/status').then(r => r.ok ? r.json() : null).catch(() => null);
+  const [spot, perpDefault, perpXyz, fills, status] = await Promise.all([
+    postInfo({ type:'spotClearinghouseState', user:ADDR }),
+    postInfo({ type:'clearinghouseState', user:ADDR }),
+    postInfo({ type:'clearinghouseState', user:ADDR, dex:'xyz' }),
+    postInfo({ type:'userFillsByTime', user:ADDR, startTime:start, endTime:now }),
+    statusPromise,
+  ]);
+  return { spot, perpDefault, perpXyz, fills, status, now };
+}
+
+function render({ spot, perpDefault, perpXyz, fills, status, now }) {
+  // ---- Bot Process status (only present when served by bot.js) ----
+  const botProcEl = document.getElementById('botProc');
+  const botProcSubEl = document.getElementById('botProcSub');
+  if (status && status.ok) {
+    const upH = status.uptimeSec / 3600;
+    const uptimeStr = upH < 1 ? Math.round(upH*60)+' min' : upH < 48 ? upH.toFixed(1)+' h' : (upH/24).toFixed(1)+' d';
+    botProcEl.innerHTML = '<span class="badge good">ALIVE</span>';
+    botProcSubEl.textContent = 'v' + status.version + ' · uptime ' + uptimeStr + ' · auto-trade ' + (status.autoTradeEnabled ? 'ON' : 'OFF');
+  } else {
+    botProcEl.innerHTML = '<span class="badge neu">OFFLINE / LOCAL</span>';
+    botProcSubEl.textContent = 'No /api/status — page served from disk, not from bot';
+  }
+
+  // ---- Last scan ----
+  const scanEl = document.getElementById('lastScanAge');
+  const scanSubEl = document.getElementById('lastScanSub');
+  if (status && status.lastScanAgeSec != null) {
+    const ms = status.lastScanAgeSec * 1000;
+    scanEl.innerHTML = '<span class="badge ' + (ms < 5*60*1000 ? 'good' : ms < 15*60*1000 ? 'warn' : 'bad') + '">' + fmtAge(ms) + '</span>';
+    document.getElementById('scanCount').textContent = status.scanCount;
+  } else {
+    scanEl.innerHTML = '<span class="badge neu">—</span>';
+  }
+
+  // ---- Equity (true equity = spot USDC) ----
+  let usdc = 0;
+  if (spot && spot.balances) {
+    const bal = spot.balances.find(b => b.coin === 'USDC');
+    if (bal) usdc = parseFloat(bal.total);
+  }
+  document.getElementById('equity').textContent = '$' + usdc.toFixed(2);
+  const accVal = parseFloat(perpDefault?.marginSummary?.accountValue || '0');
+  const accValXyz = parseFloat(perpXyz?.marginSummary?.accountValue || '0');
+  document.getElementById('equitySub').textContent =
+    'HL perp acc: $' + accVal.toFixed(2) + ' · xyz dex: $' + accValXyz.toFixed(2);
+
+  // ---- Open positions ----
+  const openPos = {};
+  for (const dex of [perpDefault, perpXyz]) {
+    if (!dex || !dex.assetPositions) continue;
+    for (const ap of dex.assetPositions) {
+      const p = ap.position;
+      const sz = parseFloat(p.szi);
+      if (Math.abs(sz) < 1e-9) continue;
+      openPos[p.coin] = {
+        side: sz > 0 ? 'LONG' : 'SHORT',
+        sz: Math.abs(sz),
+        entry: parseFloat(p.entryPx),
+        upnl: parseFloat(p.unrealizedPnl),
+        liq: parseFloat(p.liquidationPx || 0),
+      };
+    }
+  }
+
+  // ---- Group fills + classify ----
+  const opens = [];
+  const closes = [];
+  fills.sort((a,b) => a.time - b.time);
+  // Group by oid for accurate notional
+  const byOid = new Map();
+  for (const f of fills) {
+    if (!byOid.has(f.oid)) byOid.set(f.oid, []);
+    byOid.get(f.oid).push(f);
+  }
+  const orders = [];
+  for (const [oid, group] of byOid) {
+    const first = group[0];
+    const sz = group.reduce((s,f)=>s+Math.abs(parseFloat(f.sz)),0);
+    const wpx = group.reduce((s,f)=>s+Math.abs(parseFloat(f.sz))*parseFloat(f.px),0)/sz;
+    const pnl = group.reduce((s,f)=>s+parseFloat(f.closedPnl||'0'),0);
+    const fee = group.reduce((s,f)=>s+parseFloat(f.fee||'0'),0);
+    const notional = sz * wpx;
+    const isOpen = (first.dir||'').startsWith('Open');
+    const c = isOpen ? classify(first.coin, notional) : { source:'inherit', ratio:notional / (COIN_CAPS[first.coin]?.cap || 1) };
+    orders.push({
+      oid, time:first.time, coin:first.coin, dir:first.dir, side:first.side,
+      sz, px:wpx, notional, pnl, fee,
+      source:c.source, ratio:c.ratio,
+    });
+  }
+  orders.sort((a,b)=>b.time - a.time);
+
+  // ---- Last bot fire (any Open with source=bot) ----
+  const botFires = orders.filter(o => o.dir.startsWith('Open') && o.source === 'bot');
+  const lastBotFire = botFires[0]; // sorted desc
+  document.getElementById('lastFireAge').innerHTML =
+    '<span class="badge ' + ageBadge(lastBotFire ? now - lastBotFire.time : null) + '">' +
+    fmtAge(lastBotFire ? now - lastBotFire.time : null) + '</span>';
+  document.getElementById('lastFireSub').textContent = lastBotFire
+    ? new Date(lastBotFire.time).toISOString().slice(0,16).replace('T',' ') + ' · ' +
+      lastBotFire.coin + ' ' + (lastBotFire.dir.includes('Long')?'LONG':'SHORT') + ' $' + lastBotFire.notional.toFixed(0)
+    : 'No bot opens in last 7d';
+
+  // ---- Last wallet fill (any) ----
+  const last = orders[0];
+  document.getElementById('lastFillAge').innerHTML =
+    '<span class="badge ' + ageBadge(last ? now - last.time : null) + '">' +
+    fmtAge(last ? now - last.time : null) + '</span>';
+  document.getElementById('lastFillSub').textContent = last
+    ? new Date(last.time).toISOString().slice(0,16).replace('T',' ') + ' · ' +
+      last.coin + ' ' + last.dir + ' (' + last.source + ')'
+    : 'No fills in last 7d';
+
+  // ---- Per-coin table ----
+  const ctbody = document.querySelector('#coinTable tbody');
+  ctbody.innerHTML = '';
+  for (const coin of COIN_ORDER) {
+    const def = COIN_CAPS[coin];
+    const coinOrders = orders.filter(o => o.coin === coin);
+    const opensOfCoin = coinOrders.filter(o => o.dir.startsWith('Open'));
+    const botCount = opensOfCoin.filter(o => o.source === 'bot').length;
+    const manCount = opensOfCoin.filter(o => o.source === 'manual').length;
+    const lastBot = opensOfCoin.find(o => o.source === 'bot');
+    const open = openPos[coin];
+    const lastAny = coinOrders[0];
+    const tr = document.createElement('tr');
+    tr.className = 'row-coin';
+    tr.innerHTML =
+      '<td><b>' + def.label + '</b></td>' +
+      '<td class="num">' + (open
+        ? '<span class="badge ' + (open.upnl >= 0 ? 'good' : 'bad') + '">' + open.side + ' $' + (open.sz*open.entry).toFixed(0) + ' (' + (open.upnl>=0?'+':'')+'$'+open.upnl.toFixed(2) + ')</span>'
+        : '<span class="dim">flat</span>') + '</td>' +
+      '<td class="num">' + botCount + '</td>' +
+      '<td class="num">' + (manCount > 0 ? '<span class="badge man">'+manCount+'</span>' : '<span class="dim">0</span>') + '</td>' +
+      '<td>' + (lastBot
+        ? '<span class="badge ' + ageBadge(now - lastBot.time) + '">' + fmtAge(now - lastBot.time) + '</span> ago'
+        : '<span class="dim">—</span>') + '</td>' +
+      '<td>' + (lastAny
+        ? new Date(lastAny.time).toISOString().slice(5,16).replace('T',' ') + ' ' + lastAny.dir
+        : '<span class="dim">—</span>') + '</td>' +
+      '<td class="num dim">$' + def.cap + '</td>';
+    ctbody.appendChild(tr);
+  }
+
+  // ---- Recent fills table ----
+  const ftbody = document.querySelector('#fillTable tbody');
+  ftbody.innerHTML = '';
+  for (const o of orders.slice(0, 14)) {
+    const def = COIN_CAPS[o.coin] || { label:o.coin, cap:1 };
+    const ratioStr = o.ratio != null ? o.ratio.toFixed(2)+'×' : '—';
+    const sourceBadge = o.source === 'bot' ? 'bot' : o.source === 'manual' ? 'man' : 'neu';
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td>' + new Date(o.time).toISOString().slice(5,16).replace('T',' ') + '</td>' +
+      '<td>' + def.label + '</td>' +
+      '<td>' + o.dir + '</td>' +
+      '<td class="num">$' + o.px.toFixed(o.px > 1000 ? 1 : 3) + '</td>' +
+      '<td class="num">$' + o.notional.toFixed(0) + '</td>' +
+      '<td class="num ' + (o.ratio > MANUAL_MULT ? 'pnl-neg' : 'dim') + '">' + ratioStr + '</td>' +
+      '<td><span class="badge ' + sourceBadge + '">' + o.source + '</span></td>' +
+      '<td class="num">' + fmtPnl(o.pnl) + '</td>';
+    ftbody.appendChild(tr);
+  }
+
+  document.getElementById('walletMeta').textContent =
+    ADDR.slice(0,8) + '…' + ADDR.slice(-6) + ' · refreshed ' + new Date(now).toISOString().slice(11,19) + ' UTC';
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('content').style.display = '';
+}
+
+async function refresh() {
+  document.getElementById('err').style.display = 'none';
+  document.getElementById('loading').style.display = '';
+  document.getElementById('loading').textContent = 'Loading wallet data…';
+  document.getElementById('content').style.display = 'none';
+  try {
+    const data = await loadAll();
+    render(data);
+  } catch (e) {
+    document.getElementById('loading').style.display = 'none';
+    const errEl = document.getElementById('err');
+    errEl.textContent = 'Failed to load: ' + e.message;
+    errEl.style.display = '';
+  }
+}
+
+refresh();
+// Auto-refresh every 60s
+setInterval(refresh, 60000);
+</script>
+</body>
+</html>
