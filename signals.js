@@ -749,14 +749,26 @@ function hasLTFAlignment(direction, lowerCandles) {
 //
 // Returns { confirmed, direction, breakBarsAgo, retestBarsAgo, retestExtreme,
 //           convictionBodyATR, reason }.
-function detectRetest(c, levelPrice, atrVal, coinMinStopPct){
+//
+// `opts` (optional) — per-asset overrides sourced from coins-config.js:
+//   breakDistFloorPct (default 0.0015) — minimum "break" distance as a % of price.
+//                     Crypto-calibrated default; lower for assets where ATR is
+//                     small vs. price (e.g. SP500 LTFs at $7,400 with $7 ATR).
+//   minBreakCloses    (default 2) — number of closes between break bar and
+//                     retest bar that must hold beyond the level. Lower to 1
+//                     when a valid break-to-retest can happen in a single bar.
+function detectRetest(c, levelPrice, atrVal, coinMinStopPct, opts){
   const n = c.length;
   if(n < 10) return { confirmed:false, reason:'insufficient candles' };
   if(!atrVal || atrVal <= 0) return { confirmed:false, reason:'no ATR' };
 
+  opts = opts || {};
+  const breakDistFloorPct = (opts.breakDistFloorPct != null) ? opts.breakDistFloorPct : 0.0015;
+  const minBreakClosesCfg = (opts.minBreakCloses    != null) ? opts.minBreakCloses    : 2;
+
   // Tolerances — scale with ATR and enforce a price-% floor
   const stopFloor  = coinMinStopPct || 0.005;
-  const breakDist  = Math.max(atrVal * 0.3, levelPrice * 0.0015);  // how far beyond = a "break"
+  const breakDist  = Math.max(atrVal * 0.3, levelPrice * breakDistFloorPct);  // how far beyond = a "break"
   const retestTol  = Math.max(atrVal * 0.4, levelPrice * 0.002);   // how close = "touched the level"
   const closeBuf   = atrVal * 0.1;                                 // wick-through tolerance on closes
   const minBodyATR = 0.5;                                           // conviction threshold
@@ -838,8 +850,10 @@ function detectRetest(c, levelPrice, atrVal, coinMinStopPct){
   // ---- Step 5 (v5.17): post-break confirmation -- require multiple closes beyond level
   // Filters false breakdowns: e.g. May 5 GOLD short where a single candle spiked through
   // support ($4,513.9) and immediately reversed. Count candles between the break bar and
-  // the retest bar that closed beyond the level. Require >= 2 to confirm the break held.
-  const MIN_BREAK_CLOSES = 2;
+  // the retest bar that closed beyond the level. Default >= 2; per-asset override via
+  // coins-config.js minBreakCloses (SP500 = 1 — break-to-retest can happen in one bar
+  // on a strong index move; the extra-close gate was blocking otherwise valid setups).
+  const MIN_BREAK_CLOSES = minBreakClosesCfg;
   let breakCloseCount = 0;
   for(let i = retestBarsAgo + 1; i <= breakBarsAgo; i++){
     if(n - 1 - i < 0) break;
@@ -867,10 +881,14 @@ function detectRetest(c, levelPrice, atrVal, coinMinStopPct){
 // Retest = only pattern we trade. Runs on every TF (15m, 1H, 4H, 1D, 1W); signals
 // aggregate into multi-TF confidence the same way as before. HTF direction still
 // blocks counter-trend retests via maybeAutoTrade's existing gate.
-function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR, coinMinStopPct, feeEst){
+//
+// `coinOpts` (optional) — forwarded to detectRetest for per-asset retest tuning
+// (breakDistFloorPct, minBreakCloses). Pulled from coins-config.js by callers.
+function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR, coinMinStopPct, feeEst, coinOpts){
   coinMinRR = coinMinRR || 1.0;
   coinMinStopPct = coinMinStopPct || 0.005;
   feeEst = feeEst || 0.05;
+  coinOpts = coinOpts || {};
   const n = c.length;
   const minCandles = (tf==='1W'||tf==='1D') ? 12 : 20;
   if(n < minCandles) return { sig:'NEUTRAL', type:'NONE', reason:'Insufficient data' };
@@ -898,7 +916,7 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR, coinMinStopPc
 
   for(let li = 0; li < maxToTest; li++){
     const lv = nearby[li];
-    const result = detectRetest(c, lv.price, a, coinMinStopPct);
+    const result = detectRetest(c, lv.price, a, coinMinStopPct, coinOpts);
 
     if(result.confirmed){
       const sig = result.direction;   // 'LONG' | 'SHORT'
