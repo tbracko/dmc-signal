@@ -2484,7 +2484,9 @@ function processTF(i, candles, dCandles, coinId, lowerCandles){
   const coinMinRR = coinCfg.minRR || 1.0;
   const coinMinStopPct = coinCfg.minStopPct || 0.005;
   const coinFeeEst = coinCfg.feeEst || 0.05;
-  const d = dms(candles, a, dCandles, tf.l, htfCarrier, lowerCandles || null, coinMinRR, coinMinStopPct, coinFeeEst);
+  // v5.24: per-asset retest tuning (breakDistFloorPct, minBreakCloses)
+  const coinOpts = { breakDistFloorPct: coinCfg.breakDistFloorPct, minBreakCloses: coinCfg.minBreakCloses };
+  const d = dms(candles, a, dCandles, tf.l, htfCarrier, lowerCandles || null, coinMinRR, coinMinStopPct, coinFeeEst, coinOpts);
   s.results[tf.l] = d;
   // Alerts fire for all coins regardless of active view
   if(d.type!=='NONE' && d.type!=='AT_LEVEL'){
