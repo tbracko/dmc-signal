@@ -2737,7 +2737,13 @@ async function scanCoin(coinId){
       const coinMinRR = COINS[coinId] ? COINS[coinId].minRR : 1.0;
       const coinMinStopPct = COINS[coinId] ? COINS[coinId].minStopPct : 0.005;
       const coinFeeEst = COINS[coinId] ? COINS[coinId].feeEst : 0.05;
-      const d = dms(c, a, dc, tf.l, htfCarrier, lower, coinMinRR, coinMinStopPct, coinFeeEst);
+      // v5.24: forward per-asset retest tuning (breakDistFloorPct, minBreakCloses).
+      // Defined in coins-config.js; SP500 overrides the crypto-calibrated defaults.
+      const coinOpts = COINS[coinId] ? {
+        breakDistFloorPct: COINS[coinId].breakDistFloorPct,
+        minBreakCloses:    COINS[coinId].minBreakCloses,
+      } : {};
+      const d = dms(c, a, dc, tf.l, htfCarrier, lower, coinMinRR, coinMinStopPct, coinFeeEst, coinOpts);
       allResults[tf.l] = d;
 
       // Log ALL non-NONE signals for diagnostics
