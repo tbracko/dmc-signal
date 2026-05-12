@@ -244,7 +244,7 @@ if(!TG_TOKEN || !TG_CHATID){
 // truth, shared with daily-report.js and the backtester. Per-coin sizing/fees are edited
 // there now; this file only consumes them. Eliminates the v5.17 GOLD-cap drift bug where
 // daily-report.js had GOLD at $500 while bot.js had reduced it to $300.
-const { COINS } = require('./coins-config');
+const { COINS, DAILY_LOSS_PCT, getMaxNotional } = require('./coins-config');
 
 const TFS = [
   { l:'1W', w:5 },
@@ -492,7 +492,9 @@ const HL = {
   // v5.0: Daily P&L limit tracking
   dailyPnl: 0,
   dailyPnlDate: '',
-  DAILY_LOSS_LIMIT: parseFloat(process.env.DAILY_LOSS_LIMIT || '-10'),  // pause after -$10
+  // v5.25: Daily loss limit scales with equity (DAILY_LOSS_PCT from coins-config.js, default 3%).
+  // Computed dynamically: -(equity × DAILY_LOSS_PCT). Env override still works as a flat dollar fallback.
+  DAILY_LOSS_LIMIT: null,  // set dynamically in syncEquity(); null = not yet computed
   DAILY_LOSS_REDUCE: 0.5, // reduce size to 50% after hitting limit
 
   // v5.1: Counter-trend blocking -- remembers last profitable trade direction per coin
@@ -631,9 +633,9 @@ const HL = {
       this.loadActiveTrades();
       this.loadManualSeen();  // v5.7: restore manual-position detection state across restarts
       console.log('HL loaded persisted trades:', Object.keys(this.activeTrades).length, '->', JSON.stringify(this.activeTrades));
+      await this.syncEquity();  // v5.25: must run before syncPositions so dynamic caps use real equity
       await this.syncPositions();
       await this.processPendingTrims();   // v5.5: trim any oversized manual positions found at startup
-      await this.syncEquity();
       console.log('HL ready:', this.address, '| Master:', this.masterAddress || 'not set', '| Auto:', this.enabled, '| Equity: $' + this.cachedEquity.toFixed(2), '| Assets:', Object.keys(this.assetMap).join(', '));
       return true;
     } catch (e) {
@@ -708,7 +710,13 @@ const HL = {
       if (bal > 0) {
         this.cachedEquity = bal;
         this._lastEquitySync = Date.now();
-        console.log('HL equity synced: $' + bal.toFixed(2));
+        // v5.25: Recompute daily loss limit from equity (3% default, env override for flat $)
+        if (process.env.DAILY_LOSS_LIMIT) {
+          this.DAILY_LOSS_LIMIT = parseFloat(process.env.DAILY_LOSS_LIMIT);
+        } else {
+          this.DAILY_LOSS_LIMIT = -(bal * DAILY_LOSS_PCT);
+        }
+        console.log('HL equity synced: $' + bal.toFixed(2) + ' | daily loss limit: $' + this.DAILY_LOSS_LIMIT.toFixed(2));
       }
     } catch (e) { console.warn('HL syncEquity failed:', e.message); }
   },
@@ -880,7 +888,8 @@ const HL = {
         // If manual (notional > cap × MANUAL_NOTIONAL_MULT), apply INHERIT_MANUAL_POSITIONS policy.
         const coinCfg = COINS[coinId];
         const notional = Math.abs(szi) * entry;
-        const capBase = (coinCfg && coinCfg.maxNotional) || 0;
+        // v5.25: dynamic cap from equity instead of static maxNotional
+        const capBase = getMaxNotional(coinCfg, this.cachedEquity > 0 ? this.cachedEquity : 100);
         const isSameAsPrev = prev && prev.side === (szi > 0 ? 'LONG' : 'SHORT') && prev.trailState;
         const isNewPosition = !isSameAsPrev;
         const isManualInherited = isNewPosition && capBase > 0 && notional > capBase * MANUAL_NOTIONAL_MULT;
@@ -1230,15 +1239,15 @@ const HL = {
     const asset = coin?.asset;
     if (!asset || !this.enabled || !this.wallet) return null;
 
-    // v5.4: Pick up session-scaled cap set by the caller (e.g. sp500EffectiveCap in maybeAutoTrade).
-    // Falls back to the static coin.maxNotional. The override is one-shot — cleared after read so
-    // it cannot leak into a subsequent trade on the same coin.
-    let effectiveMaxNotional = coin.maxNotional || 0;
+    // v5.25: Dynamic maxNotional from equity × equityPct (coins-config.js).
+    // v5.4 session-scaled override still works — it overrides the dynamic base if set.
+    const equity = this.cachedEquity > 0 ? this.cachedEquity : 100;
+    let effectiveMaxNotional = getMaxNotional(coin, equity);
     const _scaledCap = coinState[coinId] && coinState[coinId].effectiveMaxNotional;
     if (typeof _scaledCap === 'number' && _scaledCap > 0) {
       effectiveMaxNotional = _scaledCap;
-      if (_scaledCap !== (coin.maxNotional || 0)) {
-        console.log(`HL: ${asset} session-scaled cap $${_scaledCap} (default $${coin.maxNotional || 0}) [v5.4]`);
+      if (_scaledCap !== getMaxNotional(coin, equity)) {
+        console.log(`HL: ${asset} session-scaled cap $${_scaledCap} (equity-based $${getMaxNotional(coin, equity).toFixed(0)}) [v5.4]`);
       }
     }
     if (coinState[coinId] && 'effectiveMaxNotional' in coinState[coinId]) {
@@ -1375,7 +1384,9 @@ const HL = {
     let riskPct = RISK_PCT;
 
     // v5.0: Reduce position size by 50% if daily loss limit breached (#8)
-    if (this.dailyPnl <= this.DAILY_LOSS_LIMIT) {
+    // v5.25: DAILY_LOSS_LIMIT is computed in syncEquity(); fallback to -(3% equity) if null
+    const dailyLossLimit = this.DAILY_LOSS_LIMIT != null ? this.DAILY_LOSS_LIMIT : -(accountSize * DAILY_LOSS_PCT);
+    if (this.dailyPnl <= dailyLossLimit) {
       riskPct = RISK_PCT * this.DAILY_LOSS_REDUCE;
       console.warn(`HL: daily P&L $${this.dailyPnl.toFixed(2)} <= limit $${this.DAILY_LOSS_LIMIT} -- reducing risk to ${riskPct}%`);
     }
@@ -2061,7 +2072,8 @@ async function syncFillHistory() {
       } else if (coinId) {
         const coinCfg = COINS[coinId];
         const entryNotional = totalSz * Math.abs(entryPx);
-        const capBase = (coinCfg && coinCfg.maxNotional) || 0;
+        // v5.25: dynamic cap from equity
+        const capBase = getMaxNotional(coinCfg, HL.cachedEquity > 0 ? HL.cachedEquity : 100);
         if (capBase > 0 && entryNotional > capBase * MANUAL_NOTIONAL_MULT) {
           fillSource = 'manual';
         } else {
@@ -2138,28 +2150,24 @@ async function maybeAlert(sig, tf, type, level, target, rr, stopPrice, coinId, p
 //   PARTIAL UP                             + non-US session          -> $150
 //   anything else + LONG                                             -> 0  (block)
 function sp500EffectiveCap(sig, conf, allResults) {
-  const defaultCap = (COINS.sp500 && COINS.sp500.maxNotional) || 500;
+  // v5.25: base cap is now equity-proportional (equity × equityPct)
+  const equity = HL.cachedEquity > 0 ? HL.cachedEquity : 100;
+  const defaultCap = getMaxNotional(COINS.sp500, equity);
   if (sig !== 'LONG') return { cap: defaultCap, tier: 'SHORT/default' };
   const utcHour = new Date().getUTCHours();
   const inUSSession = utcHour >= 13 && utcHour < 21;
   const wk = allResults && allResults['1W'] && allResults['1W'].sig;
   const dy = allResults && allResults['1D'] && allResults['1D'].sig;
   const regimeUp = wk === 'LONG' && dy === 'LONG';
-  const partialUp = (wk === 'LONG' || dy === 'LONG') && wk !== 'SHORT' && dy !== 'SHORT';  // v5.5: at least one LONG, neither SHORT
+  const partialUp = (wk === 'LONG' || dy === 'LONG') && wk !== 'SHORT' && dy !== 'SHORT';
   const strongUp = regimeUp && (typeof conf === 'number' && conf >= 70);
-  // v5.5: Relaxed regime check — "PARTIAL UP" (one of 1W/1D LONG, other NEUTRAL) now allowed
-  // at reduced caps. Previously required BOTH 1W+1D LONG which was too restrictive and caused
-  // all SP500 entries to be manual. The 4-day SP500 tail win streak (+$11.34) was entirely manual
-  // because the bot couldn't enter under the strict regime check.
-  // v5.6: STRONG UP + US raised from $750 → $1500 (3× base). Apr 17 manual SP500 long at $2,132
-  // notional captured +$19.85 — 5/5 consecutive SP500 US-session wins prove this edge is durable.
-  // $1,500 captures ~70% of what manual sizing achieves while staying within automated risk limits.
-  // UP + US bumped from $500 → $750 to give non-STRONG regimes more room during proven session.
-  if (strongUp && inUSSession)       return { cap: 1500, tier: 'STRONG UP + US (v5.6)' };
-  if (regimeUp && inUSSession)       return { cap: 750, tier: 'UP + US (v5.6)' };
-  if (regimeUp && !inUSSession)      return { cap: 200, tier: 'UP + non-US' };
-  if (partialUp && inUSSession)      return { cap: 500, tier: 'PARTIAL UP + US (v5.6)' };    // was $350
-  if (partialUp && !inUSSession)     return { cap: 150, tier: 'PARTIAL UP + non-US (v5.5)' };
+  // v5.25: Session-scaling tiers expressed as multipliers of the equity-based defaultCap.
+  // Original ratios at $500 base: STRONG+US 3×, UP+US 1.5×, UP+nonUS 0.4×, PARTIAL+US 1×, PARTIAL+nonUS 0.3×
+  if (strongUp && inUSSession)       return { cap: Math.round(defaultCap * 3.0), tier: 'STRONG UP + US (3× base)' };
+  if (regimeUp && inUSSession)       return { cap: Math.round(defaultCap * 1.5), tier: 'UP + US (1.5× base)' };
+  if (regimeUp && !inUSSession)      return { cap: Math.round(defaultCap * 0.4), tier: 'UP + non-US (0.4× base)' };
+  if (partialUp && inUSSession)      return { cap: Math.round(defaultCap * 1.0), tier: 'PARTIAL UP + US (1× base)' };
+  if (partialUp && !inUSSession)     return { cap: Math.round(defaultCap * 0.3), tier: 'PARTIAL UP + non-US (0.3× base)' };
   return { cap: 0, tier: `regime-not-UP (1W=${wk||'n/a'}, 1D=${dy||'n/a'}, US=${inUSSession})` };
 }
 
@@ -2173,16 +2181,20 @@ function sp500EffectiveCap(sig, conf, allResults) {
 //   Otherwise:                            $200 (default — BTC has no session filter)
 // SHORT entries: always $200 (default cap, no regime scaling).
 function btcEffectiveCap(sig, conf, allResults) {
-  const defaultCap = (COINS.bitcoin && COINS.bitcoin.maxNotional) || 200;
+  // v5.25: base cap is now equity-proportional (equity × equityPct)
+  const equity = HL.cachedEquity > 0 ? HL.cachedEquity : 100;
+  const defaultCap = getMaxNotional(COINS.bitcoin, equity);
   if (sig !== 'LONG') return { cap: defaultCap, tier: 'SHORT/default' };
   const wk = allResults && allResults['1W'] && allResults['1W'].sig;
   const dy = allResults && allResults['1D'] && allResults['1D'].sig;
   const regimeUp = wk === 'LONG' && dy === 'LONG';
   const partialUp = (wk === 'LONG' || dy === 'LONG') && wk !== 'SHORT' && dy !== 'SHORT';
   const strongUp = regimeUp && (typeof conf === 'number' && conf >= 70);
-  if (strongUp)    return { cap: 400, tier: 'STRONG UP (v5.10)' };
-  if (regimeUp)    return { cap: 200, tier: 'UP (v5.10)' };
-  if (partialUp)   return { cap: 150, tier: 'PARTIAL UP (v5.10)' };
+  // v5.25: tiers as multipliers of equity-based defaultCap.
+  // Original ratios at $200 base: STRONG 2×, UP 1×, PARTIAL 0.75×
+  if (strongUp)    return { cap: Math.round(defaultCap * 2.0), tier: 'STRONG UP (2× base)' };
+  if (regimeUp)    return { cap: Math.round(defaultCap * 1.0), tier: 'UP (1× base)' };
+  if (partialUp)   return { cap: Math.round(defaultCap * 0.75), tier: 'PARTIAL UP (0.75× base)' };
   return { cap: defaultCap, tier: `default (1W=${wk||'n/a'}, 1D=${dy||'n/a'})` };
 }
 
@@ -2957,7 +2969,7 @@ async function checkDailySummary() {
 let lastScanTs = 0;
 let scanCount  = 0;
 const BOT_STARTED_AT = Date.now();
-const BOT_VERSION    = 'v5.22';
+const BOT_VERSION    = 'v5.25';
 
 async function scanAll(){
   const coins = Object.keys(COINS);
@@ -3079,10 +3091,14 @@ async function main(){
   if (HL_PRIVATE_KEY && AUTO_TRADE) {
     const hlOk = await HL.init();
     if (hlOk) {
-      console.log('Auto-trading ENABLED | Risk:', RISK_PCT + '%', '| Min conf:', MIN_CONFIDENCE + '%', '| Max trades/day:', MAX_TRADES_DAY);
+      // v5.25: Log equity-proportional caps at startup
+      const _eq = HL.cachedEquity > 0 ? HL.cachedEquity : 100;
+      const _caps = Object.values(COINS).map(c => `${c.label}:$${getMaxNotional(c, _eq).toFixed(0)}`).join(' ');
+      console.log(`Auto-trading ENABLED | Risk: ${RISK_PCT}% | Min conf: ${MIN_CONFIDENCE}% | Max trades/day: ${MAX_TRADES_DAY}`);
+      console.log(`Equity: $${_eq.toFixed(2)} | Caps: ${_caps} | Daily loss limit: $${HL.DAILY_LOSS_LIMIT?.toFixed(2) || 'N/A'}`);
       // Backfill any closed trades missed during downtime
       await syncFillHistory();
-      await sendTelegram('🤖 <b>DMS Signal Bot v5.17 started (inherit-protect KILL SWITCH)</b>\n✅ Auto-trading ENABLED\nScanning BTC . HYPE . SPX . GOLD every 2 min\nRisk: ' + RISK_PCT + '% | Min conf: ' + MIN_CONFIDENCE + '%');
+      await sendTelegram(`🤖 <b>DMS Signal Bot v5.25 started (equity-proportional sizing)</b>\n✅ Auto-trading ENABLED\nEquity: $${_eq.toFixed(2)}\nCaps: ${_caps}\nDaily loss limit: $${HL.DAILY_LOSS_LIMIT?.toFixed(2) || 'N/A'}\nRisk: ${RISK_PCT}% | Min conf: ${MIN_CONFIDENCE}%`);
     } else {
       console.warn('Auto-trading init FAILED -- running in alert-only mode');
       await sendTelegram('🤖 <b>DMS Signal Bot v5.17 started (inherit-protect KILL SWITCH)</b>\n⚠️ Auto-trading FAILED to init\nRunning in alert-only mode');
