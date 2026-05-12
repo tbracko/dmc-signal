@@ -391,6 +391,41 @@ async function hlKlines(coin, interval, limit){
 // v4.9: reduced limits for HIP-3 assets -- they have shorter history than BTC/HYPE
 const HL_LIMITS = { '1W':26, '1D':90, '4H':200, '1H':500, '15m':192 };
 
+// v5.13: Fetch current predicted funding rate from Hyperliquid for HIP-3 (and standard) assets.
+// Returns the per-8h funding rate as a decimal (e.g., 0.0003 = 0.03% per 8h).
+// Positive rate = longs pay shorts; negative rate = shorts pay longs.
+//
+// 2026-05-12 (audit fix): This function previously lived inside signals.js's IIFE but was
+// never exported AND referenced HL_API which wasn't in scope there — so the call site below
+// (scanCoin → coinState[coinId].fundingRate = await hlFundingRate(...)) threw ReferenceError,
+// silently caught, and fundingRate was always null. That disabled the v5.13 funding-rate
+// confidence boost in maybeAutoTrade. Restored here in bot.js next to the other HL fetch
+// helpers (hlKlines etc.), which is where it should have been all along.
+async function hlFundingRate(apiSym) {
+  try {
+    const isHIP3 = apiSym.startsWith('xyz:');
+    const body = { type: 'metaAndAssetCtxs' };
+    if (isHIP3) body.dex = 'xyz';
+    const r = await fetch(HL_API + '/info', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) return null;
+    const data = await r.json();
+    // Response is [meta, assetCtxs[]] — meta.universe[i].name matches assetCtxs[i]
+    const [meta, ctxs] = data;
+    if (!meta || !meta.universe || !Array.isArray(ctxs)) return null;
+    // HIP-3 universe names keep the 'xyz:' prefix (e.g., 'xyz:GOLD', 'xyz:SP500')
+    const assetName = isHIP3 ? apiSym : apiSym.replace('USDT', '');
+    const idx = meta.universe.findIndex(u => u.name === assetName);
+    if (idx < 0 || !ctxs[idx]) return null;
+    return parseFloat(ctxs[idx].funding);
+  } catch (e) {
+    console.warn(`hlFundingRate(${apiSym}):`, e.message);
+    return null;
+  }
+}
+
 async function getCandles(tfLabel, coinId){
   const coin = COINS[coinId];
   if(coin.exchange === 'hyperliquid'){
