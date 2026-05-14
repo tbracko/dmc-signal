@@ -598,11 +598,16 @@ const TFS=[{l:'1W',iv:'W',w:5},{l:'1D',iv:'D',w:4},{l:'4H',iv:'240',w:3},{l:'1H'
 
 // ── MULTI-COIN STATE ──────────────────────────────────────
 // Each coin runs its own independent engine loop
+// v5.26 (2026-05-14): Added equityPct (mirrors coins-config.js v5.25 equity-proportional sizing).
+//   Static maxNotional kept as legacy fallback only — the manual-trade detector in
+//   syncPositions now prefers cachedEquity × equityPct, matching bot.js behavior.
+//   Without this, bot-opened trades at the new dynamic cap (e.g. SP500 at 1× equity)
+//   were misclassified as manual-inherited and their SL/TP weren't surfaced in the UI.
 const COINS = {
-  bitcoin:     { id:'bitcoin',     label:'BTC/USD',  sym:'BINANCE:BTCUSDT', shortLabel:'BTC',  apiSym:'BTCUSDT',  exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.007, maxNotional: 200, isHIP3: false },  // v5.3: re-enabled with $200 cap
-  hyperliquid: { id:'hyperliquid', label:'HYPE/USD', sym:'BYBIT:HYPEUSDT',  shortLabel:'HYPE', apiSym:'HYPEUSDT', exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, maxNotional: 100, isHIP3: false },  // v5.5: halved $200→$100 after 3 consecutive SL hits (synced w/ bot.js)
-  sp500:       { id:'sp500',       label:'S&P500',   sym:'OANDA:SPX500USD', shortLabel:'SPX',  apiSym:'xyz:SP500', exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, maxNotional: 500, isHIP3: true },  // v5.5: minRR 1.5→1.2 (synced w/ bot.js)
-  gold:        { id:'gold',        label:'GOLD/USD', sym:'OANDA:XAUUSD',    shortLabel:'GOLD', apiSym:'xyz:GOLD', exchange:'hyperliquid', minRR: 1.5, feeEst: 0.12, minStopPct: 0.005, maxNotional: 300, isHIP3: true },  // v5.17: maxNotional $500→$300 (synced w/ bot.js — single GOLD SL wiped 3 HYPE wins)
+  bitcoin:     { id:'bitcoin',     label:'BTC/USD',  sym:'BINANCE:BTCUSDT', shortLabel:'BTC',  apiSym:'BTCUSDT',  exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.007, equityPct: 0.50, maxNotional: 200, isHIP3: false },  // v5.3: re-enabled with $200 cap; v5.26: equityPct 0.50
+  hyperliquid: { id:'hyperliquid', label:'HYPE/USD', sym:'BYBIT:HYPEUSDT',  shortLabel:'HYPE', apiSym:'HYPEUSDT', exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, equityPct: 0.25, maxNotional: 100, isHIP3: false },  // v5.5: halved $200→$100 after 3 consecutive SL hits (synced w/ bot.js); v5.26: equityPct 0.25
+  sp500:       { id:'sp500',       label:'S&P500',   sym:'OANDA:SPX500USD', shortLabel:'SPX',  apiSym:'xyz:SP500', exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, equityPct: 1.00, maxNotional: 500, isHIP3: true },  // v5.5: minRR 1.5→1.2 (synced w/ bot.js); v5.26: equityPct 1.00
+  gold:        { id:'gold',        label:'GOLD/USD', sym:'OANDA:XAUUSD',    shortLabel:'GOLD', apiSym:'xyz:GOLD', exchange:'hyperliquid', minRR: 1.5, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.40, maxNotional: 300, isHIP3: true },  // v5.17: maxNotional $500→$300 (synced w/ bot.js — single GOLD SL wiped 3 HYPE wins); v5.26: equityPct 0.40
 };
 
 // v5.22 (2026-05-08): Pure signal-engine functions imported from /signals.js (UMD).
@@ -3258,6 +3263,10 @@ const HL = {
         }
       }
       console.log('HL trigger orders map:', JSON.stringify(trigMap));
+      // v5.26 (2026-05-14): expose trigger-order map so renderTrades can surface SL/TP
+      // even for positions we deliberately don't track in activeTrades (manual-inherit
+      // ignore path, or any other reason an entry is missing).
+      this.lastTrigMap = trigMap;
 
       const oldTrades = { ...this.activeTrades };
       const nowOpen = new Set();
@@ -3282,7 +3291,12 @@ const HL = {
         // If manual (notional > cap × MANUAL_NOTIONAL_MULT), apply hl_inherit_manual_positions policy.
         const coinCfg = COINS[coinId];
         const notional = Math.abs(szi) * entry;
-        const capBase = (coinCfg && coinCfg.maxNotional) || 0;
+        // v5.26 (2026-05-14): use equity-proportional cap when available (mirrors bot.js / coins-config.js v5.25).
+        // Falls back to legacy static maxNotional only if equityPct missing or equity not yet synced.
+        const eqForCap = (this.cachedEquity > 0) ? this.cachedEquity : 0;
+        const capBase = (coinCfg && coinCfg.equityPct && eqForCap > 0)
+          ? eqForCap * coinCfg.equityPct
+          : ((coinCfg && coinCfg.maxNotional) || 0);
         const isSameAsPrev = prev && prev.side === (szi > 0 ? 'LONG' : 'SHORT') && prev.trailState;
         const isNewPosition = !isSameAsPrev;
         const isManualInherited = isNewPosition && capBase > 0 && notional > capBase * MANUAL_NOTIONAL_MULT;
@@ -4367,12 +4381,16 @@ async function renderTrades(){
       const liq = pos.liquidationPx ? parseFloat(pos.liquidationPx) : null;
       const leverage = pos.leverage ? pos.leverage.value : '—';
 
-      // Look up SL/TP from activeTrades
+      // Look up SL/TP from activeTrades, with fallback to live HL trigger orders.
+      // v5.26 (2026-05-14): manual positions (or anything skipped by the inherit-ignore
+      // path) won't be in activeTrades, but their SL/TP still live on the exchange in
+      // HL.lastTrigMap — surface those so the UI matches what's actually protecting the trade.
       const symToId = SYM_TO_COIN_ID;
       const cid = symToId[coin];
       const at = cid ? HL.activeTrades[cid] : null;
-      const sl = at ? at.sl : null;
-      const tp = at ? at.tp : null;
+      const trig = (HL.lastTrigMap && HL.lastTrigMap[coin]) || {};
+      const sl = (at && at.sl) || trig.sl || null;
+      const tp = (at && at.tp) || trig.tp || null;
       const trailInfo = at && at.trailState !== 'initial' ? ` (${at.trailState})` : '';
 
       return `<div class="pos-card ${side.toLowerCase()}">
