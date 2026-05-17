@@ -25,6 +25,13 @@
 //   - isHIP3 flag
 //
 // Prior version notes:
+//   v5.28 (2026-05-17): GOLD retest tuning — breakDistFloorPct 0.0015 → 0.0008,
+//                       minBreakCloses 2 → 1 (mirrors SP500 config). 1H ATR is
+//                       $4.20 (0.09%) but the 0.15% floor yielded breakDist=$6.81
+//                       (1.7× ATR), making entries unreachable. New breakDist=$3.63
+//                       (0.86× ATR) — still filters noise but allows realistic entries.
+//                       May 16 had a $180 flash crash wick that didn't trigger because
+//                       the close recovered; this change helps catch follow-through moves.
 //   v5.27 (2026-05-16): Two tuning changes from daily trade-summary analysis:
 //     BTC minStopPct 0.7% → 1.0% — counterfactual over 60 days showed 5 SL hits
 //       clustered at 0.87–0.97% ($10.72 saved). 0.8% saved nothing. No TP blocked.
@@ -59,7 +66,7 @@ const COINS = {
   bitcoin:     { id:'bitcoin',     label:'BTC',    apiSym:'BTCUSDT',    asset:'BTC',        exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.010, equityPct: 0.50, isHIP3: false },
   hyperliquid: { id:'hyperliquid', label:'HYPE',   apiSym:'HYPEUSDT',   asset:'HYPE',       exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, equityPct: 0.25, isHIP3: false },
   sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',  asset:'xyz:SP500',  exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, equityPct: 1.00, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 },
-  gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',   asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.40, isHIP3: true  },
+  gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',   asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.40, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 },
 };
 
 // Daily loss limit as fraction of equity (3%). Bot computes: equity × DAILY_LOSS_PCT.
