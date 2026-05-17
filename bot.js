@@ -217,7 +217,7 @@ const DEDUP_FILE    = path.join(__dirname, '.dedup.json');
 const HL_PRIVATE_KEY  = process.env.HL_PRIVATE_KEY;   // Agent wallet private key
 const HL_MASTER_ADDR  = process.env.HL_MASTER_ADDR || '';  // Master account address (if agent wallet)
 const AUTO_TRADE      = process.env.AUTO_TRADE === 'true';
-const RISK_PCT        = parseFloat(process.env.RISK_PCT || '1');      // % of account to risk per trade
+const RISK_PCT        = parseFloat(process.env.RISK_PCT || '2');      // % of account to risk per trade
 const MIN_CONFIDENCE  = parseInt(process.env.MIN_CONFIDENCE || '50'); // base min confidence %
 const MAX_TRADES_DAY  = parseInt(process.env.MAX_TRADES_DAY || '10');
 const TRAIL_INTERVAL  = parseInt(process.env.TRAIL_INTERVAL || '30000'); // check trailing every 30s
