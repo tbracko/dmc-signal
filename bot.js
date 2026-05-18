@@ -20,6 +20,23 @@
 //   - HIP-3 TP orders use limit trigger (isMarket:false) to avoid taker fees (~8 bps saved on GOLD)
 //   - SL remains market trigger (isMarket:true) for guaranteed fills
 //
+// v5.29 changelog (2026-05-18):
+//   - BREAKOUT QUALITY EXEMPTION FOR VALIDATED RETESTS: The v5.16 breakout quality
+//     penalty (-15% conf) now skips when detectRetest has confirmed the pattern with
+//     breakCloseCount >= 2. Rationale: the penalty penalizes entries whose price AND
+//     level are both inside the 48h range, flagging them as "noise oscillation." But a
+//     genuine breakout from consolidation always starts inside the range — the break is
+//     what takes it out. The Retest pattern validation (multiple closes held beyond the
+//     level + retest touch + conviction candle) already proves the break is structural.
+//     Applying the penalty on top is circular and was the decisive blocker on May 17:
+//     HYPE LONG at $41.35 with 24 break-closes had 40% conf → 25% after penalty →
+//     blocked. The +14% move that followed was missed entirely.
+//   - Counterfactual: May 17 HYPE entry would have fired at ~04:00 UTC ($42.40) with
+//     R:R > 1.0. Estimated gain: $5-10 at equity-proportional sizing.
+//   - Safety preserved: retest validation, counter-trend gate (40%), chop filter (ADX≥20),
+//     regime block, and R:R minimum all remain active. The penalty still fires for signals
+//     without structural backing (breakCloseCount < 2 or pattern not confirmed).
+//
 // v5.3 changelog (2026-04-13):
 //   - Regime-aware directional blocking: when 1W + 1D agree on direction, blocks counter-regime
 //     trades with <80% confidence. Replaces the proposed blanket HYPE short block — allows
@@ -2401,6 +2418,14 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults, entryCandles
   // OR that the entry-TF ATR is large enough relative to range size (trending, not ranging).
   // This would have filtered the May 3 BTC false breakout ($78.9k entry within $78k-$79.1k range)
   // while preserving the May 4 genuine breakout ($78.9k entry after range high $79.1k was breached).
+  //
+  // v5.29 (2026-05-18): Exempt confirmed retests with breakCloseCount >= 2 from this penalty.
+  //   The retest detection already validates structural integrity (break → multiple closes
+  //   held beyond level → retest touch → conviction candle). Penalizing it for being "inside
+  //   the 48h range" is circular — every genuine breakout from consolidation starts there.
+  //   May 17 counterfactual: HYPE LONG at $41.35 with 24 break-closes was blocked solely by
+  //   this penalty (40% conf - 15% = 25% < 40% counter-trend threshold). The +14% move that
+  //   followed was the exact scenario the retest strategy was built to capture.
   if (BREAKOUT_QUALITY.enabled) {
     const range = s?.range48h;
     if (range && range.high > range.low) {
@@ -2411,7 +2436,9 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults, entryCandles
         // Check if both the entry price AND the tested level are inside the 48h range
         const pxInRange = currentPx >= range.low && currentPx <= range.high;
         const levelInRange = levelPx >= range.low && levelPx <= range.high;
-        if (pxInRange && levelInRange) {
+        // v5.29: Skip penalty for validated retests — the pattern itself proves the break is real.
+        const isValidatedRetest = d.breakCloseCount && d.breakCloseCount >= 2;
+        if (pxInRange && levelInRange && !isValidatedRetest) {
           // The "breakout" is entirely within the range — likely noise.
           // Allow if ATR shows genuine expansion (trending day) or high multi-TF conf.
           // Otherwise, apply a confidence penalty that usually blocks marginal signals.
@@ -2423,6 +2450,8 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults, entryCandles
             currentPx, levelPx, rangeLow: range.low, rangeHigh: range.high, rangeSize,
             penalty, filter: `v5.16 breakout quality: price+level both within 48h range`
           });
+        } else if (pxInRange && levelInRange && isValidatedRetest) {
+          console.log(`HL BREAKOUT-QUALITY EXEMPT: ${sym} ${d.sig} — price+level in 48h range but retest validated (${d.breakCloseCount} break-closes) — penalty skipped (v5.29)`);
         }
       }
     }
