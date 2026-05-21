@@ -25,6 +25,16 @@
 //   - isHIP3 flag
 //
 // Prior version notes:
+//   v5.29 (2026-05-21): Two improvements from counterfactual testing (30d, 29 trades):
+//     1. BTC minBreakBodyPct 0.008 (0.8%) — break impulse filter. detectRetest now
+//        rejects setups where the largest directional body between break and retest
+//        is below this threshold. Filters range-bottom entries where the "break" was
+//        just consolidation noise. Counterfactual: +$7.06 net (4 losses avoided,
+//        2 marginal wins lost). BTC-only — SP500/GOLD have smaller natural bodies.
+//     2. Level-based SL hard floor in dms() — if the level-based SL (before the
+//        minStopPct widening) is within minStopPct of entry, skip the signal entirely.
+//        Widening the SL past the level distorts R:R and places the stop at a
+//        meaningless price. Counterfactual: +$8.04 net, zero winners blocked.
 //   v5.28 (2026-05-17): GOLD retest tuning — breakDistFloorPct 0.0015 → 0.0008,
 //                       minBreakCloses 2 → 1 (mirrors SP500 config). 1H ATR is
 //                       $4.20 (0.09%) but the 0.15% floor yielded breakDist=$6.81
@@ -61,9 +71,19 @@
 //                        the break bar and the retest bar. Default 2 (filters
 //                        single-candle false breakdowns). Lower to 1 for assets
 //                        where break-to-retest can happen in a single bar.
+//   minBreakBodyPct    — minimum break candle body as fraction of price.
+//                        Default null (disabled). When set, detectRetest rejects
+//                        setups where the largest directional body between the
+//                        break bar and the retest bar is below this threshold.
+//                        v5.29 (2026-05-21): added for BTC at 0.008 (0.8%).
+//                        Counterfactual over 30 days: +$7.06 net (4 losses
+//                        avoided, 2 marginal wins lost). Filters range-bottom
+//                        shorts where the "break" is just consolidation noise.
+//                        NOT applied to SP500/GOLD — their naturally smaller
+//                        candle bodies mean this filter blocks too many winners.
 
 const COINS = {
-  bitcoin:     { id:'bitcoin',     label:'BTC',    apiSym:'BTCUSDT',    asset:'BTC',        exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.010, equityPct: 0.50, isHIP3: false },
+  bitcoin:     { id:'bitcoin',     label:'BTC',    apiSym:'BTCUSDT',    asset:'BTC',        exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.010, equityPct: 0.50, isHIP3: false, minBreakBodyPct: 0.008 },
   hyperliquid: { id:'hyperliquid', label:'HYPE',   apiSym:'HYPEUSDT',   asset:'HYPE',       exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, equityPct: 0.25, isHIP3: false },
   sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',  asset:'xyz:SP500',  exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, equityPct: 1.00, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 },
   gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',   asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.40, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 },
