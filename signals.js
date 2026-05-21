@@ -765,6 +765,7 @@ function detectRetest(c, levelPrice, atrVal, coinMinStopPct, opts){
   opts = opts || {};
   const breakDistFloorPct = (opts.breakDistFloorPct != null) ? opts.breakDistFloorPct : 0.0015;
   const minBreakClosesCfg = (opts.minBreakCloses    != null) ? opts.minBreakCloses    : 2;
+  const minBreakBodyPct   = opts.minBreakBodyPct    || null;  // v5.29: break impulse filter
 
   // Tolerances — scale with ATR and enforce a price-% floor
   const stopFloor  = coinMinStopPct || 0.005;
@@ -865,6 +866,29 @@ function detectRetest(c, levelPrice, atrVal, coinMinStopPct, opts){
     return { confirmed:false, reason:`only ${breakCloseCount} close(s) beyond level after break (need ${MIN_BREAK_CLOSES}+) — likely false breakdown` };
   }
 
+  // ---- Step 6 (v5.29): Break impulse filter — require a minimum break bar body ----
+  // Scans candles between break bar and retest bar for the largest directional body
+  // (matching the trade direction). If the largest body is below minBreakBodyPct of
+  // price, the break was not impulsive enough — likely range noise, not a real breakout.
+  // Only applied when minBreakBodyPct is configured (currently BTC only).
+  let maxBreakBodyPct = 0;
+  if(minBreakBodyPct){
+    for(let i = retestBarsAgo + 1; i <= breakBarsAgo; i++){
+      if(n - 1 - i < 0) break;
+      const k = c[n - 1 - i];
+      const body = Math.abs(k.c - k.o);
+      const mid  = (k.h + k.l) / 2;
+      if(mid <= 0) continue;
+      const bPct = body / mid;
+      const bullish = k.c > k.o;
+      if(direction === 'LONG'  && bullish  && bPct > maxBreakBodyPct) maxBreakBodyPct = bPct;
+      if(direction === 'SHORT' && !bullish && bPct > maxBreakBodyPct) maxBreakBodyPct = bPct;
+    }
+    if(maxBreakBodyPct < minBreakBodyPct){
+      return { confirmed:false, reason:`break impulse too weak: max body ${(maxBreakBodyPct*100).toFixed(2)}% < ${(minBreakBodyPct*100).toFixed(1)}% floor (v5.29)` };
+    }
+  }
+
   return {
     confirmed: true,
     direction,
@@ -872,8 +896,9 @@ function detectRetest(c, levelPrice, atrVal, coinMinStopPct, opts){
     retestBarsAgo,
     retestExtreme,
     breakCloseCount,
+    maxBreakBodyPct: +(maxBreakBodyPct * 100).toFixed(2),
     convictionBodyATR: +(convictionBody / atrVal).toFixed(2),
-    reason: `break ${breakBarsAgo}b ago (${breakCloseCount} closes held), retest ${retestBarsAgo}b ago, body ${(convictionBody/atrVal).toFixed(2)} ATR`
+    reason: `break ${breakBarsAgo}b ago (${breakCloseCount} closes held${maxBreakBodyPct > 0 ? ', impulse ' + (maxBreakBodyPct*100).toFixed(1) + '%' : ''}), retest ${retestBarsAgo}b ago, body ${(convictionBody/atrVal).toFixed(2)} ATR`
   };
 }
 
@@ -958,6 +983,17 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR, coinMinStopPc
         stop = Math.max(stop, entryCeil);
       }
 
+      // v5.29: Hard floor — if the level is so close to entry that the level-based SL
+      // (before the minStopPct widening above) was within minStopPct of entry, skip.
+      // Widening the SL past the level distorts R:R and places the stop at a technically
+      // meaningless price. Better to skip entirely — the level is in the noise zone.
+      const levelBasedStop = sig === 'LONG' ? lv.price - stopBuf : lv.price + stopBuf;
+      const levelSlDist = Math.abs(cur.c - levelBasedStop) / cur.c;
+      if(levelSlDist < coinMinStopPct){
+        if(!atLevelFallback) atLevelFallback = { ...lv, _retestReason: `level SL ${(levelSlDist*100).toFixed(2)}% < ${(coinMinStopPct*100).toFixed(1)}% minStop (v5.29)` };
+        continue;
+      }
+
       const rr = calcRR(cur.c, tgt.price, lv.price, stop, feeEst);
       if(!rr || parseFloat(rr) < coinMinRR){
         if(!atLevelFallback) atLevelFallback = { ...lv, _retestReason: `R:R ${rr || 'n/a'} < ${coinMinRR}` };
@@ -982,6 +1018,7 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR, coinMinStopPc
         breakCloseCount:   result.breakCloseCount,
         breakBarsAgo:      result.breakBarsAgo,
         retestBarsAgo:     result.retestBarsAgo,
+        maxBreakBodyPct:   result.maxBreakBodyPct || 0,  // v5.29
         reason: `RETEST ${tf} ${sig}: ${lv.source} $${fmt(lv.price)} . ${dist>0?'+':''}${dist}% . ${result.reason} . conviction ${result.convictionBodyATR} ATR${htfNote} . R:R ${rr} -> $${fmt(tgt.price)}`,
         detail: `Retest entry -- SL: $${fmt(stop)}`,
         untested: false
