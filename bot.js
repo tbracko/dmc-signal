@@ -1291,6 +1291,11 @@ const HL = {
     const asset = coin?.asset;
     if (!asset || !this.enabled || !this.wallet) return null;
 
+    // v5.31: equityPct 0 = asset DISABLED (no auto-trade). Canonical off-switch —
+    // lets an asset be turned off via coins-config.js without removing it (keeps
+    // scanning + dashboard, preserves tuning notes). GOLD disabled here as of v5.31.
+    if (!(coin.equityPct > 0)) { console.log(`HL: ${coinId} auto-trade disabled (equityPct 0) — skipping entry`); return null; }
+
     // v5.25: Dynamic maxNotional from equity × equityPct (coins-config.js).
     // v5.4 session-scaled override still works — it overrides the dynamic base if set.
     const equity = this.cachedEquity > 0 ? this.cachedEquity : 100;
