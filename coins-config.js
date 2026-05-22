@@ -13,7 +13,7 @@
 //     BTC   0.50  (50% of equity)  — moderate vol, flagship asset
 //     HYPE  0.25  (25%)            — highest vol alt, smallest allocation
 //     SP500 1.00  (100%)           — low vol TradFi index, largest allocation
-//     GOLD  0.40  (40%)            — moderate vol commodity
+//     GOLD  0.00  (DISABLED v5.31) — lost in every window; crude replaces the commodity slot
 //     CRUDE 0.20  (20%)            — high-vol energy commodity, conservative start
 //
 //   At $1K equity:  BTC $500, HYPE $250, SP500 $1,000, GOLD $400
@@ -26,6 +26,16 @@
 //   - isHIP3 flag
 //
 // Prior version notes:
+//   v5.31 (2026-05-22): GOLD DISABLED. Set gold equityPct 0.40 → 0. Rationale:
+//     live bot P&L showed gold losing in every window (30d −$23.61 / 14% win,
+//     60d −$22.54 / 25%, 90d −$38.95 / 27%) despite five prior tuning passes
+//     (v5.17/5.19/5.24/5.27/5.28). Crude (v5.30) now covers the commodity slot
+//     and backtested materially better (57% vs 43% raw win). equityPct 0 is now
+//     the canonical OFF switch: bot.js executeTrade early-returns when
+//     equityPct is not > 0, so the asset is still scanned and shown on the
+//     dashboard (watch mode) but never auto-traded. Re-enable by restoring 0.40.
+//     NOTE: getMaxNotional returns 0 for gold now, so daily-report.js will tag
+//     any residual gold fills as 'unknown' source rather than bot/manual.
 //   v5.30 (2026-05-22): NEW ASSET — CRUDE (xyz:CL, WTI crude perp on the xyz HIP-3
 //     dex). Added after a diversification + edge study:
 //       - Correlation: crude is near-zero/negatively correlated with the whole
@@ -108,7 +118,7 @@ const COINS = {
   bitcoin:     { id:'bitcoin',     label:'BTC',    apiSym:'BTCUSDT',    asset:'BTC',        exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.010, equityPct: 0.50, isHIP3: false, minBreakBodyPct: 0.008 },
   hyperliquid: { id:'hyperliquid', label:'HYPE',   apiSym:'HYPEUSDT',   asset:'HYPE',       exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, equityPct: 0.25, isHIP3: false },
   sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',  asset:'xyz:SP500',  exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, equityPct: 1.00, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 },
-  gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',   asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.40, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 },
+  gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',   asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.00, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 }, // v5.31: DISABLED (equityPct 0 = no auto-trade). Lost in every window; crude took the commodity slot. Still scanned/displayed (watch mode). Set equityPct back to 0.40 to re-enable.
   crude:       { id:'crude',       label:'CRUDE',  apiSym:'xyz:CL',     asset:'xyz:CL',     exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.20, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 },
 };
 
