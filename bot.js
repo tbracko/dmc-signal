@@ -902,7 +902,7 @@ const HL = {
           if (d.assetPositions) positions.push(...d.assetPositions);
         } catch (e) { console.warn('HL syncPositions: HIP-3 JSON parse failed:', e.message); }
       }
-      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', 'S&P500': 'sp500', 'xyz:SP500': 'sp500', GOLD: 'gold', 'xyz:GOLD': 'gold' };
+      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', 'S&P500': 'sp500', 'xyz:SP500': 'sp500', GOLD: 'gold', 'xyz:GOLD': 'gold', 'xyz:CL': 'crude', CRUDE: 'crude', CL: 'crude' };
 
       // Build SL/TP map from trigger orders
       const trigMap = {};
@@ -2093,7 +2093,7 @@ async function syncFillHistory() {
       return t.ts ? Math.round(new Date(t.ts).getTime() / 10000) : 0;
     }));
 
-    const symToId = { BTC:'bitcoin', HYPE:'hyperliquid', 'S&P500':'sp500', 'xyz:SP500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
+    const symToId = { BTC:'bitcoin', HYPE:'hyperliquid', 'S&P500':'sp500', 'xyz:SP500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold', 'xyz:CL':'crude', CRUDE:'crude', CL:'crude' };
     let added = 0;
 
     for (const cl of clusters) {
@@ -2371,7 +2371,7 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults, entryCandles
   {
     const closed = loadClosedTrades();
     const recentCoinTrades = closed.filter(t => {
-      const cId = { 'xyz:SP500':'sp500', 'xyz:GOLD':'gold', BTC:'bitcoin', HYPE:'hyperliquid' }[t.coin] || t.coin;
+      const cId = { 'xyz:SP500':'sp500', 'xyz:GOLD':'gold', 'xyz:CL':'crude', CRUDE:'crude', CL:'crude', BTC:'bitcoin', HYPE:'hyperliquid' }[t.coin] || t.coin;
       return cId === coinId;
     }).slice(0, 3);
     if (recentCoinTrades.length >= 3) {
@@ -2911,7 +2911,7 @@ async function scanCoin(coinId){
           {
             const closed = loadClosedTrades();
             const recentCoinTrades = closed.filter(t => {
-              const cId = { 'xyz:SP500':'sp500', 'xyz:GOLD':'gold', BTC:'bitcoin', HYPE:'hyperliquid' }[t.coin] || t.coin;
+              const cId = { 'xyz:SP500':'sp500', 'xyz:GOLD':'gold', 'xyz:CL':'crude', CRUDE:'crude', CL:'crude', BTC:'bitcoin', HYPE:'hyperliquid' }[t.coin] || t.coin;
               return cId === coinId;
             }).slice(0, 3);
             if (recentCoinTrades.length >= 3) {
