@@ -97,6 +97,7 @@ const CHOP_FILTER = {
   bitcoin:     { enabled: false, adxThreshold: 18, lookbackBars: 30, minTFWeight: 3 },
   sp500:       { enabled: false, adxThreshold: 18, lookbackBars: 30, minTFWeight: 3 },
   gold:        { enabled: true,  adxThreshold: 18, lookbackBars: 30, minTFWeight: 3 },
+  crude:       { enabled: true,  adxThreshold: 18, lookbackBars: 30, minTFWeight: 3 }, // v5.30: GOLD-style chop filter (24/7 trading, skip range-bound conditions)
 };
 
 // v5.16: Time-based exit for stalled positions — close at market if no TP1 reached
@@ -107,6 +108,7 @@ const MAX_HOLD_HOURS = {
   hyperliquid: 24,  // HYPE same
   sp500:       36,  // HIP-3 assets trend slower
   gold:        36,  // HIP-3 assets trend slower
+  crude:       36,  // v5.30: HIP-3 commodity, trends slower
 };
 
 // v5.16: Funding rate exit signal — if cumulative funding paid on a position exceeds
@@ -152,6 +154,7 @@ const EXHAUSTION_THRESHOLDS = {
   hyperliquid: { tightenPct: 5.0, skipPct: 8.0 },
   sp500:       { tightenPct: 2.0, skipPct: 3.5 },
   gold:        { tightenPct: 2.0, skipPct: 3.5 },
+  crude:       { tightenPct: 3.0, skipPct: 5.0 }, // v5.30: looser than GOLD — crude's natural 48h moves (~68% ann vol) are larger; GOLD's 2.0/3.5 would over-skip
 };
 
 // v5.13: Fetch current predicted funding rate from Hyperliquid for HIP-3 (and standard) assets.
