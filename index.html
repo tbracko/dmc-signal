@@ -274,6 +274,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
     <option value="hyperliquid" data-sym="HYPEUSDT" data-label="HYPE/USD">HYPE/USD</option>
     <option value="sp500" data-sym="xyz:S&amp;P500" data-label="S&amp;P500">S&amp;P500</option>
     <option value="gold" data-sym="XAUUSD" data-label="GOLD/USD">GOLD/USD</option>
+    <option value="crude" data-sym="xyz:CL" data-label="CRUDE/USD">CRUDE/USD</option>
   </select>
   <div class="topbar-r">
     <span id="tb-price">—</span>
@@ -536,6 +537,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
           <option value="HYPE">HYPE</option>
           <option value="SPX">SPX</option>
           <option value="GOLD">GOLD</option>
+          <option value="CRUDE">CRUDE</option>
         </select>
       </div>
       <div class="mf-field">
@@ -608,6 +610,7 @@ const COINS = {
   hyperliquid: { id:'hyperliquid', label:'HYPE/USD', sym:'BYBIT:HYPEUSDT',  shortLabel:'HYPE', apiSym:'HYPEUSDT', exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, equityPct: 0.25, maxNotional: 100, isHIP3: false },  // v5.5: halved $200→$100 after 3 consecutive SL hits (synced w/ bot.js); v5.26: equityPct 0.25
   sp500:       { id:'sp500',       label:'S&P500',   sym:'OANDA:SPX500USD', shortLabel:'SPX',  apiSym:'xyz:SP500', exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, equityPct: 1.00, maxNotional: 500, isHIP3: true },  // v5.5: minRR 1.5→1.2 (synced w/ bot.js); v5.26: equityPct 1.00
   gold:        { id:'gold',        label:'GOLD/USD', sym:'OANDA:XAUUSD',    shortLabel:'GOLD', apiSym:'xyz:GOLD', exchange:'hyperliquid', minRR: 1.5, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.40, maxNotional: 300, isHIP3: true },  // v5.17: maxNotional $500→$300 (synced w/ bot.js — single GOLD SL wiped 3 HYPE wins); v5.26: equityPct 0.40
+  crude:       { id:'crude',       label:'CRUDE/USD',sym:'OANDA:WTICOUSD',  shortLabel:'CRUDE',apiSym:'xyz:CL',   exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.20, maxNotional: 200, isHIP3: true },  // v5.30: WTI crude (xyz:CL) — new asset, conservative equityPct 0.20 (synced w/ coins-config.js)
 };
 
 // v5.22 (2026-05-08): Pure signal-engine functions imported from /signals.js (UMD).
@@ -679,7 +682,7 @@ const HL_INTERVALS = { '1W':'1w', '1D':'1d', '4H':'4h', '1H':'1h', '15m':'15m' }
 let activeCoin = 'bitcoin'; // currently viewed coin
 
 // v5.0 FIX #6: Single source of truth for symbol-to-coinId mapping (was duplicated 8+ times)
-const SYM_TO_COIN_ID = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:SP500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold' };
+const SYM_TO_COIN_ID = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:SP500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold', CRUDE:'crude', CL:'crude', 'xyz:CL':'crude' };
 
 // Per-coin state — keyed by coin id
 const coinState = {
@@ -687,6 +690,7 @@ const coinState = {
   hyperliquid: { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
   sp500:    { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
   gold:     { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
+  crude:    { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
 };
 
 // Convenience accessors for active coin (used by render functions)
@@ -2517,7 +2521,7 @@ function processTF(i, candles, dCandles, coinId, lowerCandles){
         let conf = totalW>0 ? Math.round(Math.max(wL,wS)/totalW*100) : 0;
         const baseMinConf = parseInt(localStorage.getItem('hl_min_conf') || '50');
         const majorSig = wL > wS ? 'LONG' : wS > wL ? 'SHORT' : null;
-        const SYM = { bitcoin:'BTC', hyperliquid:'HYPE', sp500:'SPX', gold:'GOLD' };
+        const SYM = { bitcoin:'BTC', hyperliquid:'HYPE', sp500:'SPX', gold:'GOLD', crude:'CRUDE' };
         const sym = SYM[coinId] || coinId;
 
         // v5.11: Counter-trend gate loosened from v4.9 hard block.
@@ -3594,7 +3598,7 @@ const HL = {
     if (!this._pendingTrims || this._pendingTrims.length === 0) return;
     const queue = this._pendingTrims;
     this._pendingTrims = [];
-    const SYM = { bitcoin: 'BTC', hyperliquid: 'HYPE', sp500: 'S&P500', gold: 'GOLD' };
+    const SYM = { bitcoin: 'BTC', hyperliquid: 'HYPE', sp500: 'S&P500', gold: 'GOLD', crude: 'CRUDE' };
     for (const t of queue) {
       try {
         const coin = COINS[t.coinId];
@@ -3717,7 +3721,7 @@ const HL = {
   // ── Translate short coin symbols to HL asset names (for HIP-3 assets) ──
   resolveAsset(asset) {
     // Check explicit mappings FIRST — SPX exists on main dex but we want xyz:SP500
-    const hlMap = { GOLD: 'xyz:GOLD', 'S&P500': 'xyz:SP500', SPX: 'xyz:SP500' };
+    const hlMap = { GOLD: 'xyz:GOLD', 'S&P500': 'xyz:SP500', SPX: 'xyz:SP500', CRUDE: 'xyz:CL' };
     if (hlMap[asset]) return hlMap[asset];
     return asset;
   },
@@ -3769,7 +3773,7 @@ const HL = {
 
   // ── Execute full trade: entry + SL + TP ──
   async executeTrade(coinId, signal, confidence) {
-    const SYM = { bitcoin: 'BTC', hyperliquid: 'HYPE', sp500: 'S&P500', gold: 'GOLD' };
+    const SYM = { bitcoin: 'BTC', hyperliquid: 'HYPE', sp500: 'S&P500', gold: 'GOLD', crude: 'CRUDE' };
     const asset = SYM[coinId];
     if (!asset || !this.enabled || !this.wallet) return null;
 
