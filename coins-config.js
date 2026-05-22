@@ -14,6 +14,7 @@
 //     HYPE  0.25  (25%)            — highest vol alt, smallest allocation
 //     SP500 1.00  (100%)           — low vol TradFi index, largest allocation
 //     GOLD  0.40  (40%)            — moderate vol commodity
+//     CRUDE 0.20  (20%)            — high-vol energy commodity, conservative start
 //
 //   At $1K equity:  BTC $500, HYPE $250, SP500 $1,000, GOLD $400
 //   At $5K equity:  BTC $2,500, HYPE $1,250, SP500 $5,000, GOLD $2,000
@@ -25,6 +26,27 @@
 //   - isHIP3 flag
 //
 // Prior version notes:
+//   v5.30 (2026-05-22): NEW ASSET — CRUDE (xyz:CL, WTI crude perp on the xyz HIP-3
+//     dex). Added after a diversification + edge study:
+//       - Correlation: crude is near-zero/negatively correlated with the whole
+//         book (vs BTC -0.30, GOLD -0.20, SP500 -0.72 over the sample) — genuine
+//         diversification, unlike SILVER (0.87 to GOLD) or NVDA (0.69 to SP500).
+//       - Liquidity: deepest market on the xyz dex (~$900M/24h, ~5× SP500).
+//       - Backtest (raw-pattern, 7w, gating removed, identical for all coins):
+//         crude resolved the Retest pattern BETTER than GOLD — 57% win vs 43%,
+//         PF 0.99 vs 0.57, TP1/TP2 follow-through 57%/33% (≈ GOLD's 56%/34%).
+//         Full-filter replay produced 0 trades for ALL assets over the window
+//         (15m retention only ~7w) — edge not yet live-validated; re-run
+//         counterfactual.js once crude has real fills.
+//     Config: HIP-3 commodity tuning mirrored from GOLD (minRR 1.2, feeEst 0.12,
+//       minStopPct 0.005, breakDistFloorPct 0.0008, minBreakCloses 1).
+//       equityPct 0.20 — half of GOLD: conservative start for a new, higher-vol
+//       (~68% ann), not-yet-validated asset. Raise after real fills confirm edge.
+//       Protective filters (signals.js): CHOP_FILTER enabled (ADX 18, GOLD-style),
+//       MAX_HOLD_HOURS 36, EXHAUSTION_THRESHOLDS {3.0, 5.0} (looser than GOLD's
+//       {2.0,3.5} because crude's natural 48h moves are larger). NOTE: no session
+//       filter — crude trades 24/7. Watch the weekly EIA inventory print
+//       (Wed ~14:30 UTC) which spikes crude inside US hours.
 //   v5.29 (2026-05-21): Two improvements from counterfactual testing (30d, 29 trades):
 //     1. BTC minBreakBodyPct 0.008 (0.8%) — break impulse filter. detectRetest now
 //        rejects setups where the largest directional body between break and retest
@@ -87,6 +109,7 @@ const COINS = {
   hyperliquid: { id:'hyperliquid', label:'HYPE',   apiSym:'HYPEUSDT',   asset:'HYPE',       exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, equityPct: 0.25, isHIP3: false },
   sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',  asset:'xyz:SP500',  exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, equityPct: 1.00, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 },
   gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',   asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.40, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 },
+  crude:       { id:'crude',       label:'CRUDE',  apiSym:'xyz:CL',     asset:'xyz:CL',     exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.20, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 },
 };
 
 // Daily loss limit as fraction of equity (3%). Bot computes: equity × DAILY_LOSS_PCT.
