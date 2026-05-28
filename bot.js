@@ -1,955 +1,384 @@
-<!DOCTYPE html>
-<html lang="en" style="background:#07090d">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>DMS Signal · BTC</title>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;600&family=Sora:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js" defer></script>
-<style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{background:#07090d;color:#dce8f5;font-family:'Sora',system-ui,sans-serif;min-height:100%;-webkit-text-size-adjust:100%}
-body{padding-bottom:calc(68px + env(safe-area-inset-bottom,0px));overflow-x:hidden}
-body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,230,118,.015) 1px,transparent 1px),linear-gradient(90deg,rgba(0,230,118,.015) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0}
-
-/* TOP BAR */
-.topbar{position:sticky;top:0;z-index:100;background:#07090df5;border-bottom:1px solid #1a2230;padding:calc(env(safe-area-inset-top,0px) + 10px) 16px 10px;display:flex;align-items:center;gap:10px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
-.brand{font-family:'Bebas Neue',sans-serif;font-size:24px;letter-spacing:.1em;color:#00e676;line-height:1;flex-shrink:0}
-.pair{font-family:'IBM Plex Mono',monospace;font-size:10px;color:#5d7a99;background:#10151c;border:1px solid #1a2230;padding:3px 8px;border-radius:4px}
-.topbar-r{margin-left:auto;display:flex;align-items:center;gap:8px}
-#tb-price{font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;color:#dce8f5}
-#tb-chg{font-family:'IBM Plex Mono',monospace;font-size:11px;padding:3px 7px;border-radius:4px;display:none}
-.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:#ffc107}
-.dot.ok{background:#00e676;animation:dpulse 2s infinite}
-.dot.err{background:#ff3d5a}
-@keyframes dpulse{0%,100%{box-shadow:0 0 0 0 rgba(0,230,118,.5)}50%{box-shadow:0 0 0 5px rgba(0,230,118,0)}}
-
-/* STATUS */
-.statusbar{display:flex;align-items:center;gap:6px;padding:5px 16px;border-bottom:1px solid #1a2230;background:#0c0f14}
-#status-txt{font-family:'IBM Plex Mono',monospace;font-size:9px;color:#3d5068;flex:1}
-#last-upd{font-family:'IBM Plex Mono',monospace;font-size:9px;color:#3d5068}
-
-/* PAGES */
-.page{display:none;position:relative;z-index:1}
-.page.active{display:block}
-
-/* HERO */
-.hero{margin:14px 16px;border-radius:14px;padding:20px 18px;border:1px solid #243040;background:#10151c;position:relative;overflow:hidden;transition:background .4s,border-color .4s}
-.hero.long{background:#001f0e;border-color:rgba(0,230,118,.3)}
-.hero.short{background:#1a0008;border-color:rgba(255,61,90,.3)}
-.hero.neutral{background:#1a1400;border-color:rgba(255,193,7,.25)}
-.hero-glow{position:absolute;top:-40px;left:-40px;width:180px;height:180px;border-radius:50%;opacity:.12;pointer-events:none;filter:blur(40px);transition:background .4s}
-.hero.long .hero-glow{background:#00e676}
-.hero.short .hero-glow{background:#ff3d5a}
-.hero.neutral .hero-glow{background:#ffc107}
-.hero-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:12px}
-.hero-dir{font-family:'Bebas Neue',sans-serif;font-size:68px;line-height:.85;letter-spacing:.03em;color:#5d7a99;transition:color .4s;flex:1}
-.hero.long .hero-dir{color:#00e676}
-.hero.short .hero-dir{color:#ff3d5a}
-.hero.neutral .hero-dir{color:#ffc107}
-.hero-meta{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px;padding-top:4px;flex-shrink:0}
-.hero-tfs{font-family:'IBM Plex Mono',monospace;font-size:10px;color:#5d7a99;white-space:nowrap}
-.hero-conf{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;padding:3px 9px;border-radius:5px;border:1px solid #243040;background:#0c0f14;color:#dce8f5;white-space:nowrap}
-.hero-conf.high{background:rgba(0,230,118,.12);border-color:rgba(0,230,118,.3);color:#00e676}
-.hero-conf.med{background:rgba(255,193,7,.1);border-color:rgba(255,193,7,.3);color:#ffc107}
-.hero-conflbl{font-family:'IBM Plex Mono',monospace;font-size:8px;letter-spacing:.15em;color:#3d5068;text-transform:uppercase}
-.hero-reason{font-family:'IBM Plex Mono',monospace;font-size:10px;color:#5d7a99;line-height:1.6;border-top:1px solid #1a2230;padding-top:10px}
-.hero-conflict{font-family:'IBM Plex Mono',monospace;font-size:9px;line-height:1.5;padding:6px 10px;border-radius:6px;margin-top:8px;border:1px solid rgba(255,152,0,.3);background:rgba(255,152,0,.06);color:#ff9800}
-.hero-conflict.strong{border-color:rgba(255,61,90,.35);background:rgba(255,61,90,.07);color:#ff6b6b}
-
-/* NEXT MOVE */
-.session-banner{margin:0 16px 10px;padding:10px 14px;border-radius:10px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.05em;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);display:flex;flex-direction:column;gap:5px}
-.session-banner .sb-row{display:flex;align-items:center;gap:8px}
-.session-banner .sb-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
-.session-banner .sb-label{color:#7b8fa8;font-size:9px;letter-spacing:.08em;text-transform:uppercase}
-.session-banner .sb-val{color:#c9d6e3;font-size:10px}
-.session-banner .sb-range{color:#ffc107;font-size:10px;font-weight:600}
-.session-banner .sb-trap{font-size:9px;letter-spacing:.04em;padding:2px 7px;border-radius:4px;font-weight:700}
-.session-banner .sb-trap.long{background:rgba(0,230,118,.15);color:#00e676;border:1px solid rgba(0,230,118,.3)}
-.session-banner .sb-trap.short{background:rgba(255,61,90,.12);color:#ff3d5a;border:1px solid rgba(255,61,90,.25)}
-.session-banner .sb-trap.watch{background:rgba(255,193,7,.1);color:#ffc107;border:1px solid rgba(255,193,7,.22)}
-.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 16px 12px}
-.stat-card{background:#0c0f14;border:1px solid #1a2230;border-radius:10px;padding:12px 14px}
-.stat-card.full{grid-column:1/-1}
-.stat-val{font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:.04em;line-height:1}
-.stat-val.green{color:#00e676}.stat-val.red{color:#ff3d5a}.stat-val.yellow{color:#ffc107}.stat-val.white{color:#c9d6e3}
-.stat-lbl{font-family:'IBM Plex Mono',monospace;font-size:8px;color:#3d5068;letter-spacing:.08em;text-transform:uppercase;margin-top:3px}
-.stat-sub{font-family:'IBM Plex Mono',monospace;font-size:8px;color:#5d7a99;margin-top:5px;line-height:1.5}
-.stat-bar-wrap{height:4px;background:#1a2230;border-radius:2px;margin-top:8px;overflow:hidden}
-.stat-bar{height:100%;border-radius:2px;background:#00e676;transition:width .4s}
-.stat-table{width:100%;border-collapse:collapse;margin-top:6px}
-.stat-table td{font-family:'IBM Plex Mono',monospace;font-size:9px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04);color:#7b8fa8}
-.stat-table td:first-child{color:#c9d6e3;width:40%}
-.stat-table td.green{color:#00e676}.stat-table td.red{color:#ff3d5a}.stat-table td.yellow{color:#ffc107}
-.stat-streak{display:flex;gap:3px;margin-top:6px;flex-wrap:wrap}
-.streak-dot{width:10px;height:10px;border-radius:2px}
-.nm-divider{height:1px;background:rgba(255,255,255,.06);margin:10px 0 8px}
-.nm-story-lbl{font-family:'IBM Plex Mono',monospace;font-size:8px;color:#3d5068;letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px}
-.nm-story{display:flex;flex-direction:column;gap:4px}
-.story-row{display:flex;align-items:flex-start;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:9px;line-height:1.4}
-.story-icon{flex-shrink:0;width:14px;height:14px;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;margin-top:1px}
-.story-icon.gain{background:rgba(0,230,118,.2);color:#00e676}
-.story-icon.fail{background:rgba(255,61,90,.15);color:#ff3d5a}
-.story-icon.neutral{background:rgba(255,193,7,.1);color:#ffc107}
-.story-text{color:#7b8fa8;flex:1}
-.story-text strong{color:#c9d6e3}
-.story-conclusion{margin-top:4px;font-family:'IBM Plex Mono',monospace;font-size:9px;color:#5d7a99;border-top:1px solid rgba(255,255,255,.04);padding-top:6px}
-.story-conclusion span{color:#c9d6e3;font-weight:600}
-.nm-card{margin:0 16px 14px;border-radius:10px;background:#0c0f14;border:1px solid #1a2230;padding:14px 16px}
-.nm-lbl{font-family:'IBM Plex Mono',monospace;font-size:8px;letter-spacing:.2em;text-transform:uppercase;color:#3d5068;margin-bottom:4px}
-.nm-val{font-family:'Bebas Neue',sans-serif;font-size:36px;letter-spacing:.06em;line-height:1;color:#5d7a99}
-.nm-val.UP{color:#00e676}.nm-val.DOWN{color:#ff3d5a}.nm-val.UNCLEAR{color:#ffc107}
-.nm-sub{font-family:'IBM Plex Mono',monospace;font-size:9px;color:#3d5068;line-height:1.5;margin-top:4px}
-
-/* SECTION HEADER */
-.sh{padding:12px 16px 8px;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:#3d5068;display:flex;align-items:center;gap:6px}
-.sh::before{content:'';width:12px;height:1px;background:#1a2230}
-
-/* TF CARDS */
-.tf-cards{padding:0 16px 4px;display:flex;flex-direction:column;gap:8px}
-.tfc{background:#0c0f14;border:1px solid #1a2230;border-radius:10px;padding:14px;position:relative;overflow:hidden}
-.tfc::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:3px 0 0 3px;background:#3d5068}
-.tfc.long::before{background:#00e676}
-.tfc.short::before{background:#ff3d5a}
-.tfc.neutral::before{background:#ffc107}
-.tfc-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
-.tfc-tf{font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;color:#dce8f5;min-width:32px}
-.tfc-type{font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.07em;padding:3px 8px;border-radius:4px;white-space:nowrap}
-.tfc-type.FAIL_GAIN{background:rgba(255,61,90,.12);color:#ff3d5a;border:1px solid rgba(255,61,90,.25)}
-.tfc-type.FAIL_LOSE{background:rgba(0,230,118,.1);color:#00e676;border:1px solid rgba(0,230,118,.22)}
-.tfc-type.BLIND_ENTRY{background:rgba(255,193,7,.15);color:#ffc107;border:1px solid rgba(255,193,7,.35)}
-.tfc-type.BREAKOUT{background:rgba(100,181,246,.12);color:#64b5f6;border:1px solid rgba(100,181,246,.3)}
-.tfc-type.AT_LEVEL{background:rgba(255,193,7,.1);color:#ffc107;border:1px solid rgba(255,193,7,.22)}
-.tfc-type.NONE{background:#10151c;color:#3d5068;border:1px solid #1a2230}
-.tfc-sig{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:700}
-.tfc-sig.LONG{color:#00e676}.tfc-sig.SHORT{color:#ff3d5a}.tfc-sig.NEUTRAL{color:#ffc107}.tfc-sig.WAIT{color:#3d5068}
-.tfc-reason{font-family:'IBM Plex Mono',monospace;font-size:9px;color:#5d7a99;line-height:1.55}
-.tfc-prices{display:flex;gap:14px;margin-top:8px;padding-top:8px;border-top:1px solid #1a2230;flex-wrap:wrap}
-.tcp{font-family:'IBM Plex Mono',monospace;font-size:9px}
-.tcp-l{color:#3d5068;margin-right:4px}
-.tfc.collapsed .tfc-reason,.tfc.collapsed .tfc-prices,.tfc.collapsed .tfc-head+.tfc-head{display:none}
-.tfc .tfc-toggle{display:none;margin-left:auto;color:#3d5068;font-size:12px;cursor:pointer}
-.tfc.collapsed .tfc-toggle{display:inline}
-.tfc:not(.collapsed) .tfc-toggle{display:inline;transform:rotate(180deg)}
-
-/* TF TAB BAR */
-.tf-bar{display:flex;gap:6px;padding:10px 16px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid #1a2230;background:#0c0f14}
-.tf-bar::-webkit-scrollbar{display:none}
-.tf-btn{flex-shrink:0;font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;padding:8px 16px;border-radius:7px;border:1px solid #1a2230;background:transparent;color:#5d7a99;cursor:pointer;transition:all .15s;letter-spacing:.05em}
-.tf-btn.active{background:#00e676;color:#07090d;border-color:#00e676}
-
-/* CHART */
-.chart-wrap{height:calc(100svh - 160px);min-height:380px}
-.chart-wrap>div{width:100%;height:100%}
-
-/* LEVELS */
-.lvl-item{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid #1a2230}
-.lvl-item.untested{background:rgba(255,193,7,.025)}
-.lvl-badge{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;width:36px;text-align:center;padding:4px 0;border-radius:5px}
-.lvl-badge.R{color:#ff3d5a;background:rgba(255,61,90,.1)}
-.lvl-badge.S{color:#00e676;background:rgba(0,230,118,.08)}
-.lvl-info{flex:1}
-.lvl-tf{font-family:'IBM Plex Mono',monospace;font-size:10px;color:#3d5068}
-.lvl-untag{font-family:'IBM Plex Mono',monospace;font-size:8px;color:#ffc107;margin-left:5px}
-.lvl-right{text-align:right}
-.lvl-price{font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:600}
-.lvl-price.R{color:#ff3d5a}.lvl-price.S{color:#00e676}
-.lvl-dist{font-family:'IBM Plex Mono',monospace;font-size:9px;color:#3d5068;margin-top:2px}
-
-/* LOG */
-.log-item{padding:13px 16px;border-bottom:1px solid #1a2230;border-left:3px solid transparent}
-.log-item.long{border-left-color:#00e676;background:rgba(0,230,118,.02)}
-.log-item.short{border-left-color:#ff3d5a;background:rgba(255,61,90,.02)}
-.log-item.neutral{border-left-color:#ffc107}
-.log-head{display:flex;align-items:center;gap:8px;margin-bottom:5px}
-.log-sig{font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:700}
-.log-sig.LONG{color:#00e676}.log-sig.SHORT{color:#ff3d5a}.log-sig.NEUTRAL{color:#ffc107}
-.log-tf{font-family:'IBM Plex Mono',monospace;font-size:10px;color:#3d5068;background:#10151c;border:1px solid #1a2230;padding:2px 7px;border-radius:4px}
-.log-time2{font-family:'IBM Plex Mono',monospace;font-size:9px;color:#3d5068;margin-left:auto}
-.log-prices{display:flex;gap:14px;margin-top:6px;flex-wrap:wrap}
-.log-p{font-family:'IBM Plex Mono',monospace;font-size:10px}
-.log-pl{color:#3d5068;margin-right:3px;font-size:9px}
-.log-status{font-family:'IBM Plex Mono',monospace;font-size:8px;padding:2px 7px;border-radius:4px;margin-left:auto;align-self:flex-start}
-.log-status.open{background:rgba(255,193,7,.1);color:#ffc107;border:1px solid rgba(255,193,7,.2)}
-.log-status.hit{background:rgba(0,230,118,.1);color:#00e676;border:1px solid rgba(0,230,118,.2)}
-.log-status.stopped{background:rgba(255,61,90,.1);color:#ff3d5a;border:1px solid rgba(255,61,90,.2)}
-.log-status.review_exit{background:rgba(255,152,0,.12);color:#ff9800;border:1px solid rgba(255,152,0,.3)}
-.log-reason{font-family:'IBM Plex Mono',monospace;font-size:9px;color:#3d5068;margin-top:4px;line-height:1.5}
-
-/* SETTINGS */
-.setting-row{padding:16px;border-bottom:1px solid #1a2230}
-.setting-lbl{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:#3d5068;margin-bottom:8px}
-.setting-desc{font-family:'Sora',sans-serif;font-size:11px;color:#5d7a99;line-height:1.5;margin-bottom:10px}
-.setting-input{width:100%;background:#0c0f14;border:1px solid #243040;border-radius:7px;padding:10px 12px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#dce8f5;outline:none;transition:border-color .2s}
-.setting-input:focus{border-color:#00e676}
-.setting-input::placeholder{color:#3d5068}
-.setting-save{margin-top:8px;font-family:'IBM Plex Mono',monospace;font-size:10px;padding:9px 16px;border-radius:6px;border:1px solid rgba(0,230,118,.35);background:rgba(0,230,118,.1);color:#00e676;cursor:pointer;letter-spacing:.07em;transition:all .2s}
-.setting-save:active{transform:scale(.96)}
-.setting-status{font-family:'IBM Plex Mono',monospace;font-size:9px;color:#3d5068;margin-top:6px}
-.toggle-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.toggle{position:relative;width:44px;height:26px;flex-shrink:0}
-.toggle input{opacity:0;width:0;height:0;position:absolute}
-.toggle-slider{position:absolute;inset:0;background:#1a2230;border-radius:13px;cursor:pointer;transition:.3s}
-.toggle-slider::before{content:'';position:absolute;width:20px;height:20px;left:3px;top:3px;background:#3d5068;border-radius:50%;transition:.3s}
-.toggle input:checked+.toggle-slider{background:rgba(0,230,118,.25);border:1px solid rgba(0,230,118,.5)}
-.toggle input:checked+.toggle-slider::before{transform:translateX(18px);background:#00e676}
-
-/* TRADES PAGE */
-.trades-bal{margin:14px 16px;border-radius:14px;background:#10151c;border:1px solid #1a2230;padding:18px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.trades-bal-main{grid-column:1/-1;text-align:center;padding-bottom:12px;border-bottom:1px solid #1a2230}
-.trades-bal-val{font-family:'Bebas Neue',sans-serif;font-size:42px;color:#dce8f5;line-height:1}
-.trades-bal-lbl{font-family:'IBM Plex Mono',monospace;font-size:8px;color:#3d5068;letter-spacing:.15em;text-transform:uppercase;margin-top:4px}
-.trades-bal-sub{text-align:center}
-.trades-bal-sub .trades-bal-val{font-size:22px}
-.pos-card{margin:0 16px 8px;border-radius:10px;background:#0c0f14;border:1px solid #1a2230;padding:14px;position:relative;overflow:hidden}
-.pos-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:3px 0 0 3px}
-.pos-card.long::before{background:#00e676}
-.pos-card.short::before{background:#ff3d5a}
-.pos-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.pos-coin{font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:600;color:#dce8f5}
-.pos-side{font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;padding:3px 8px;border-radius:4px}
-.pos-side.LONG{background:rgba(0,230,118,.1);color:#00e676;border:1px solid rgba(0,230,118,.22)}
-.pos-side.SHORT{background:rgba(255,61,90,.12);color:#ff3d5a;border:1px solid rgba(255,61,90,.25)}
-.pos-pnl{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:700}
-.pos-pnl.green{color:#00e676}.pos-pnl.red{color:#ff3d5a}
-.pos-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px}
-.pos-cell{font-family:'IBM Plex Mono',monospace;font-size:9px}
-.pos-cell-lbl{color:#3d5068;font-size:8px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:2px}
-.pos-cell-val{color:#7b8fa8}
-.pos-close-row{display:flex;gap:6px;margin-bottom:6px}
-.pos-pct-btn{flex:1;font-family:'IBM Plex Mono',monospace;font-size:10px;padding:7px 0;border-radius:6px;border:1px solid rgba(255,189,46,.25);background:rgba(255,189,46,.06);color:#ffbd2e;cursor:pointer;letter-spacing:.04em;transition:all .2s;text-align:center}
-.pos-pct-btn:hover{background:rgba(255,189,46,.14);border-color:rgba(255,189,46,.4)}
-.pos-pct-btn:active{transform:scale(.97);background:rgba(255,189,46,.2)}
-.pos-close-btn{width:100%;font-family:'IBM Plex Mono',monospace;font-size:10px;padding:8px;border-radius:6px;border:1px solid rgba(255,61,90,.3);background:rgba(255,61,90,.08);color:#ff3d5a;cursor:pointer;letter-spacing:.06em;transition:all .2s}
-.pos-close-btn:active{transform:scale(.97);background:rgba(255,61,90,.2)}
-.manual-form{margin:0 16px 12px;border-radius:10px;background:#0c0f14;border:1px solid #1a2230;padding:14px}
-.mf-row{display:flex;gap:8px;margin-bottom:10px;align-items:flex-end}
-.mf-field{flex:1}
-.mf-label{font-family:'IBM Plex Mono',monospace;font-size:8px;color:#3d5068;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px}
-.mf-input{width:100%;background:#10151c;border:1px solid #243040;border-radius:6px;padding:8px 10px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#dce8f5;outline:none}
-.mf-input:focus{border-color:#00e676}
-.mf-select{width:100%;background:#10151c;border:1px solid #243040;border-radius:6px;padding:8px 10px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#dce8f5;outline:none;cursor:pointer}
-.mf-open-btn{width:100%;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;padding:10px;border-radius:7px;border:1px solid rgba(0,230,118,.35);background:rgba(0,230,118,.1);color:#00e676;cursor:pointer;letter-spacing:.08em;transition:all .2s}
-.mf-open-btn:active{transform:scale(.97)}
-.mf-open-btn:disabled{opacity:.4;cursor:not-allowed}
-.closed-item{padding:10px 16px;border-bottom:1px solid rgba(255,255,255,.04);display:flex;align-items:center;gap:10px}
-.closed-coin{font-family:'IBM Plex Mono',monospace;font-size:10px;color:#5d7a99;min-width:36px}
-.closed-side{font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;min-width:48px}
-.closed-side.LONG{color:#00e676}.closed-side.SHORT{color:#ff3d5a}
-.closed-pnl{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;margin-left:auto}
-.closed-pnl.green{color:#00e676}.closed-pnl.red{color:#ff3d5a}
-.closed-time{font-family:'IBM Plex Mono',monospace;font-size:9px;color:#3d5068}
-
-/* BOTTOM NAV */
-.bnav{position:fixed;bottom:0;left:0;right:0;z-index:200;background:#07090df5;border-top:1px solid #1a2230;display:flex;padding-bottom:env(safe-area-inset-bottom,0px);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
-.nb{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:10px 4px 12px;font-family:'IBM Plex Mono',monospace;font-size:8px;letter-spacing:.06em;color:#3d5068;background:none;border:none;cursor:pointer;transition:color .2s;text-transform:uppercase}
-.nb.active{color:#00e676}
-.nb svg{width:20px;height:20px;stroke-width:1.5;flex-shrink:0}
-
-/* FAB */
-.fab{position:fixed;bottom:calc(80px + env(safe-area-inset-bottom,0px));right:16px;z-index:150;width:44px;height:44px;border-radius:50%;background:#10151c;border:1px solid #243040;color:#5d7a99;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(0,0,0,.5);transition:transform .15s}
-.fab:active{transform:scale(.88)}
-.fab.spin{animation:fspin 1s linear infinite}
-@keyframes fspin{to{transform:rotate(360deg)}}
-
-/* SKEL / EMPTY */
-.skel{background:linear-gradient(90deg,#1a2230 25%,#243040 50%,#1a2230 75%);background-size:200% 100%;animation:skel 1.5s infinite;border-radius:3px;display:inline-block}
-@keyframes skel{0%{background-position:200% center}100%{background-position:-200% center}}
-.empty{padding:24px 16px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:#3d5068;text-align:center}
-
-/* ALERT TOAST */
-.toast{position:fixed;top:80px;left:16px;right:16px;z-index:300;background:#0c0f14;border:1px solid #00e676;border-radius:10px;padding:14px 16px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#00e676;box-shadow:0 8px 32px rgba(0,0,0,.6);transform:translateY(-20px);opacity:0;transition:all .3s;pointer-events:none}
-.toast.show{transform:translateY(0);opacity:1}
-.toast.short-alert{border-color:#ff3d5a;color:#ff3d5a}
-</style>
-</head>
-<body>
-
-<div class="topbar">
-  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v5.11</span></span>
-  <select id="coin-sel" onchange="switchCoin(this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:4px 8px;cursor:pointer;letter-spacing:.04em">
-    <option value="bitcoin" data-sym="BTCUSDT" data-label="BTC/USD" selected>BTC/USD</option>
-    <option value="hyperliquid" data-sym="HYPEUSDT" data-label="HYPE/USD">HYPE/USD</option>
-    <option value="sp500" data-sym="xyz:S&amp;P500" data-label="S&amp;P500">S&amp;P500</option>
-    <option value="gold" data-sym="XAUUSD" data-label="GOLD/USD">GOLD/USD</option>
-    <option value="crude" data-sym="xyz:CL" data-label="CRUDE/USD">CRUDE/USD</option>
-  </select>
-  <div class="topbar-r">
-    <span id="tb-price">—</span>
-    <span id="tb-chg"></span>
-    <button class="topbar-gear" onclick="toggleSettings()" style="background:none;border:none;color:#5d7a99;font-size:16px;cursor:pointer;padding:4px">⚙</button>
-    <span class="dot" id="dot"></span>
-  </div>
-</div>
-<div class="statusbar">
-  <span id="status-txt">Connecting...</span>
-  <span id="last-upd"></span>
-</div>
-
-<!-- TOAST -->
-<div class="toast" id="toast"></div>
-
-<!-- SETTINGS OVERLAY & PANEL -->
-<div id="settings-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:250" onclick="toggleSettings()"></div>
-<div id="settings-panel" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:260;background:#0a0e14;border-top:2px solid #00e676;border-radius:16px 16px 0 0;max-height:85vh;overflow-y:auto;padding:20px 16px calc(20px + env(safe-area-inset-bottom,0px))">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <span style="font-family:'Bebas Neue';font-size:20px;color:#00e676;letter-spacing:.1em">SETTINGS</span>
-    <button onclick="toggleSettings()" style="background:none;border:none;color:#5d7a99;font-size:22px;cursor:pointer">&times;</button>
-  </div>
-  <div class="sh">Notifications · Telegram</div>
-
-  <div class="setting-row">
-    <div class="setting-lbl">Setup Guide</div>
-    <div class="setting-desc">
-      1. Open Telegram → search <strong style="color:#dce8f5">@BotFather</strong><br>
-      2. Send <strong style="color:#dce8f5">/newbot</strong> → follow prompts → copy the token<br>
-      3. Search <strong style="color:#dce8f5">@userinfobot</strong> → send /start → copy your Chat ID<br>
-      4. Paste both below and tap Save
-    </div>
-  </div>
-
-  <div class="setting-row">
-    <div class="setting-lbl">Bot Token</div>
-    <input class="setting-input" id="tg-token" type="text" placeholder="1234567890:AAFxyz..." autocomplete="off" autocorrect="off" spellcheck="false">
-  </div>
-
-  <div class="setting-row">
-    <div class="setting-lbl">Your Chat ID</div>
-    <input class="setting-input" id="tg-chatid" type="text" placeholder="123456789" autocomplete="off" autocorrect="off" spellcheck="false">
-    <button class="setting-save" onclick="saveTelegram()">SAVE &amp; TEST</button>
-    <div class="setting-status" id="tg-status"></div>
-  </div>
-
-  <div class="setting-row">
-    <div class="setting-lbl">Alert Settings</div>
-    <div style="display:flex;flex-direction:column;gap:12px;margin-top:4px">
-
-      <div class="toggle-row">
-        <div>
-          <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:2px">FAIL TO GAIN (Short signal)</div>
-          <div style="font-family:'Sora',sans-serif;font-size:11px;color:#3d5068">Send alert when short setup fires</div>
-        </div>
-        <label class="toggle"><input type="checkbox" id="alert-short" checked><span class="toggle-slider"></span></label>
-      </div>
-
-      <div class="toggle-row">
-        <div>
-          <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:2px">FAIL TO LOSE (Long signal)</div>
-          <div style="font-family:'Sora',sans-serif;font-size:11px;color:#3d5068">Send alert when long setup fires</div>
-        </div>
-        <label class="toggle"><input type="checkbox" id="alert-long" checked><span class="toggle-slider"></span></label>
-      </div>
-
-      <div class="toggle-row">
-        <div>
-          <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:2px">AT LEVEL (Watch zone)</div>
-          <div style="font-family:'Sora',sans-serif;font-size:11px;color:#3d5068">Send alert when price reaches a key level</div>
-        </div>
-        <label class="toggle"><input type="checkbox" id="alert-atlevel"><span class="toggle-slider"></span></label>
-      </div>
-
-      <div class="toggle-row">
-        <div>
-          <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:2px">H1 + Daily only</div>
-          <div style="font-family:'Sora',sans-serif;font-size:11px;color:#3d5068">Only alert on H1 and Daily signals (no noise from 15m/1H)</div>
-        </div>
-        <label class="toggle"><input type="checkbox" id="alert-htfonly" checked><span class="toggle-slider"></span></label>
-      </div>
-    </div>
-  </div>
-
-  <div class="setting-row">
-    <div class="setting-lbl">In-App Alerts</div>
-    <div class="toggle-row">
-      <div>
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:2px">Visual toast notifications</div>
-        <div style="font-family:'Sora',sans-serif;font-size:11px;color:#3d5068">Show banner in app when signal fires</div>
-      </div>
-      <label class="toggle"><input type="checkbox" id="alert-toast" checked><span class="toggle-slider"></span></label>
-    </div>
-  </div>
-
-  <div class="setting-row">
-    <div class="setting-lbl">Trade Settings</div>
-    <div style="display:flex;flex-direction:column;gap:10px">
-      <div>
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:4px">Min R:R Ratio</div>
-        <input class="setting-input" id="min-rr" type="number" step="0.1" value="1.5" style="width:120px" onchange="localStorage.setItem('min_rr',this.value)">
-      </div>
-      <div>
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:4px">Account Size ($)</div>
-        <input class="setting-input" id="account-size" type="number" value="100" style="width:160px" onchange="localStorage.setItem('account_size',this.value)">
-      </div>
-      <div>
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:4px">Risk Per Trade (%)</div>
-        <input class="setting-input" id="risk-pct" type="number" step="0.1" value="1" style="width:120px" onchange="localStorage.setItem('risk_pct',this.value)">
-      </div>
-    </div>
-  </div>
-
-  <div class="sh" style="margin-top:16px">Auto-Trading · Hyperliquid</div>
-
-  <div class="setting-row">
-    <div class="setting-lbl">Enable Auto-Trading</div>
-    <div class="toggle-row">
-      <div>
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:2px">Execute trades on Hyperliquid</div>
-        <div style="font-family:'Sora',sans-serif;font-size:11px;color:#3d5068">Signals with >50% confidence will auto-execute</div>
-      </div>
-      <label class="toggle"><input type="checkbox" id="hl-auto-trade" onchange="localStorage.setItem('hl_auto_trade',this.checked);if(typeof HL!=='undefined')HL.enabled=this.checked"><span class="toggle-slider"></span></label>
-    </div>
-  </div>
-
-  <div class="setting-row">
-    <div class="setting-lbl">Master Account Address</div>
-    <div style="font-family:'Sora',sans-serif;font-size:11px;color:#5d7a99;margin-bottom:6px">Your main Hyperliquid wallet address. Funds &amp; positions live here.</div>
-    <input class="setting-input" id="hl-master-addr" type="text" placeholder="0x1a41..." autocomplete="off" autocorrect="off" spellcheck="false" style="font-size:11px" onchange="localStorage.setItem('hl_master_addr',this.value.trim());if(typeof HL!=='undefined')HL.masterAddress=this.value.trim()">
-  </div>
-
-  <div class="setting-row">
-    <div class="setting-lbl">API Wallet Private Key</div>
-    <div style="font-family:'Sora',sans-serif;font-size:11px;color:#ff6b6b;margin-bottom:6px">Your API wallet key (agent). Trades on behalf of the master account above.</div>
-    <input class="setting-input" id="hl-wallet-key" type="password" placeholder="0xabc123..." autocomplete="off" autocorrect="off" spellcheck="false" style="font-size:11px">
-    <button class="setting-save" onclick="saveHLWallet()">SAVE &amp; CONNECT</button>
-    <div class="setting-status" id="hl-status"></div>
-  </div>
-
-  <div class="setting-row">
-    <div class="setting-lbl">Safety Limits</div>
-    <div style="display:flex;flex-direction:column;gap:10px">
-      <div>
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:4px">Max Trades Per Day</div>
-        <input class="setting-input" id="hl-max-trades" type="number" value="10" style="width:120px" onchange="localStorage.setItem('hl_max_trades',this.value)">
-      </div>
-      <div>
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:4px">Min Confidence (%)</div>
-        <input class="setting-input" id="hl-min-conf" type="number" value="50" style="width:120px" onchange="localStorage.setItem('hl_min_conf',this.value)">
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- PAGE: SIGNAL -->
-<div class="page active" id="page-signal">
-  <div class="hero wait" id="hero">
-    <div class="hero-glow"></div>
-    <div class="hero-top">
-      <div class="hero-dir" id="hero-dir">—</div>
-      <div class="hero-meta">
-        <div class="hero-tfs" id="hero-tfs">0 / 5 TFs</div>
-        <div class="hero-conf" id="hero-conf">—</div>
-        <div class="hero-conflbl" id="hero-conflbl">confidence</div>
-      </div>
-    </div>
-    <div class="hero-reason" id="hero-reason">Fetching candle data...</div>
-    <div class="hero-conflict" id="hero-conflict" style="display:none"></div>
-  </div>
-  <div class="nm-card">
-    <div class="nm-lbl">Next Major Move · HTF</div>
-    <div class="nm-val UNCLEAR" id="nm-val">—</div>
-    <div class="nm-sub" id="nm-sub">Analysing weekly + daily bodies...</div>
-    <div class="nm-divider" id="nm-divider" style="display:none"></div>
-    <div class="nm-story-lbl" id="nm-story-lbl" style="display:none">SESSION STORY</div>
-    <div class="nm-story" id="nm-story" style="display:none"></div>
-  </div>
-  <div class="session-banner" id="session-banner" style="display:none"></div>
-  <div class="sh">Timeframe Breakdown</div>
-  <div class="tf-cards" id="tf-cards"></div>
-</div>
-
-<!-- PAGE: CHART -->
-<div class="page" id="page-chart">
-  <div class="tf-bar" id="tf-bar">
-    <button class="tf-btn" data-iv="W">1W</button>
-    <button class="tf-btn" data-iv="D">1D</button>
-    <button class="tf-btn active" data-iv="240">4H</button>
-    <button class="tf-btn" data-iv="60">1H</button>
-    <button class="tf-btn" data-iv="15">15m</button>
-  </div>
-  <div class="chart-wrap" id="tv-wrap"></div>
-</div>
-
-<!-- PAGE: LEVELS -->
-<div class="page" id="page-levels">
-  <div class="sh">Key Levels · Weekly + Daily + Session (V-Peaks + PDH/PDL + Asia/London/NY)</div>
-  <div id="lvl-list"><div class="empty">Loading levels...</div></div>
-</div>
-
-<!-- PAGE: STATS -->
-<div class="page" id="page-stats">
-  <div class="sh" style="display:flex;justify-content:space-between;align-items:center">
-    <span>Performance Stats</span>
-    <div style="display:flex;gap:8px;align-items:center">
-      <button onclick="rebuildFromHL()" id="rebuild-btn" style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:5px 10px;border-radius:6px;border:1px solid rgba(0,230,118,.3);background:rgba(0,230,118,.06);color:#00e676;cursor:pointer;letter-spacing:.04em">SYNC HL</button>
-      <span id="stats-auto-lbl" style="font-size:9px;color:#3d5068;letter-spacing:.06em">AUTO-CHECKING</span>
-    </div>
-  </div>
-  <div id="stats-content"><div class="empty">Loading stats...</div></div>
-</div>
-
-<!-- PAGE: SETTINGS -->
-
-<!-- LOG PAGE -->
-<div class="page" id="page-log">
-  <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px 4px">
-    <div class="sh" style="padding:0">Signal History</div>
-    <button onclick="clearDedup()" style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:5px 12px;border-radius:6px;border:1px solid rgba(255,152,0,.3);background:rgba(255,152,0,.06);color:#ff9800;cursor:pointer;margin-right:6px">Clear Signal Lock</button>
-        <button onclick="clearLog()" style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#3d5068;background:none;border:1px solid #1a2230;border-radius:5px;padding:5px 10px;cursor:pointer;letter-spacing:.06em">CLEAR</button>
-  </div>
-  <div style="padding:4px 16px 10px;font-family:'IBM Plex Mono',monospace;font-size:9px;color:#3d5068">
-    Persists across sessions · last 50 signals
-  </div>
-  <div id="log-list"><div class="empty">No signals logged yet</div></div>
-</div>
-
-<!-- PAGE: TRADES -->
-<div class="page" id="page-trades">
-  <div class="trades-bal" id="trades-bal">
-    <div class="trades-bal-main">
-      <div class="trades-bal-val" id="tr-equity">$—</div>
-      <div class="trades-bal-lbl">Account Equity</div>
-    </div>
-    <div class="trades-bal-sub">
-      <div class="trades-bal-val" id="tr-upnl" style="color:#3d5068">$0.00</div>
-      <div class="trades-bal-lbl">Unrealized P&L</div>
-    </div>
-    <div class="trades-bal-sub">
-      <div class="trades-bal-val" id="tr-avail" style="color:#3d5068">$—</div>
-      <div class="trades-bal-lbl">Available</div>
-    </div>
-  </div>
-
-  <div class="sh">Active Positions</div>
-  <div id="positions-list"><div class="empty">No open positions</div></div>
-
-  <div class="sh" style="display:flex;justify-content:space-between;align-items:center">
-    <span>Open Manual Trade</span>
-    <span style="font-size:9px;color:#3d5068;letter-spacing:.06em">HYPERLIQUID</span>
-  </div>
-  <div class="manual-form">
-    <div class="mf-row">
-      <div class="mf-field">
-        <div class="mf-label">Coin</div>
-        <select class="mf-select" id="mf-coin">
-          <option value="BTC">BTC</option>
-          <option value="HYPE">HYPE</option>
-          <option value="SPX">SPX</option>
-          <option value="GOLD">GOLD</option>
-          <option value="CRUDE">CRUDE</option>
-        </select>
-      </div>
-      <div class="mf-field">
-        <div class="mf-label">Side</div>
-        <select class="mf-select" id="mf-side">
-          <option value="LONG">LONG</option>
-          <option value="SHORT">SHORT</option>
-        </select>
-      </div>
-      <div class="mf-field">
-        <div class="mf-label">Size</div>
-        <input class="mf-input" id="mf-size" type="number" step="any" placeholder="0.001">
-      </div>
-    </div>
-    <div class="mf-row">
-      <div class="mf-field">
-        <div class="mf-label">Stop Loss</div>
-        <input class="mf-input" id="mf-sl" type="number" step="any" placeholder="Optional">
-      </div>
-      <div class="mf-field">
-        <div class="mf-label">Take Profit</div>
-        <input class="mf-input" id="mf-tp" type="number" step="any" placeholder="Optional">
-      </div>
-    </div>
-    <button class="mf-open-btn" id="mf-open" onclick="manualOpenTrade()">OPEN TRADE</button>
-  </div>
-
-  <div class="sh">Last 10 Trades</div>
-  <div id="closed-list"><div class="empty">No closed trades yet</div></div>
-</div>
-
-<button class="fab" id="fab" onclick="manualRefresh()">↻</button>
-
-<nav class="bnav">
-  <button class="nb active" onclick="nav('signal',this)">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Signal
-  </button>
-  <button class="nb" onclick="nav('chart',this)">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Chart
-  </button>
-  <button class="nb" onclick="nav('levels',this)">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>Levels
-  </button>
-  <button class="nb" onclick="nav('log',this)">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>Log
-  </button>
-  <button class="nb" onclick="nav('trades',this)">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="9"/></svg>Trades
-  </button>
-  <button class="nb" onclick="nav('stats',this)">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>Stats
-  </button>
-</nav>
-
-<script src="signals.js"></script>
-<script>
-'use strict';
-const BINANCE='https://api.binance.com/api/v3', BYBIT='https://api.bybit.com/v5/market', REFRESH=120000;
-const TFS=[{l:'1W',iv:'W',w:5},{l:'1D',iv:'D',w:4},{l:'4H',iv:'240',w:3},{l:'1H',iv:'60',w:2},{l:'15m',iv:'15',w:1}];
-
-// ── MULTI-COIN STATE ──────────────────────────────────────
-// Each coin runs its own independent engine loop
-// v5.26 (2026-05-14): Added equityPct (mirrors coins-config.js v5.25 equity-proportional sizing).
-//   Static maxNotional kept as legacy fallback only — the manual-trade detector in
-//   syncPositions now prefers cachedEquity × equityPct, matching bot.js behavior.
-//   Without this, bot-opened trades at the new dynamic cap (e.g. SP500 at 1× equity)
-//   were misclassified as manual-inherited and their SL/TP weren't surfaced in the UI.
-const COINS = {
-  bitcoin:     { id:'bitcoin',     label:'BTC/USD',  sym:'BINANCE:BTCUSDT', shortLabel:'BTC',  apiSym:'BTCUSDT',  exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.007, equityPct: 0.50, maxNotional: 200, isHIP3: false },  // v5.3: re-enabled with $200 cap; v5.26: equityPct 0.50
-  hyperliquid: { id:'hyperliquid', label:'HYPE/USD', sym:'BYBIT:HYPEUSDT',  shortLabel:'HYPE', apiSym:'HYPEUSDT', exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, equityPct: 0.25, maxNotional: 100, isHIP3: false },  // v5.5: halved $200→$100 after 3 consecutive SL hits (synced w/ bot.js); v5.26: equityPct 0.25
-  sp500:       { id:'sp500',       label:'S&P500',   sym:'OANDA:SPX500USD', shortLabel:'SPX',  apiSym:'xyz:SP500', exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, equityPct: 1.00, maxNotional: 500, isHIP3: true },  // v5.5: minRR 1.5→1.2 (synced w/ bot.js); v5.26: equityPct 1.00
-  gold:        { id:'gold',        label:'GOLD/USD', sym:'OANDA:XAUUSD',    shortLabel:'GOLD', apiSym:'xyz:GOLD', exchange:'hyperliquid', minRR: 1.5, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.00, maxNotional: 300, isHIP3: true },  // v5.31: DISABLED (equityPct 0 = no auto-trade) — lost in every window; crude took commodity slot. Still scanned/displayed. Restore 0.40 to re-enable.
-  crude:       { id:'crude',       label:'CRUDE/USD',sym:'OANDA:WTICOUSD',  shortLabel:'CRUDE',apiSym:'xyz:CL',   exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.20, maxNotional: 200, isHIP3: true },  // v5.30: WTI crude (xyz:CL) — new asset, conservative equityPct 0.20 (synced w/ coins-config.js)
-};
-
-// v5.22 (2026-05-08): Pure signal-engine functions imported from /signals.js (UMD).
-// Plan item #6 of the May 8 health-check — eliminates the duplicate-bug class
-// where dms/detectRetest/atr/calcADX/levels/sessions had to be edited in both
-// bot.js (now signals.js) AND this file. Inline duplicates removed below.
-const {
-  fmt, atr, calcADX, trendExhaustion48h,
-  isSwingHigh, isSwingLow, detectFlippedLevel, scoreLevel, classifyStrength,
-  countLevelTests, findVPeaks, findPDHL,
-  getSessionBoundaries, getCurrentSession,
-  getAsiaRange, getAsiaLevels, getNYRange, getNYLevels, getLondonRange, getLondonLevels,
-  findFibLevels, findDMCLevels, findNextLevel, findStopLevel, calcRR,
-  hasRejection, hasStrongBodyBounce, hasMomentumAgainst, hasLTFAlignment,
-  detectRetest, dms, nextMove, scoreSignal,
-  CHOP_FILTER, MAX_HOLD_HOURS, FUNDING_EXIT_THRESHOLD, BREAKOUT_QUALITY, EXHAUSTION_THRESHOLDS,
-} = window.DMSSignals;
-
-
-// v5.5 changelog (2026-04-16, synced w/ bot.js):
-//   - Inherited-manual-position policy (localStorage 'hl_inherit_manual_positions').
+// DMS Signal Bot v5.17 -- AUTO-TRADE edition (v5.17 = post-break confirmation, GOLD notional cap, 2026-05-06)
+// Mirrors the DMS algorithm from index.html exactly -- same levels, same scoring, same signals
+// Now also executes trades on Hyperliquid with TP/SL/trailing stops
+// Node 18+ required (uses built-in fetch)
+//
+// v5.0 changelog:
+//   - Partial TP (50% at TP1, remainder trails)
+//   - GTC limit orders for HIP-3 assets (fee optimization)
+//   - maxNotional caps for SP500/GOLD ($500) with double-check safety net
+//   - Post-loss cooldown per coin (configurable, default 10min)
+//   - Daily loss circuit breaker (halves position size)
+//   - Fee-adjusted R:R with per-coin feeEst (GOLD 12bps for builder fees)
+//   - Ranging market detector (whipsaw protection)
+//   - SP500 US-session-only filter (13:00-21:00 UTC)
+//   - Fresh price fetch in executeTrade (stale price fix)
+//   - Per-coin minStopPct floors (BTC 0.7%, others 0.5%)
+//
+// v5.2 changelog:
+//   - 3-stage partial TP ladder: 34% at 1.0R, 33% at 1.8R, 33% trail (was 50/50 2-stage)
+//   - HIP-3 TP orders use limit trigger (isMarket:false) to avoid taker fees (~8 bps saved on GOLD)
+//   - SL remains market trigger (isMarket:true) for guaranteed fills
+//
+// v5.29 changelog (2026-05-18):
+//   - BREAKOUT QUALITY EXEMPTION FOR VALIDATED RETESTS: The v5.16 breakout quality
+//     penalty (-15% conf) now skips when detectRetest has confirmed the pattern with
+//     breakCloseCount >= 2. Rationale: the penalty penalizes entries whose price AND
+//     level are both inside the 48h range, flagging them as "noise oscillation." But a
+//     genuine breakout from consolidation always starts inside the range — the break is
+//     what takes it out. The Retest pattern validation (multiple closes held beyond the
+//     level + retest touch + conviction candle) already proves the break is structural.
+//     Applying the penalty on top is circular and was the decisive blocker on May 17:
+//     HYPE LONG at $41.35 with 24 break-closes had 40% conf → 25% after penalty →
+//     blocked. The +14% move that followed was missed entirely.
+//   - Counterfactual: May 17 HYPE entry would have fired at ~04:00 UTC ($42.40) with
+//     R:R > 1.0. Estimated gain: $5-10 at equity-proportional sizing.
+//   - Safety preserved: retest validation, counter-trend gate (40%), chop filter (ADX≥20),
+//     regime block, and R:R minimum all remain active. The penalty still fires for signals
+//     without structural backing (breakCloseCount < 2 or pattern not confirmed).
+//
+// v5.3 changelog (2026-04-13):
+//   - Regime-aware directional blocking: when 1W + 1D agree on direction, blocks counter-regime
+//     trades with <80% confidence. Replaces the proposed blanket HYPE short block — allows
+//     high-conviction counter-regime trades while blocking low-conviction ones.
+//   - Combined notional exposure limit: caps total open notional at 8× equity across all positions.
+//     Prevents correlated reversal blow-ups (Apr 12 had 7.3× — below cap, but close).
+//   - Dynamic trailing stop: after TP2 fills, trail multiplier widens by +1.0R (HIP-3: 2.5→3.5,
+//     standard: 2.0→3.0) to let runners ride on strong trend days.
+//   - TP1 breakeven safeguard: when TP1 fills (position drops to <67% of original), SL is
+//     immediately moved to breakeven. Prevents the Apr 12 HYPE scenario where TP1 earned +$1.03
+//     but the trailing half lost -$2.30 because SL was still below entry.
+//
+// v5.4 changelog (2026-04-15):
+//   - SP500 session-scaled maxNotional for LONG entries (reinforcing Apr 14 winning tactic).
+//     Replaces the flat $500 cap + hard out-of-session block with a tiered scheme:
+//       . STRONG UP (1W+1D both LONG AND conf >= 70%) + US session (13-21 UTC): $750
+//       . UP (1W+1D both LONG) + US session:                                    $500 (= previous)
+//       . UP + non-US session:                                                  $200 (NEW — was blocked)
+//       . Anything else + LONG:                                                 blocked
+//     Shorts unchanged (allowed any session, default $500 cap). GOLD and other assets unchanged.
+//     Rationale: Apr 14 report showed manual SP500 longs ($706 notional) captured edge the bot
+//     was missing (+$4.55 realized). Tiered cap lets the bot replicate that size in genuinely
+//     strong regimes while preserving safety otherwise. Implementation: sp500EffectiveCap() helper
+//     sets coinState[coinId].effectiveMaxNotional, which executeTrade reads in place of coin.maxNotional.
+//
+// v5.6 changelog (2026-04-18):
+//   - SP500 session-scaled cap increase: STRONG UP + US raised $750 → $1,500 (3× base).
+//     UP + US raised $500 → $750. PARTIAL UP + US raised $350 → $500.
+//     Rationale: Apr 17 manual SP500 long at $2,132 notional captured +$19.85 — best single
+//     trade in 12 days. 5/5 consecutive SP500 US-session longs profitable (+$31.19 cumulative).
+//     The edge is proven and under-exploited by the bot. $1,500 STRONG UP cap lets the bot
+//     capture ~70% of manual-level returns while staying within automated risk limits.
+//     Non-US-session and non-UP tiers unchanged (risk preservation).
+//
+//   - CRITICAL FIX: Duplicate SL/TP order spam (100+ orders on BTC reported Apr 17).
+//     Root causes:
+//       (a) closePosition() did not cancel trigger orders before flipping — old short's SL/TP
+//           stayed on-exchange when position flipped to long, then stacked with new orders.
+//       (b) trailStops() placed new SL+TP every 30s cycle even when cancelTriggerOrders() failed
+//           silently (error caught, returned 0, but code proceeded to place new orders).
+//       (c) No minimum SL change threshold — even 1 cent of price movement triggered a full
+//           cancel-and-replace cycle, creating unnecessary order churn.
+//     Fixes:
+//       (a) closePosition() now cancels all trigger orders for the asset BEFORE closing.
+//       (b) trailStops() now verifies cancels succeeded (fetches orders again, retries once)
+//           and REFUSES to place new orders if old triggers still exist.
+//       (c) Added 0.05% minimum SL change threshold to skip negligible updates.
+//
+//   - Manual position SL/TP protection: 'ignore' mode now places one-time protective SL (2%
+//     for standard, 1.5% for HIP-3) and TP (2R) on manual positions. Previously, manual
+//     positions had NO automated protection at all — the orphaned HYPE short on Apr 17 had
+//     -$4.90 unrealized with no stop. Bot still does NOT trail or adjust these orders after
+//     initial placement.
+//
+// v5.5 changelog (2026-04-16):
+//   - Inherited-manual-position policy (INHERIT_MANUAL_POSITIONS env var).
 //     When syncPositions discovers a *new* position whose entry-notional exceeds the asset's
 //     maxNotional by > 1.05×, it is almost certainly a manual trade by Tomaž. Three modes:
-//       'ignore' (DEFAULT, safest): do NOT add to activeTrades. Bot will not place SL/TP
-//          or trail on the position. Manage manually. Telegram alert fires once.
-//       'trim'  : bot places a reduce-only IOC market order to bring notional back under
-//          the cap, then tracks the trimmed remainder normally.
-//       'manage': previous behavior — adopt the oversized position at full size (NOT
-//          recommended; this is what caused -$3.19 on Apr 15).
-//     Detection is notional-based: |szi|*entryPx > coin.maxNotional * 1.05.
-//     Set via: localStorage.setItem('hl_inherit_manual_positions', 'ignore')
+//       . 'ignore' (DEFAULT): do NOT add to activeTrades. Bot places one-time protective SL/TP
+//         (v5.6) but will NOT trail, adjust, or re-place orders. Telegram alert fires once per
+//         detection with the SL/TP levels. Previously had no protection at all.
+//       . 'trim': bot places a reduce-only market order to bring the position down to
+//         maxNotional size, THEN adds the trimmed position to activeTrades for normal
+//         management. Alert fires with the trim details. Use only after a period of stable
+//         'ignore' behavior.
+//       . 'manage': previous behavior — adopt the oversized position at full size. Not
+//         recommended; this is what caused -$3.19 on Apr 15 (bot's SL fired on a 2× position).
+//     Detection is notional-based: |szi|*entryPx > coin.maxNotional * 1.05. To avoid repeated
+//     alerts on the same position, a `manualInheritedSeen` set tracks positions we've already
+//     classified this session.
+//   - Bot/Manual P&L split: closed trades now carry a `source` field (`bot` | `manual` | `unknown`)
+//     inferred at close time from the *opening* fill's notional. Daily report generator
+//     (tools/daily-report.js) reads this and produces the split.
 //
-// v5.5 config: inherited-manual-position policy — 'ignore' (default) / 'trim' / 'manage'
-function _inheritManualPolicy(){
-  const v = (localStorage.getItem('hl_inherit_manual_positions') || 'ignore').toLowerCase();
-  if (!['ignore','trim','manage'].includes(v)) {
-    console.warn(`WARN: invalid hl_inherit_manual_positions=${v}, defaulting to 'ignore'`);
-    return 'ignore';
-  }
-  return v;
-}
-const MANUAL_NOTIONAL_MULT = parseFloat(localStorage.getItem('hl_manual_notional_mult') || '1.05');
+// v5.10 changelog (2026-04-23):
+//   - Missed-signals diagnostic log: every signal that is evaluated but filtered (regime block,
+//     counter-trend, cooldown, circuit breaker, exposure cap, exhaustion, low confidence, majority
+//     mismatch, session filter, whipsaw protection, manual position, stacking, max positions) is
+//     now recorded to .missed_signals.json with timestamp, coin, signal direction, confidence, and
+//     the specific filter reason. Entries auto-prune after 48h. daily-report.js can read this file
+//     to diagnose why the bot was inactive on any given day.
+//   - BTC regime-scaled effective cap (btcEffectiveCap): mirrors sp500EffectiveCap() pattern.
+//     Manual BTC longs at 3× the $200 cap have been consistently profitable (Apr 22: +$4.53).
+//     New tiered LONG caps:
+//       . STRONG UP (1W+1D both LONG, conf >= 70%): $400 (2× base)
+//       . UP (1W+1D both LONG):                     $200 (unchanged)
+//       . PARTIAL UP (one LONG, other neutral):      $150
+//       . Default / SHORT:                           $200 (unchanged)
+//     SHORT entries: always $200 (no regime scaling). BTC has no session filter.
+//
+// v5.12 changelog (2026-04-25):
+//   - ADX CHOP FILTER: Adds calcADX() function and a per-coin range-detection gate
+//     in maybeAutoTrade. When the entry-TF ADX is below threshold (default 20 for HYPE),
+//     the signal is blocked as "range-bound." Only applies to lower TFs (15m/1H/4H);
+//     1W/1D entries are exempt (rarely whipsaw on the same horizon).
+//   - Rationale: Apr 20-24 HYPE produced 4 SL hits in 6 days (-$4.66) in a tight
+//     $40.50-$42.80 range. The Retest pattern correctly identifies level breaks and
+//     retests, but in a ranging market these "breaks" are false and don't carry through
+//     to the next level. ADX < 20 would have filtered 2-3 of these losing entries.
+//   - Configuration: CHOP_FILTER object per coin. Currently enabled for HYPE only.
+//     Expand by setting enabled: true for other coins as needed.
+//   - Sends Telegram alert when a signal is blocked by the chop filter.
+//
+// v5.17 changelog (2026-05-06):
+//   - POST-BREAK CONFIRMATION FILTER: detectRetest() now counts how many candles between
+//     the break bar and the retest bar closed beyond the level. Requires >= 2 (MIN_BREAK_CLOSES).
+//     Filters single-candle false breakdowns — directly addresses the May 5 GOLD short where
+//     one 1H candle spiked to $4,513.9 (through $4,538 support) and immediately reversed;
+//     the bot shorted the retest and caught a 32h grind higher to SL at $4,591.7 (-$5.60 net).
+//     With this filter, that entry would have been rejected: only 1 candle closed below the level.
+//   - GOLD maxNotional $500→$300: A single GOLD SL (-$5.60) wiped 3 HYPE wins (+$3.21 net).
+//     GOLD's wider stops (minRR 1.5, 0.5% minStopPct) on $500 notional produce outsized losses.
+//     $300 cap limits max single-trade damage to ~$3.36 at 1.12% adverse move.
+//
+// v5.15 changelog (2026-05-02):
+//   - POST-EXHAUSTION RE-ENTRY FILTER: After 2+ TP closes on the same coin+direction
+//     within 4 hours, blocks same-direction re-entry on that asset for 4 hours from the
+//     last TP close. Prevents chasing exhausted moves — directly addresses the Apr 29→30
+//     GOLD SL where the bot re-shorted at $4,529 after 3 profitable TP partials and caught
+//     a mean-reversion bounce to $4,574 (-$2.65). The filter tracks TP closes in a
+//     tpCloseLog map (coinId -> [{ts, side}]) and checks in executeTrade before entry.
+//     Configurable via EXHAUSTION_TP_COUNT (default 2) and EXHAUSTION_COOLDOWN_MS (default 4h).
+//
+// v5.14 changelog (2026-05-01):
+//   - GOLD SESSION FILTER EXTENDED TO SHORTS: Previously only LONGs were blocked outside
+//     13:00-20:00 UTC. Now SHORTs are also blocked outside 06:00-17:00 UTC (EU open through
+//     early US afternoon). Evidence: Apr 29 GOLD short entered at 18:33 UTC caught overnight
+//     mean-reversion and hit SL for -$2.65 (closed Apr 30 00:47 UTC at $4,573.9 — a 1% bounce
+//     from the day's lows). Winning GOLD shorts consistently enter during 07:00-15:00 UTC
+//     (EU/US overlap). The 06:00-17:00 window gives a 1-hour buffer on each side.
+//     Applied in both maybeAutoTrade and the multi-TF dedup path.
+//
+// v5.13 changelog (2026-04-29):
+//   - RANGE-AWARENESS FILTER (BTC): Detects where price sits within the 48h high-low range.
+//     Shorts near the bottom 30% or longs near the top 30% get a 12% confidence penalty.
+//     Prevents entries like Apr 28's BTC short at $76,136 (near range support) that got
+//     squeezed to $76,878 for a -$2.13 loss. Computed from existing 4H candle data in runCoin.
+//   - FUNDING RATE SIGNAL AMPLIFIER (HIP-3 assets): Fetches current predicted funding rate
+//     from Hyperliquid metaAndAssetCtxs. When |rate| > 0.01%/8h and funding direction aligns
+//     with the Retest signal (positive rate favors SHORT, negative favors LONG), confidence
+//     gets an 8% boost. Rationale: Apr 28 GOLD shorts collected +$0.107 in funding — structural
+//     carry that amplifies the Retest edge. Applies to SP500 and GOLD (isHIP3 assets).
+//   - BTC TIME-OF-DAY FILTER: 10% confidence penalty during US session (13:00-20:00 UTC).
+//     BTC frequently mean-reverts during these hours due to institutional hedging flows.
+//     Apr 28's losing short entered at 13:09 UTC; the successful Apr 27 short entered at
+//     ~21:45 UTC (low-liquidity Asian hours). Does not hard-block — just makes it harder
+//     for marginal signals to fire during whipsaw-prone hours.
+//
+// v5.11 changelog (2026-04-24):
+//   - STRATEGY REPLACEMENT: Retest strategy is now the sole entry engine. The v4.9-v5.10
+//     trap / strong-body-bounce / breakout / blind-entry logic has been removed.
+//     (Backup preserved at bot.js.bak-v5.11.)
+//   - Pattern Tomaž hand-picked as highest conviction:
+//       1) Price BREAKS a level (up or down) — at least one close beyond level by
+//          max(0.3 ATR, 0.15%).
+//       2) Price RETESTS the level from the broken side — wicks across are allowed,
+//          but no candle may CLOSE back through the level between the retest and now.
+//       3) A CONVICTION candle (current bar) closes in the continuation direction
+//          with a body >= 0.5 × ATR. This is the entry trigger.
+//   - SL: far side of the tested level + max(0.3 ATR, 0.2%) buffer, with the per-coin
+//         minStopPct floor from current price enforced.
+//   - TP: next level in continuation direction (findNextLevel — unchanged).
+//   - Runs on every TF (1W / 1D / 4H / 1H / 15m). Multi-TF confluence, confidence
+//     aggregation, dedup, counter-trend blocking in maybeAutoTrade — all unchanged.
+//   - Return contract preserved: {sig, type:'BLIND_ENTRY', level, target, rr,
+//     stopPrice, strength, score, reason}. reason prefix is "RETEST <TF>" for logs.
+//   - Removed helpers are still available in bot.js (hasRejection, hasStrongBodyBounce,
+//     hasMomentumAgainst) — hasLTFAlignment is still used to gate 1W/1D retests.
 
-// v5.6: SP500 session-scaled maxNotional helper (synced w/ bot.js v5.6).
-// Returns { cap, tier }. cap=0 means "do not open this LONG".
-// Shorts fall through to the coin default cap regardless of session.
-// v5.5: Added PARTIAL UP tiers (one of 1W/1D LONG, other NEUTRAL — was too restrictive).
-// v5.6: Raised caps — STRONG UP+US $750→$1500, UP+US $500→$750, PARTIAL UP+US $350→$500.
-function sp500EffectiveCap(sig, conf, results) {
-  const defaultCap = (COINS.sp500 && COINS.sp500.maxNotional) || 500;
-  if (sig !== 'LONG') return { cap: defaultCap, tier: 'SHORT/default' };
-  const utcHour = new Date().getUTCHours();
-  const inUSSession = utcHour >= 13 && utcHour < 21;
-  const wk = results && results['1W'] && results['1W'].sig;
-  const dy = results && results['1D'] && results['1D'].sig;
-  const regimeUp = wk === 'LONG' && dy === 'LONG';
-  const partialUp = (wk === 'LONG' || dy === 'LONG') && wk !== 'SHORT' && dy !== 'SHORT';
-  const strongUp = regimeUp && (typeof conf === 'number' && conf >= 70);
-  if (strongUp && inUSSession)   return { cap: 1500, tier: 'STRONG UP + US (v5.6)' };
-  if (regimeUp && inUSSession)   return { cap: 750, tier: 'UP + US (v5.6)' };
-  if (regimeUp && !inUSSession)  return { cap: 200, tier: 'UP + non-US' };
-  if (partialUp && inUSSession)  return { cap: 500, tier: 'PARTIAL UP + US (v5.6)' };
-  if (partialUp && !inUSSession) return { cap: 150, tier: 'PARTIAL UP + non-US (v5.5)' };
-  return { cap: 0, tier: `regime-not-UP (1W=${wk||'n/a'}, 1D=${dy||'n/a'}, US=${inUSSession})` };
-}
+const fs    = require('fs');
+const path  = require('path');
+const http  = require('http');                  // v5.22: health-page HTTP server
+const ethers = require('ethers');
 
-const HL_INFO = 'https://api.hyperliquid.xyz/info';
-const HL_INTERVALS = { '1W':'1w', '1D':'1d', '4H':'4h', '1H':'1h', '15m':'15m' };
-let activeCoin = 'bitcoin'; // currently viewed coin
-
-// v5.0 FIX #6: Single source of truth for symbol-to-coinId mapping (was duplicated 8+ times)
-const SYM_TO_COIN_ID = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:SP500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold', CRUDE:'crude', CL:'crude', 'xyz:CL':'crude' };
-
-// Per-coin state — keyed by coin id
-const coinState = {
-  bitcoin:  { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
-  hyperliquid: { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
-  sp500:    { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
-  gold:     { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
-  crude:    { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
-};
-
-// Convenience accessors for active coin (used by render functions)
-function cs(){ return coinState[activeCoin]; }
-let tvLoaded=false;
-// Legacy aliases pointing to active coin state (updated by switchCoin)
-let results={}, allLevels=[], price=0, htfDir='UNCLEAR';
-function syncActiveState(){
-  const s=cs(); results=s.results; allLevels=s.allLevels; price=s.price; htfDir=s.htfDir;
-}
-
-// ── COIN SWITCHING ───────────────────────────────────────
-function switchCoin(coinId){
-  if(!COINS[coinId]) return;
-  activeCoin = coinId;
-  syncActiveState();
-  // Update header label
-  document.getElementById('coin-sel').value = coinId;
-  // Re-render with this coin's cached state
-  renderHero();
-  renderCards();
-  renderLevels();
-  renderTopFromState();
-  // Update status bar + session banner to reflect current coin
-  const s = cs();
-  if(s.price > 0){
-    setStatus('ok', COINS[coinId].shortLabel+' Live · --:--:--');
-  } else {
-    setStatus('loading', 'Loading '+COINS[coinId].shortLabel+'...');
-  }
-  if(s.candles15m) renderSessionBanner(s.candles15m, coinId);
-  else document.getElementById('session-banner').style.display='none';
-  if(s.lastStory) renderNM(s.lastStory);
-  else renderNM({dir:'UNCLEAR', reason:'Loading...', story:null});
-  // Reload TradingView chart with new symbol
-  tvLoaded = false;
-  if(document.getElementById('page-chart').style.display!=='none'){
-    loadTV();
-  }
-}
-
-function renderTopFromState(){
-  const s = cs();
-  if(s.price > 0){
-    document.getElementById('tb-price').textContent = '$'+fmt(s.price);
-    document.getElementById('dot').style.background = '#00e676';
-    const chg = document.getElementById('tb-chg');
-    if(chg && s.change !== undefined){
-      chg.style.display = '';
-      chg.textContent = (s.change>=0?'+':'')+s.change.toFixed(2)+'%';
-      chg.style.background = s.change>=0?'rgba(0,230,118,.15)':'rgba(255,61,90,.15)';
-      chg.style.color = s.change>=0?'#00e676':'#ff3d5a';
-    }
-  }
-}
-
-// ── SETTINGS ──────────────────────────────────────────────
-function toggleSettings(){
-  const p=document.getElementById('settings-panel');
-  const o=document.getElementById('settings-overlay');
-  const show=p.style.display==='none';
-  p.style.display=show?'block':'none';
-  o.style.display=show?'block':'none';
-}
-
-function loadSettings(){
-  document.getElementById('tg-token').value  = localStorage.getItem('tg_token')||'';
-  document.getElementById('tg-chatid').value = localStorage.getItem('tg_chatid')||'';
-  document.getElementById('alert-short').checked   = localStorage.getItem('alert_short')!=='false';
-  document.getElementById('alert-long').checked    = localStorage.getItem('alert_long')!=='false';
-  document.getElementById('alert-atlevel').checked = localStorage.getItem('alert_atlevel')==='true';
-  document.getElementById('alert-htfonly').checked = localStorage.getItem('alert_htfonly')==='true';
-  document.getElementById('alert-toast').checked   = localStorage.getItem('alert_toast')!=='false';
-  document.getElementById('min-rr').value = localStorage.getItem('min_rr') || '1.5';
-  document.getElementById('account-size').value = localStorage.getItem('account_size') || '100';
-  document.getElementById('risk-pct').value = localStorage.getItem('risk_pct') || '1';
-  // Hyperliquid settings
-  document.getElementById('hl-auto-trade').checked = localStorage.getItem('hl_auto_trade') === 'true';
-  document.getElementById('hl-max-trades').value = localStorage.getItem('hl_max_trades') || '10';
-  document.getElementById('hl-min-conf').value = localStorage.getItem('hl_min_conf') || '50';
-  document.getElementById('hl-master-addr').value = localStorage.getItem('hl_master_addr') || '';
-  // Don't display the key, just show status if configured
-  if(localStorage.getItem('hl_wallet_key')){
-    document.getElementById('hl-wallet-key').value = localStorage.getItem('hl_wallet_key');
-    document.getElementById('hl-status').textContent = 'Key saved · will connect on startup';
-    document.getElementById('hl-status').style.color = '#ffc107';
-  }
-}
-function saveTelegram(){
-  const token  = document.getElementById('tg-token').value.trim();
-  const chatid = document.getElementById('tg-chatid').value.trim();
-  if(!token||!chatid){document.getElementById('tg-status').textContent='⚠ Please enter both token and chat ID';return;}
-  localStorage.setItem('tg_token', token);
-  localStorage.setItem('tg_chatid', chatid);
-  localStorage.setItem('alert_short',  document.getElementById('alert-short').checked);
-  localStorage.setItem('alert_long',   document.getElementById('alert-long').checked);
-  localStorage.setItem('alert_atlevel',document.getElementById('alert-atlevel').checked);
-  localStorage.setItem('alert_htfonly',document.getElementById('alert-htfonly').checked);
-  localStorage.setItem('alert_toast',  document.getElementById('alert-toast').checked);
-  document.getElementById('tg-status').textContent='Saving...';
-  sendTelegram('✅ DMS Signal alerts are active!\ntbracko.github.io/dms-signal').then(ok=>{
-    document.getElementById('tg-status').textContent = ok ? '✓ Test message sent! Check Telegram.' : '✗ Failed — check token and chat ID';
+// -- CONFIG (env vars or .env file) ------------------------------------------
+(function loadDotEnv(){
+  const f = path.join(__dirname, '.env');
+  if(!fs.existsSync(f)) return;
+  fs.readFileSync(f,'utf8').split('\n').forEach(line=>{
+    const m = line.match(/^\s*([^#=\s][^=]*?)\s*=\s*(.*)\s*$/);
+    if(m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^['"]|['"]$/g,'');
   });
+})();
+
+const TG_TOKEN  = process.env.TG_TOKEN;
+const TG_CHATID = process.env.TG_CHATID;
+const WANT_LONG     = process.env.ALERT_LONG    !== 'false';
+const WANT_SHORT    = process.env.ALERT_SHORT   !== 'false';
+const WANT_ATLEVEL  = process.env.ALERT_ATLEVEL === 'true';
+const MIN_RR        = parseFloat(process.env.MIN_RR || '1.0');
+const INTERVAL_MS   = parseInt(process.env.INTERVAL_MS || '120000', 10);
+const DEDUP_FILE    = path.join(__dirname, '.dedup.json');
+
+// -- AUTO-TRADE CONFIG --------------------------------------------------------
+const HL_PRIVATE_KEY  = process.env.HL_PRIVATE_KEY;   // Agent wallet private key
+const HL_MASTER_ADDR  = process.env.HL_MASTER_ADDR || '';  // Master account address (if agent wallet)
+const AUTO_TRADE      = process.env.AUTO_TRADE === 'true';
+const RISK_PCT        = parseFloat(process.env.RISK_PCT || '2');      // % of account to risk per trade
+const MIN_CONFIDENCE  = parseInt(process.env.MIN_CONFIDENCE || '50'); // base min confidence %
+const MAX_TRADES_DAY  = parseInt(process.env.MAX_TRADES_DAY || '10');
+const TRAIL_INTERVAL  = parseInt(process.env.TRAIL_INTERVAL || '30000'); // check trailing every 30s
+// v5.20 (2026-05-08): Hard cap on max-loss-per-trade. If level-based SL implies an
+// adverse move > MAX_LOSS_PCT (default 3%), executeTrade skips the entry. Catches
+// the May 3 HYPE pattern where SL was 4.7% from entry — reward asymmetry too poor
+// after fees. Tunable per-deploy via env var.
+const MAX_LOSS_PCT    = parseFloat(process.env.MAX_LOSS_PCT || '0.03'); // 3% of notional
+
+// v5.5: Inherited-manual-position policy — 'ignore' (default) / 'trim' / 'manage'
+const INHERIT_MANUAL_POSITIONS = (process.env.INHERIT_MANUAL_POSITIONS || 'ignore').toLowerCase();
+const MANUAL_NOTIONAL_MULT     = parseFloat(process.env.MANUAL_NOTIONAL_MULT || '1.05'); // tag as manual if notional > cap × this
+if (!['ignore','trim','manage'].includes(INHERIT_MANUAL_POSITIONS)) {
+  console.warn(`WARN: invalid INHERIT_MANUAL_POSITIONS=${INHERIT_MANUAL_POSITIONS}, defaulting to 'ignore'`);
 }
 
-// ── TELEGRAM ──────────────────────────────────────────────
+if(!TG_TOKEN || !TG_CHATID){
+  console.error('ERROR: TG_TOKEN and TG_CHATID must be set.');
+  process.exit(1);
+}
+
+// -- COINS (BTC, HYPE, SPX + GOLD via Hyperliquid HIP-3) ---------------------
+// v5.18 (2026-05-08): COINS metadata moved to ./coins-config.js as the single source of
+// truth, shared with daily-report.js and the backtester. Per-coin sizing/fees are edited
+// there now; this file only consumes them. Eliminates the v5.17 GOLD-cap drift bug where
+// daily-report.js had GOLD at $500 while bot.js had reduced it to $300.
+const { COINS, DAILY_LOSS_PCT, getMaxNotional } = require('./coins-config');
+
+const TFS = [
+  { l:'1W', w:5 },
+  { l:'1D', w:4 },
+  { l:'4H', w:3 },
+  { l:'1H', w:2 },
+  { l:'15m',w:1 },
+];
+
+const INTERVAL_MAP = {
+  binance: { '1W':'1w', '1D':'1d', '4H':'4h', '1H':'1h', '15m':'15m' },
+  bybit:   { '1W':'W',  '1D':'D',  '4H':'240', '1H':'60', '15m':'15' }
+};
+const HL_INTERVALS = { '1W':'1w', '1D':'1d', '4H':'4h', '1H':'1h', '15m':'15m' };
+
+const LIMITS = { '1W':104, '1D':180, '4H':500, '1H':500, '15m':192 };
+
+const BINANCE = 'https://api.binance.com/api/v3';
+const BYBIT   = 'https://api.bybit.com/v5/market';
+const HL_API  = 'https://api.hyperliquid.xyz';
+
+
+// -- STATE --------------------------------------------------------------------
+const coinState = {};  // coinId -> { price, htfDir, results: { tf: dmsResult } }
+const ACTIVE_TRADES_FILE = path.join(__dirname, '.active_trades.json');
+const CLOSED_TRADES_FILE = path.join(__dirname, '.closed_trades.json');
+const MANUAL_SEEN_FILE   = path.join(__dirname, '.manual_seen.json');  // v5.7: persist manual-position detection across restarts
+const MISSED_SIGNALS_FILE = path.join(__dirname, '.missed_signals.json');  // v5.10: diagnostic log of filtered signals
+
+// -- MISSED SIGNALS LOG (v5.10) -----------------------------------------------
+// Records every signal that was evaluated but filtered, with the reason.
+// Persists to disk so daily-report.js can read it and diagnose bot inactivity.
+function loadMissedSignals() {
+  try { return JSON.parse(fs.readFileSync(MISSED_SIGNALS_FILE, 'utf8')); } catch { return []; }
+}
+function saveMissedSignals(arr) {
+  fs.writeFileSync(MISSED_SIGNALS_FILE, JSON.stringify(arr, null, 2));
+}
+function logMissedSignal(coinId, sig, conf, reason, details) {
+  const missed = loadMissedSignals();
+  // Prune entries older than 48h to prevent unbounded growth
+  const cutoff = Date.now() - 48 * 3600000;
+  const pruned = missed.filter(m => m.ts > cutoff);
+  pruned.push({
+    ts: Date.now(),
+    time: new Date().toISOString(),
+    coin: COINS[coinId] ? COINS[coinId].label : coinId,
+    coinId,
+    signal: sig,
+    confidence: conf,
+    reason,
+    details: details || null,
+  });
+  saveMissedSignals(pruned);
+}
+
+// -- DEDUP ---------------------------------------------------------------------
+function loadDedup(){
+  try{ return JSON.parse(fs.readFileSync(DEDUP_FILE,'utf8')); }catch{ return {}; }
+}
+function saveDedup(d){ fs.writeFileSync(DEDUP_FILE, JSON.stringify(d)); }
+function isDedupSuppressed(coinId, tf, type, level){
+  const d   = loadDedup();
+  const key = `${coinId}:${tf}:${type}:${Math.round(level)}`;
+  const win = type === 'BLIND_ENTRY' ? 28800000 : 14400000;
+  const now = Date.now();
+  // v5.0 FIX #3: Prune based on each entry's actual window, not a fixed 8h
+  // Old code used 28800000 for all prune checks, meaning 4h entries lingered in the file for 8h
+  let changed = false;
+  for(const k of Object.keys(d)){
+    const entryWindow = k.includes(':BLIND_ENTRY:') ? 28800000 : 14400000;
+    if(now - d[k] > entryWindow){ delete d[k]; changed=true; }
+  }
+  if(changed) saveDedup(d);
+  return !!(d[key] && (now - d[key]) < win);
+}
+function markDedupFired(coinId, tf, type, level){
+  const d   = loadDedup();
+  const key = `${coinId}:${tf}:${type}:${Math.round(level)}`;
+  d[key] = Date.now();
+  saveDedup(d);
+}
+
+// -- TELEGRAM ------------------------------------------------------------------
 async function sendTelegram(msg){
-  const token  = localStorage.getItem('tg_token');
-  const chatid = localStorage.getItem('tg_chatid');
-  if(!token||!chatid) return false;
   try{
-    const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{
+    const r = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({chat_id:chatid, text:msg, parse_mode:'HTML'})
+      body: JSON.stringify({ chat_id: TG_CHATID, text: msg, parse_mode:'HTML' })
     });
+    if(!r.ok) console.warn('Telegram error:', r.status, await r.text());
     return r.ok;
-  }catch{return false;}
+  }catch(e){ console.warn('Telegram fetch error:', e.message); return false; }
 }
 
-function maybeAlert(sig, tf, type, level, target, rr, coinId, state, stopPrice){
-  // NOTE: localStorage dedup is already checked in processTF before calling maybeAlert
-  // Do NOT check isDedupSuppressed here — it was already marked fired right before this call
-  coinId = coinId || activeCoin;
-  state = state || coinState[coinId];
-  const alertKey = `${coinId}_${tf}_${type}_${Math.round(level)}`;
-  if(state.sentAlerts[alertKey]) return;
-  state.sentAlerts[alertKey] = Date.now();
-  const now=Date.now();
-  // Dedup: same signal not re-alerted within 2h (was 4h — reduced to avoid missing re-entries)
-  Object.keys(state.sentAlerts).forEach(k=>{if(now-state.sentAlerts[k]>7200000)delete state.sentAlerts[k];});
-
-  const htfOnly = localStorage.getItem('alert_htfonly')==='true'; // default OFF — alert all TFs including 15m
-  if(htfOnly && tf!=='1D' && tf!=='1H') return;
-
-  const wantShort = localStorage.getItem('alert_short')!=='false';
-  const wantLong  = localStorage.getItem('alert_long')!=='false';
-  const wantLevel = localStorage.getItem('alert_atlevel')==='true';
-  const wantToast = localStorage.getItem('alert_toast')!=='false';
-
-  if((type==='FAIL_GAIN'||type==='BREAKOUT'&&sig==='SHORT') && !wantShort) return;
-  if((type==='FAIL_LOSE'||type==='BREAKOUT'&&sig==='LONG'||type==='BLIND_ENTRY') && !wantLong) return;
-  // AT_LEVEL is a watch zone only — never send as directional signal
-  if(type==='AT_LEVEL') {
-    if(!wantLevel) return;
-    // Don't send if sig leaked as SHORT/LONG (shouldn't happen but guard it)
-    if(sig !== 'NEUTRAL') return;
-  }
-
-  const icon  = sig==='LONG'?'🟢':sig==='SHORT'?'🔴':'🟡';
-  const dir   = type==='FAIL_GAIN'?'FAIL TO GAIN':type==='FAIL_LOSE'?'FAIL TO LOSE':type==='BLIND_ENTRY'?'CONFIRMED ENTRY':type==='BREAKOUT'?'BREAKOUT':'AT LEVEL';
-  const rrTxt = rr ? ` · R:R ${rr}` : '';
-  const coinLabel = COINS[coinId] ? COINS[coinId].shortLabel : coinId.toUpperCase();
-  const px = state.price || 0;
-
-  // ── In-app toast (2 lines: signal + entry/TP) — fires for ALL coins ──
-  if(wantToast){
-    const line1 = `${icon} ${coinLabel} ${sig} [${tf}]${rrTxt}`;
-    const line2 = target
-      ? `Entry: $${fmt(px)} · TP: $${fmt(target)}`
-      : `Level: $${fmt(level)}`;
-    showToast(line1, line2, sig==='SHORT');
-  }
-
-  // ── Telegram message (fires for ALL coins) ──
-  if(type==='AT_LEVEL'){
-    const msg = `${icon} <b>DMS AT LEVEL</b> · ${coinLabel} [${tf}]
-👁 Approaching $${fmt(level)} — watch 15m candle
-
-<a href="https://tbracko.github.io/dms-signal">Open DMS</a>`;
-    sendTelegram(msg);
-  } else {
-    const rrLine  = rr    ? `
-R:R <b>${rr}</b>` : '';
-    const tpLine  = target? `
-Take Profit: <b>$${fmt(target)}</b>` : '';
-    const slLevel = stopPrice || findStopLevel(
-      state.allLevels.length ? state.allLevels : [{price:level,type:sig==='SHORT'?'resistance':'support'}],
-      level, sig==='SHORT'?'short':'long'
-    );
-    const slLine  = slLevel ? `
-Stop Loss: <b>$${fmt(slLevel)}</b>` : '';
-    const msg = `${icon} <b>DMS ${sig}</b> · ${coinLabel} [${tf}]
-${dir}
-
-Entry now: <b>$${fmt(px)}</b>
-Level: <b>$${fmt(level)}</b>${tpLine}${slLine}${rrLine}
-
-<a href="https://tbracko.github.io/dms-signal">Open DMS</a>`;
-    sendTelegram(msg);
-  }
-}
-
-function showToast(line1, line2='', isShort=false){
-  const el=document.getElementById('toast');
-  el.innerHTML = line2
-    ? `<div style="font-weight:600;margin-bottom:4px">${line1}</div><div style="opacity:.75;font-size:10px">${line2}</div>`
-    : line1;
-  el.className='toast'+(isShort?' short-alert':'');
-  requestAnimationFrame(()=>{el.classList.add('show');});
-  setTimeout(()=>{el.classList.remove('show');}, 5000);
-}
-
-// ── NAV ───────────────────────────────────────────────────
-function nav(id, btn){
-  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
-  document.getElementById('page-'+id).classList.add('active');
-  btn.classList.add('active');
-  if(id==='chart'&&!tvLoaded){loadTV('240');tvLoaded=true;}
-  if(id==='stats') setTimeout(renderStats, 50);
-  if(id==='trades') renderTrades();
-}
-
-// ── TRADINGVIEW ────────────────────────────────────────────
-function loadTV(iv){
-  const w=document.getElementById('tv-wrap');
-  w.innerHTML='<div style="width:100%;height:100%"></div>';
-  const s=document.createElement('script');
-  s.src='https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
-  s.async=true;
-  s.textContent=JSON.stringify({autosize:true,symbol:COINS[activeCoin].sym,interval:iv,timezone:'Etc/UTC',theme:'dark',style:'1',locale:'en',backgroundColor:'#07090d',hide_top_toolbar:false,allow_symbol_change:false,save_image:false,hide_side_toolbar:true});
-  w.firstChild.appendChild(s);
-}
-document.getElementById('tf-bar').addEventListener('click',e=>{
-  const b=e.target.closest('.tf-btn');if(!b)return;
-  document.querySelectorAll('.tf-btn').forEach(x=>x.classList.toggle('active',x===b));
-  loadTV(b.dataset.iv);tvLoaded=true;
-});
-
-// ── API ───────────────────────────────────────────────────
-async function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
-
-// ── EXCHANGE APIs — multi-exchange candle + price fetching ──────────────
-
-// Binance: GET /api/v3/klines — returns [[openTime, o, h, l, c, vol, ...], ...]
+// -- EXCHANGE APIs -------------------------------------------------------------
 async function bnKlines(sym, interval, limit){
-  const url=`${BINANCE}/klines?symbol=${sym}&interval=${interval}&limit=${limit}`;
-  const r=await fetch(url);
+  const url = `${BINANCE}/klines?symbol=${sym}&interval=${interval}&limit=${limit}`;
+  const r   = await fetch(url);
   if(!r.ok) throw new Error(`Binance ${interval}: ${r.status}`);
-  const raw=await r.json();
-  if(!Array.isArray(raw)||raw.length<4) throw new Error(`Binance ${interval}: empty`);
+  const raw = await r.json();
+  if(!Array.isArray(raw) || raw.length < 4) throw new Error(`Binance ${interval}: empty`);
   return raw.map(k=>({
     t:k[0], o:+k[1], h:+k[2], l:+k[3], c:+k[4],
     bh:Math.max(+k[1],+k[4]), bl:Math.min(+k[1],+k[4])
   }));
 }
 
-// Bybit: GET /v5/market/kline — returns { result: { list: [[ts, o, h, l, c, vol, turnover], ...] } }
-// Note: Bybit returns newest-first, so we reverse. Intervals: 1,3,5,15,30,60,120,240,360,720,D,W,M
 async function bybitKlines(sym, interval, limit){
-  const url=`${BYBIT}/kline?category=spot&symbol=${sym}&interval=${interval}&limit=${limit}`;
-  const r=await fetch(url);
+  const url = `${BYBIT}/kline?category=spot&symbol=${sym}&interval=${interval}&limit=${limit}`;
+  const r   = await fetch(url);
   if(!r.ok) throw new Error(`Bybit ${interval}: ${r.status}`);
-  const json=await r.json();
-  if(json.retCode!==0) throw new Error(`Bybit ${interval}: ${json.retMsg}`);
-  const raw=json.result?.list;
-  if(!Array.isArray(raw)||raw.length<4) throw new Error(`Bybit ${interval}: empty`);
-  // Bybit returns newest first — reverse to oldest first (matches Binance order)
+  const json = await r.json();
+  if(json.retCode !== 0) throw new Error(`Bybit ${interval}: ${json.retMsg}`);
+  const raw = json.result?.list;
+  if(!Array.isArray(raw) || raw.length < 4) throw new Error(`Bybit ${interval}: empty`);
   return raw.reverse().map(k=>({
     t:+k[0], o:+k[1], h:+k[2], l:+k[3], c:+k[4],
     bh:Math.max(+k[1],+k[4]), bl:Math.min(+k[1],+k[4])
@@ -958,89 +387,52 @@ async function bybitKlines(sym, interval, limit){
 
 // Hyperliquid candles via candleSnapshot POST (HIP-3 assets like xyz:GOLD)
 async function hlKlines(coin, interval, limit){
-  const now=Date.now();
-  const msMap={'1w':604800000,'1d':86400000,'4h':14400000,'1h':3600000,'15m':900000};
-  const ms=msMap[interval]||86400000;
-  const startTime=now-(ms*limit*1.1);
-  const r=await fetch(HL_INFO,{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({type:'candleSnapshot',req:{coin,interval,startTime:Math.floor(startTime),endTime:Math.floor(now)}})});
+  const now = Date.now();
+  const msMap = { '1w':604800000, '1d':86400000, '4h':14400000, '1h':3600000, '15m':900000 };
+  const ms = msMap[interval] || 86400000;
+  const startTime = now - (ms * limit * 1.1);
+  const r = await fetch(HL_API + '/info', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type: 'candleSnapshot', req: { coin, interval, startTime: Math.floor(startTime), endTime: Math.floor(now) } })
+  });
   if(!r.ok) throw new Error(`HL candles ${coin} ${interval}: ${r.status}`);
-  const raw=await r.json();
-  // v4.9: lowered from 4 to 2 — HIP-3 assets (xyz:SP500, xyz:GOLD) may have limited history
-  if(!Array.isArray(raw)||raw.length<2) throw new Error(`HL candles ${coin} ${interval}: empty (${raw.length||0})`);
-  return raw.map(k=>({t:k.t,o:+k.o,h:+k.h,l:+k.l,c:+k.c,bh:Math.max(+k.o,+k.c),bl:Math.min(+k.o,+k.c)}));
+  const raw = await r.json();
+  // v4.9: lowered from 4 to 2 -- HIP-3 assets (xyz:SP500, xyz:GOLD) may have limited history
+  if(!Array.isArray(raw) || raw.length < 2) throw new Error(`HL candles ${coin} ${interval}: empty (${raw.length || 0})`);
+  return raw.map(k => ({
+    t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c,
+    bh: Math.max(+k.o, +k.c), bl: Math.min(+k.o, +k.c)
+  }));
 }
 
-// Interval mapping per exchange
-const INTERVAL_MAP = {
-  binance: { '1W':'1w', '1D':'1d', '4H':'4h', '1H':'1h', '15m':'15m' },
-  bybit:   { '1W':'W',  '1D':'D',  '4H':'240', '1H':'60', '15m':'15' }
-};
+// v4.9: reduced limits for HIP-3 assets -- they have shorter history than BTC/HYPE
+const HL_LIMITS = { '1W':26, '1D':90, '4H':200, '1H':500, '15m':192 };
 
-async function getPrice(coinId){
-  coinId=coinId||activeCoin;
-  const coin=COINS[coinId];
-  if(coin.exchange==='hyperliquid'){
-    const now=Date.now();
-    const r=await fetch(HL_INFO,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({type:'candleSnapshot',req:{coin:coin.apiSym,interval:'1h',startTime:now-7200000,endTime:now}})});
-    if(!r.ok) throw new Error('HL price: '+r.status);
-    const candles=await r.json();
-    if(!Array.isArray(candles)||candles.length===0) throw new Error('HL price: no candles');
-    const price=+candles[candles.length-1].c;
-    const r2=await fetch(HL_INFO,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({type:'candleSnapshot',req:{coin:coin.apiSym,interval:'1d',startTime:now-172800000,endTime:now}})});
-    let change=0;
-    if(r2.ok){const daily=await r2.json();if(Array.isArray(daily)&&daily.length>=2){const prev=+daily[daily.length-2].c;if(prev>0)change=((price-prev)/prev*100);}}
-    return{price,change};
-  }
-  if(coin.exchange==='bybit'){
-    const r=await fetch(`${BYBIT}/tickers?category=spot&symbol=${coin.apiSym}`);
-    if(!r.ok) throw new Error('Bybit price: '+r.status);
-    const json=await r.json();
-    const t=json.result?.list?.[0];
-    if(!t) throw new Error('Bybit price: no data');
-    const price=+t.lastPrice;
-    const prevPrice=+t.prevPrice24h||price;
-    const change=prevPrice>0?((price-prevPrice)/prevPrice*100):0;
-    return{price, change};
-  }
-  // Default: Binance
-  const r=await fetch(`${BINANCE}/ticker/24hr?symbol=${coin.apiSym}`);
-  if(!r.ok) throw new Error('Price: '+r.status);
-  const d=await r.json();
-  return{price:+d.lastPrice, change:+d.priceChangePercent};
-}
-
-async function getCandles(tf, coinId){
-  coinId=coinId||activeCoin;
-  const coin=COINS[coinId];
-  if(coin.exchange==='hyperliquid'){
-    // v4.9: reduced limits for HIP-3 assets — they have shorter history than BTC/HYPE
-    return hlKlines(coin.apiSym, HL_INTERVALS[tf.l], {  '1W':26, '1D':90, '4H':200, '1H':500, '15m':192 }[tf.l]);
-  }
-  const iv=INTERVAL_MAP[coin.exchange][tf.l];
-  const limits = { '1W':104, '1D':180, '4H':500, '1H':500, '15m':192 };
-  const limit = coin.exchange==='bybit' ? Math.min(limits[tf.l], 200) : limits[tf.l];
-  if(coin.exchange==='bybit') return bybitKlines(coin.apiSym, iv, limit);
-  return bnKlines(coin.apiSym, iv, limit);
-}
-
-// v5.13: Fetch current predicted funding rate from Hyperliquid.
-// Returns per-8h funding rate as decimal. Positive = longs pay shorts.
+// v5.13: Fetch current predicted funding rate from Hyperliquid for HIP-3 (and standard) assets.
+// Returns the per-8h funding rate as a decimal (e.g., 0.0003 = 0.03% per 8h).
+// Positive rate = longs pay shorts; negative rate = shorts pay longs.
+//
+// 2026-05-12 (audit fix): This function previously lived inside signals.js's IIFE but was
+// never exported AND referenced HL_API which wasn't in scope there — so the call site below
+// (scanCoin → coinState[coinId].fundingRate = await hlFundingRate(...)) threw ReferenceError,
+// silently caught, and fundingRate was always null. That disabled the v5.13 funding-rate
+// confidence boost in maybeAutoTrade. Restored here in bot.js next to the other HL fetch
+// helpers (hlKlines etc.), which is where it should have been all along.
 async function hlFundingRate(apiSym) {
   try {
     const isHIP3 = apiSym.startsWith('xyz:');
     const body = { type: 'metaAndAssetCtxs' };
     if (isHIP3) body.dex = 'xyz';
-    const r = await fetch(HL_INFO.replace('/info','') + '/info', {
+    const r = await fetch(HL_API + '/info', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
     if (!r.ok) return null;
     const data = await r.json();
+    // Response is [meta, assetCtxs[]] — meta.universe[i].name matches assetCtxs[i]
     const [meta, ctxs] = data;
     if (!meta || !meta.universe || !Array.isArray(ctxs)) return null;
+    // HIP-3 universe names keep the 'xyz:' prefix (e.g., 'xyz:GOLD', 'xyz:SP500')
     const assetName = isHIP3 ? apiSym : apiSym.replace('USDT', '');
     const idx = meta.universe.findIndex(u => u.name === assetName);
     if (idx < 0 || !ctxs[idx]) return null;
@@ -1051,1995 +443,134 @@ async function hlFundingRate(apiSym) {
   }
 }
 
-// aggregateCandles kept for any legacy callers (unused but harmless)
-function aggregateCandles(prices, msPerCandle){
-  const B={};
-  for(const[ts,p]of prices){
-    const b=Math.floor(ts/msPerCandle)*msPerCandle;
-    if(!B[b])B[b]={t:b,o:p,h:p,l:p,c:p};
-    else{B[b].h=Math.max(B[b].h,p);B[b].l=Math.min(B[b].l,p);B[b].c=p;}
+async function getCandles(tfLabel, coinId){
+  const coin = COINS[coinId];
+  if(coin.exchange === 'hyperliquid'){
+    return hlKlines(coin.apiSym, HL_INTERVALS[tfLabel], HL_LIMITS[tfLabel]);
   }
-  return Object.values(B).sort((a,b)=>a.t-b.t).map(k=>({...k,bh:Math.max(k.o,k.c),bl:Math.min(k.o,k.c)}));
+  const iv   = INTERVAL_MAP[coin.exchange][tfLabel];
+  const limit = coin.exchange === 'bybit' ? Math.min(LIMITS[tfLabel], 200) : LIMITS[tfLabel];
+  if(coin.exchange === 'bybit') return bybitKlines(coin.apiSym, iv, limit);
+  return bnKlines(coin.apiSym, iv, limit);
 }
 
-// ── DMS ENGINE v3 ─────────────────────────────────────────
-// Chris Hunter DMC: candle BODIES only, obvious V-peaks + PDH/PDL
-// Three phases: Draw (M/W/D) → Story (1H/4H) → Execute (15m)
-// Signal = wick through level, 15m BODY closes back inside = The Trap
-
-// ── UTILITIES ─────────────────────────────────────────────
-
-// Candle body size
-function bodySize(k){ return Math.abs(k.bh - k.bl); }
-
-// Is this a significant swing high? Pure body-based, N bars lookback each side
-
-// ── V-PEAK DETECTION ──────────────────────────────────────
-// Requires: local body extreme AND rejection wick (price wicked past but body rejected)
-// This is the core "Dumb Money" landmark — so obvious a beginner can see it
-// Detect if a level has been flipped by a clean body close on the other side
-// Returns: 'resistance' | 'support' | original type (if no flip detected)
-
-
-// Score a level: higher = more obvious = better DMC level
-// Considers: sharpness of reversal, how fast price left, # times respected
-
-
-// Has this level been revisited by a body after it was formed?
-// Returns count of times tested (0 = fresh/untested)
-// Chris Hunter: "once tested, unlikely to hold unless a new level formed there"
-function isLevelTested(c, startIdx, bh, bl, type){
-  return countLevelTests(c, startIdx, bh, bl, type) > 0;
-}
-
-// ── PDH / PDL ─────────────────────────────────────────────
-// Previous Day High/Low — primary retail cluster zone
-// ── SESSION CONTEXT ───────────────────────────────────────
-// Three sessions: Asia (00:00–08:00 UTC), London (07:00–16:00 UTC), NY (13:00–21:00 UTC)
-// Uses Intl API for DST-correct UTC offsets (London +1 in summer, NY -4 in summer)
-
-
-// Compute Asia session high/low from 15m candles (00:00–08:00 UTC today)
-// Returns { high, low, complete } — complete=true once Asia session has closed
-
-// Build Asia session levels — these become high-priority trap targets
-// Only add if Asia session is complete (range is set)
-
-// Compute NY session high/low from 15m candles
-// NY: 9:30am–4pm NY time (DST-correct)
-// Used by the following Asia session as key hunt targets
-// Score 60 (below PDH/PDL 70) — dedupes gracefully when near daily highs
-
-// NY levels — active during Asia session (next morning hunts above/below NY range)
-// Score 60 — lower than PDH/PDL so they lose dedupe battle when coincident
-
-// Compute London session high/low from 15m candles
-// London: 08:00–16:00 London time (DST-correct)
-// During NY session, London range is complete and acts as key level
-// During London session, range is live (updates as session progresses)
-
-// Build London levels — only meaningful when London session is complete (NY session active)
-// During London session these are live/building — show in banner but not as firm levels
-
-// Render the session banner on the Signal tab
-function renderSessionBanner(candles15m, coinId){
-  const el = document.getElementById('session-banner');
-  if(!el) return;
-  const session = getCurrentSession();
-  const asia = getAsiaRange(candles15m);
-  const price = coinState[coinId]?.price || 0;
-
-  // Pull story + HTF context to make trap hints smarter
-  const s = coinState[coinId];
-  const storyDir = s?.lastStory?.storyDir || 'UNCLEAR';
-  const htfDir   = s?.htfDir || 'UNCLEAR';
-  // Consensus: if BOTH story and HTF agree → strong signal; if one agrees → moderate
-  // conflictScore: +1 per bullish signal, -1 per bearish signal
-  function consensus(longIsGood){
-    // longIsGood=true means we're evaluating a LONG hint
-    let score = 0;
-    if(storyDir === 'UP')   score += (longIsGood ? 2 : -2);
-    if(storyDir === 'DOWN') score += (longIsGood ? -2 : 2);
-    if(htfDir   === 'UP')   score += (longIsGood ? 1 : -1);
-    if(htfDir   === 'DOWN') score += (longIsGood ? -1 : 1);
-    // score > 0 = agrees, score < 0 = conflicts, score = 0 = unclear
-    return score;
-  }
-  // Build a smart trap hint for a given position relative to a session range
-  // direction: 'above' (price above high), 'below' (price below low), 'inside'
-  // levelName: e.g. 'Asia High', 'London High'
-  function smartTrapHint(direction, highName, lowName){
-    if(direction === 'inside'){
-      return `<span class="sb-trap watch">Price inside range — watch breakout direction</span>`;
-    }
-    if(direction === 'above'){
-      // Price is ABOVE the high → it GAINED the level
-      // Watch for: reject back below (SHORT) or hold above (LONG continuation)
-      const cShort = consensus(false); // bearish consensus
-      const cLong  = consensus(true);  // bullish consensus
-      if(cLong >= 2) return `<span class="sb-trap long">⬆ GAINED ${highName} — holding above · story + HTF bullish</span>`;
-      if(cLong === 1) return `<span class="sb-trap long">GAINED ${highName} — holding above · story leans bullish</span>`;
-      if(cShort >= 2) return `<span class="sb-trap short">⬇ ABOVE ${highName} — watch for reject back below → SHORT · story + HTF bearish</span>`;
-      if(cShort === 1) return `<span class="sb-trap short">ABOVE ${highName} — watch for reject back below → SHORT · story leans bearish</span>`;
-      return `<span class="sb-trap watch">ABOVE ${highName} — watch for hold (LONG) or reject (SHORT)</span>`;
-    }
-    if(direction === 'below'){
-      // Price is BELOW the low → it LOST the level
-      // Watch for: reclaim back above (LONG) or hold below (SHORT continuation)
-      const cLong  = consensus(true);  // bullish consensus
-      const cShort = consensus(false); // bearish consensus
-      if(cShort >= 2) return `<span class="sb-trap short">⬇ LOST ${lowName} — holding below · story + HTF bearish</span>`;
-      if(cShort === 1) return `<span class="sb-trap short">LOST ${lowName} — holding below · story leans bearish</span>`;
-      if(cLong >= 2) return `<span class="sb-trap long">⬆ BELOW ${lowName} — watch for reclaim back above → LONG · story + HTF bullish</span>`;
-      if(cLong === 1) return `<span class="sb-trap long">BELOW ${lowName} — watch for reclaim back above → LONG · story leans bullish</span>`;
-      return `<span class="sb-trap watch">BELOW ${lowName} — watch for hold (SHORT) or reclaim (LONG)</span>`;
-    }
-    return '';
-  }
-
-  const sessionMeta = {
-    ASIA:        { emoji:'🌏', label:'Asia Session',   color:'#7b8fa8',  dot:'#4fc3f7' },
-    LONDON:      { emoji:'🇬🇧', label:'London Session', color:'#ffc107',  dot:'#ffc107' },
-    NY:          { emoji:'🗽', label:'NY Session',     color:'#00e676',  dot:'#00e676' },
-    AFTER_HOURS: { emoji:'🌙', label:'After Hours',    color:'#7b8fa8',  dot:'#3a4a5c' },
-  };
-  const meta = sessionMeta[session];
-
-  let html = `<div class="sb-row">
-    <span class="sb-dot" style="background:${meta.dot}"></span>
-    <span class="sb-label">${meta.emoji} ${meta.label}</span>
-  </div>`;
-
-  if(asia && price > 0){
-    const rangeSize = ((asia.high - asia.low)/asia.low*100).toFixed(2);
-    const aboveHigh = ((price - asia.high)/asia.high*100).toFixed(2);
-    const belowLow  = ((asia.low - price)/asia.low*100).toFixed(2);
-    const isAbove = price > asia.high;
-    const isBelow = price < asia.low;
-    const isInside = !isAbove && !isBelow;
-
-    let posLabel = isAbove
-      ? `<span style="color:#ff3d5a">+${aboveHigh}% above Asia High</span>`
-      : isBelow
-      ? `<span style="color:#00e676">-${belowLow}% below Asia Low</span>`
-      : `<span style="color:#7b8fa8">inside Asia range</span>`;
-
-    // Smart trap hint using story + HTF consensus
-    let trapHint = '';
-    if(session === 'LONDON' || session === 'NY'){
-      const dir = isAbove ? 'above' : isBelow ? 'below' : 'inside';
-      trapHint = smartTrapHint(dir, 'Asia High', 'Asia Low');
-    }
-
-    const srcNote = asia.source === 'yesterday' ? ' (prev day)' : '';
-    html += `<div class="sb-row" style="margin-top:3px">
-      <span class="sb-label">Asia Range${srcNote}</span>
-      <span class="sb-range">$${fmt(asia.low)} – $${fmt(asia.high)}</span>
-      <span style="color:#4a5a6a;font-size:9px">(${rangeSize}%)</span>
-    </div>
-    <div class="sb-row">${posLabel}</div>`;
-    if(trapHint) html += `<div class="sb-row" style="margin-top:2px">${trapHint}</div>`;
-  }
-
-  // Show London range during NY session
-  const london = getLondonRange(candles15m);
-  if(london && (session === 'NY' || (session === 'AFTER_HOURS' && london.complete)) && price > 0){
-    const lRangeSize = ((london.high - london.low)/london.low*100).toFixed(2);
-    const isAboveL = price > london.high;
-    const isBelowL = price < london.low;
-    const srcNote = london.source === 'yesterday' ? ' (prev day)' : '';
-    html += `<div class="sb-row" style="margin-top:3px;border-top:1px solid rgba(255,255,255,.04);padding-top:5px">
-      <span class="sb-label">London Range${srcNote}</span>
-      <span class="sb-range" style="color:#c9d6e3">$${fmt(london.low)} – $${fmt(london.high)}</span>
-      <span style="color:#4a5a6a;font-size:9px">(${lRangeSize}%)</span>
-    </div>`;
-    const londonDir = isAboveL ? 'above' : isBelowL ? 'below' : 'inside';
-    html += `<div class="sb-row">${smartTrapHint(londonDir, 'London High', 'London Low')}</div>`;
-  }
-
-  // Show NY range during Asia session (next morning hunting NY high/low)
-  const ny = getNYRange(candles15m);
-  if(ny && (session === 'ASIA' || session === 'AFTER_HOURS') && ny.complete && price > 0){
-    const nyRangeSize = ((ny.high - ny.low)/ny.low*100).toFixed(2);
-    const isAboveNY = price > ny.high;
-    const isBelowNY = price < ny.low;
-    const srcNote = ny.source === 'yesterday' ? ' (prev day)' : '';
-    html += `<div class="sb-row" style="margin-top:3px;border-top:1px solid rgba(255,255,255,.04);padding-top:5px">
-      <span class="sb-label">NY Range${srcNote}</span>
-      <span class="sb-range" style="color:#c9d6e3">$${fmt(ny.low)} – $${fmt(ny.high)}</span>
-      <span style="color:#4a5a6a;font-size:9px">(${nyRangeSize}%)</span>
-    </div>`;
-    const nyDir = isAboveNY ? 'above' : isBelowNY ? 'below' : 'inside';
-    html += `<div class="sb-row">${smartTrapHint(nyDir, 'NY High', 'NY Low')}</div>`;
-  }
-
-  // Show NY range building during NY session
-  if(ny && session === 'NY' && !ny.complete && ny.candleCount >= 2 && price > 0){
-    const nyRangeSize = ((ny.high - ny.low)/ny.low*100).toFixed(2);
-    html += `<div class="sb-row" style="margin-top:3px;border-top:1px solid rgba(255,255,255,.04);padding-top:5px">
-      <span class="sb-label">NY Range (building)</span>
-      <span class="sb-range" style="color:#7b8fa8">$${fmt(ny.low)} – $${fmt(ny.high)}</span>
-      <span style="color:#4a5a6a;font-size:9px">(${nyRangeSize}%)</span>
-    </div>`;
-  }
-
-  // Show London range building during London session
-  if(london && session === 'LONDON' && !london.complete && london.candleCount >= 2 && price > 0){
-    const lRangeSize = ((london.high - london.low)/london.low*100).toFixed(2);
-    html += `<div class="sb-row" style="margin-top:3px;border-top:1px solid rgba(255,255,255,.04);padding-top:5px">
-      <span class="sb-label">London Range (building)</span>
-      <span class="sb-range" style="color:#7b8fa8">$${fmt(london.low)} – $${fmt(london.high)}</span>
-      <span style="color:#4a5a6a;font-size:9px">(${lRangeSize}%)</span>
-    </div>`;
-  }
-
-  el.innerHTML = html;
-  el.style.display = 'flex';
-  el.style.flexDirection = 'column';
-  el.style.gap = '4px';
-}
-
-
-// ── FIBONACCI RETRACEMENT LEVELS (v4.9) ────────────────
-// When there's a big gap between nearest support and resistance (>8% of price),
-// generate fib retracements from the recent major swing to fill the void.
-// Uses 4H or 1D candles for swing detection to catch the macro move.
-
-// ── COMBINE + DEDUPE + RANK ───────────────────────────────
-
-// ── TARGET: next obvious level in opposite direction ──────
-
-// ── RR RATIO ──────────────────────────────────────────────
-// Chris Hunter: "Put your stop behind the NEXT level behind the entry"
-// stopLevel = the level beyond which the trade thesis is broken
-
-// Find the next level BEHIND the entry (for stop placement)
-// For SHORT: next level ABOVE the trap resistance (where shorts are wrong)
-// For LONG:  next level BELOW the trap support (where longs are wrong)
-// v4.9: ATR-aware — enforces minimum 1.0 ATR distance to avoid noise wicks
-
-// ── MAIN DMS SIGNAL ───────────────────────────────────────
-// Fixed bugs:
-// 1. Max lookback reduced: 2 bars for daily, 3 for intraday (stale traps discarded)
-// 2. Signal expiry: if price rallied/fell significantly since trap → invalidated
-// 3. Level reclaim check: if any candle between trap and now reclaimed the level → dead
-// 4. PDH/PDL excluded from 1W (only relevant on daily and below)
-
-// ── REJECTION CANDLE DETECTION (v4.9 — follow-through confirmation) ──
-// Phase 1: Rejection candle must NOT be the current candle — we need at least
-//          one follow-through candle that confirms the bounce direction.
-// Phase 2: Momentum filter — if last 3-5 candles show strong directional
-//          momentum AGAINST the signal, suppress it.
-
-// ── STRONG BODY BOUNCE (v4.9) ─────────────────────────
-// Catches V-bounces where price hits a level and reverses with a strong body
-// candle, even if there's no classic wick rejection pattern.
-
-// ── MOMENTUM FILTER (v4.9) ──────────────────────────────
-
-// ── LOWER-TF ALIGNMENT CHECK (v4.9) ───────────────────
-// Before ANY signal fires, check if lower-TF candles are moving WITH the signal.
-// 1W/1D check 4H+1H, 4H checks 1H+15m, 1H checks 15m.
-// Two independent blocking conditions (either one blocks):
-//   A) Candle count: 2+ of last 5 candles are against direction
-//   B) Net move: last 5 candles net move > 0.3 ATR against direction
-
-// -- RETEST STRATEGY DETECTION (v5.11) -----------------------------------------
-// "Retest" pattern (highest conviction per Tomaž, 2026-04-24):
-//   1) Price BREAKS a level (up or down) — at least one recent close beyond level.
-//   2) Price returns to the level and RETESTS it WITHOUT closing through — wicks
-//      across the level are allowed, but no candle since the break closed back
-//      on the original side of the level.
-//   3) A CONVICTION candle (current bar) closes in the continuation direction
-//      with a body >= 0.5 × ATR. This is the entry trigger.
-
-// ── DMS SIGNAL ENGINE (v5.11 — RETEST STRATEGY, replaces v4.9 trap/bounce/breakout) ─
-// Retest = only pattern we trade. Runs on every TF (15m, 1H, 4H, 1D, 1W); signals
-// aggregate into multi-TF confidence the same way as before. HTF direction still
-// blocks counter-trend retests via the auto-trade gate.
-
-// ── HTF STORY (1H + 4H analysis) ─────────────────────────
-// Determines if market is "gaining" or "failing" at key levels
-// ── HTF STORY: reads 4H + 1H candle bodies ──────────────────────────────
-// Chris Hunter: "Phase 2 is the story — use 1H/4H to define if price is
-// gaining or failing levels. Only execute in that direction."
-// ── SESSION STORY TRACKER ─────────────────────────────────
-// Scans recent 4H + 1H candles to assess how price is BEHAVING at key levels
-// Returns: { rows: [{icon, text}], conclusion, storyDir }
-// storyDir is advisory only — does NOT override the HTF hard block
-function buildStory(levels, h4C, h1C, currentPrice){
-  if(!levels || !levels.length || !h4C || !h1C) return null;
-  if(h4C.length < 4 || h1C.length < 4) return null;
-
-  // Focus on the 6 most significant levels within 2% of current price
-  // v4.9: tightened from 6% to avoid stale distant levels inflating points
-  const nearby = levels
-    .filter(l => Math.abs(l.price - currentPrice)/currentPrice < 0.02 && l.score >= 20)
-    .sort((a,b) => b.score - a.score)
-    .slice(0, 6);
-
-  if(nearby.length < 2) return null;
-
-  const rows = [];
-  let bullPoints = 0, bearPoints = 0;
-
-  // v4.9: Use last 12 h1 + 6 h4 candles, with recency weighting
-  // Last 2 candles = 2x weight (fresh), older = 1x
-  const h1Recent = h1C.slice(-12);
-  const h4Recent = h4C.slice(-6);
-  const h4Len = h4Recent.length;
-  const h1Len = h1Recent.length;
-
-  for(const lv of nearby){
-    const tol = lv.price * 0.004; // 0.4% touch zone
-    const isRes = lv.type === 'resistance';
-
-    // ── Scan 4H candles (base weight=2, recency 2x for last 2) ──────
-    let h4GainCount = 0, h4FailCount = 0, h4GainPts = 0, h4FailPts = 0;
-    for(let ci = 0; ci < h4Len; ci++){
-      const k = h4Recent[ci];
-      const recency = (ci >= h4Len - 2) ? 2 : 1; // last 2 candles = 2x
-      const touched = isRes
-        ? (k.h >= lv.price - tol)
-        : (k.l <= lv.price + tol);
-      if(!touched) continue;
-      const gained = isRes
-        ? (k.bh > lv.price + tol)
-        : (k.bl < lv.price - tol);
-      const failed = isRes
-        ? (k.bh < lv.price - tol * 0.5)
-        : (k.bl > lv.price + tol * 0.5);
-      if(gained){ h4GainCount++; h4GainPts += 2 * recency; }
-      else if(failed){ h4FailCount++; h4FailPts += 2 * recency; }
-    }
-
-    if(h4GainCount > 0){
-      const label = isRes ? 'Gained' : 'Lost';
-      const countStr = h4GainCount > 1 ? ` \u00d7${h4GainCount}` : '';
-      rows.push({
-        icon: isRes ? 'gain' : 'fail',
-        text:`<strong>4H ${label} $${fmt(lv.price)}</strong>${countStr} — body closed ${isRes?'above':'below'} · ${lv.source}`,
-        weight:2, dir: isRes ? 'bull' : 'bear'
-      });
-      isRes ? bullPoints += h4GainPts : bearPoints += h4GainPts;
-    }
-    if(h4FailCount > 0){
-      const label = isRes ? 'Failed to gain' : 'Held';
-      const countStr = h4FailCount > 1 ? ` \u00d7${h4FailCount}` : '';
-      rows.push({
-        icon: isRes ? 'fail' : 'gain',
-        text:`<strong>4H ${label} $${fmt(lv.price)}</strong>${countStr} — ${isRes?'rejected':'held above'} · ${lv.source}`,
-        weight:2, dir: isRes ? 'bear' : 'bull'
-      });
-      isRes ? bearPoints += h4FailPts : bullPoints += h4FailPts;
-    }
-
-    // ── Scan 1H candles (base weight=1, recency 2x for last 2) ──────
-    let h1GainCount = 0, h1FailCount = 0, h1GainPts = 0, h1FailPts = 0;
-    for(let ci = 0; ci < h1Len; ci++){
-      const k = h1Recent[ci];
-      const recency = (ci >= h1Len - 2) ? 2 : 1;
-      const touched = isRes ? (k.h >= lv.price - tol) : (k.l <= lv.price + tol);
-      if(!touched) continue;
-      const gained = isRes ? (k.bh > lv.price + tol) : (k.bl < lv.price - tol);
-      const failed = isRes ? (k.bh < lv.price - tol*0.5) : (k.bl > lv.price + tol*0.5);
-      if(gained){ h1GainCount++; h1GainPts += recency; }
-      else if(failed){ h1FailCount++; h1FailPts += recency; }
-    }
-
-    if(h1GainCount > 0){
-      const label = isRes ? 'gaining' : 'losing';
-      rows.push({
-        icon: isRes ? 'gain' : 'fail',
-        text:`<strong>1H ${label} $${fmt(lv.price)}</strong> · ${h1GainCount}\u00d7 body close ${isRes?'above':'below'} · ${lv.source}`,
-        weight:1, dir: isRes ? 'bull' : 'bear'
-      });
-      isRes ? bullPoints += h1GainPts : bearPoints += h1GainPts;
-    }
-    if(h1FailCount > 0){
-      const label = isRes ? 'failing' : 'holding';
-      rows.push({
-        icon: isRes ? 'fail' : 'gain',
-        text:`<strong>1H ${label} $${fmt(lv.price)}</strong> · ${isRes?'rejected':'held'} ${h1FailCount}\u00d7 · ${lv.source}`,
-        weight:1, dir: isRes ? 'bear' : 'bull'
-      });
-      isRes ? bearPoints += h1FailPts : bullPoints += h1FailPts;
-    }
-  }
-
-  // v4.9: PRICE POSITION CONTEXT — if price dropped below resistance levels
-  // or rallied above support levels WITHOUT touching them, that's still directional info.
-  // "Price is below $68K resistance and falling" = bearish even without a touch.
-  const resAbove = nearby.filter(l => l.type === 'resistance' && l.price > currentPrice * 1.005);
-  const supBelow = nearby.filter(l => l.type === 'support' && l.price < currentPrice * 0.995);
-  // Check if price is trending away from resistance (bearish) or support (bullish)
-  const last3h1 = h1C.slice(-3);
-  if(last3h1.length >= 3){
-    const trending = last3h1[2].c - last3h1[0].c; // positive = rising, negative = falling
-    const trendPct = Math.abs(trending) / currentPrice;
-    if(trendPct > 0.002){ // at least 0.2% move in last 3 candles
-      if(trending < 0 && resAbove.length > 0){
-        // Falling away from resistance = bearish
-        const nearest = resAbove.sort((a,b) => a.price - b.price)[0];
-        const dist = ((nearest.price - currentPrice)/currentPrice * 100).toFixed(1);
-        bearPoints += 3;
-        rows.push({
-          icon:'fail',
-          text:`<strong>Dropping from $${fmt(nearest.price)}</strong> — ${dist}% below · ${nearest.source}`,
-          weight:2, dir:'bear'
-        });
-      }
-      if(trending > 0 && supBelow.length > 0){
-        // Rising away from support = bullish
-        const nearest = supBelow.sort((a,b) => b.price - a.price)[0];
-        const dist = ((currentPrice - nearest.price)/currentPrice * 100).toFixed(1);
-        bullPoints += 3;
-        rows.push({
-          icon:'gain',
-          text:`<strong>Bouncing from $${fmt(nearest.price)}</strong> — ${dist}% above · ${nearest.source}`,
-          weight:2, dir:'bull'
-        });
-      }
-    }
-  }
-
-  // Limit to 8 most significant rows
-  const topRows = rows.slice(-8);
-
-  if(topRows.length === 0){
-    return {
-      rows:[{ icon:'neutral', text:'No significant level interactions yet this session' }],
-      conclusion:'Watching for price to engage a key level',
-      storyDir:'UNCLEAR',
-      bullPoints, bearPoints
-    };
-  }
-
-  // ── Conclusion ──────────────────────────────────────────────────────
-  const net = bullPoints - bearPoints;
-  let storyDir, conclusion;
-  if(net >= 3){
-    storyDir = 'UP';
-    conclusion = `<span style="color:#00e676">Bullish structure</span> · price gaining key levels (${bullPoints} bull vs ${bearPoints} bear pts)`;
-  } else if(net <= -3){
-    storyDir = 'DOWN';
-    conclusion = `<span style="color:#ff3d5a">Bearish structure</span> · price failing key levels (${bearPoints} bear vs ${bullPoints} bull pts)`;
-  } else if(net > 0){
-    storyDir = 'UNCLEAR';
-    conclusion = `<span style="color:#ffc107">Slight bullish lean</span> · contested at key levels — wait for clarity`;
-  } else if(net < 0){
-    storyDir = 'UNCLEAR';
-    conclusion = `<span style="color:#ffc107">Slight bearish lean</span> · contested at key levels — wait for clarity`;
-  } else {
-    storyDir = 'UNCLEAR';
-    conclusion = `<span style="color:#ffc107">No clear story</span> · price ranging between levels`;
-  }
-
-  return { rows: topRows, conclusion, storyDir, bullPoints, bearPoints };
-}
-
-
-// ── COLLECT ALL LEVELS FOR LEVELS PAGE ───────────────────
-function collectLevels(wC, dC, p, c15m, h4C, h1C){
-  const wLvls  = findVPeaks(wC,'1W').map(l=>({...l,tf:'1W'}));
-  const dLvls  = findVPeaks(dC,'1D').map(l=>({...l,tf:'1D'}));
-  const h4Lvls = h4C ? findVPeaks(h4C,'4H').map(l=>({...l,tf:'4H'})) : [];
-  const h1Lvls = h1C ? findVPeaks(h1C,'1H').map(l=>({...l,tf:'1H'})) : [];
-  const pdhl   = findPDHL(dC).map(l=>({...l,tf:'PDH/PDL'}));
-  const asia   = c15m ? getAsiaLevels(c15m).map(l=>({...l,tf:'SESSION'})) : [];
-  const london = c15m ? getLondonLevels(c15m).map(l=>({...l,tf:'SESSION'})) : [];
-  const ny     = c15m ? getNYLevels(c15m).map(l=>({...l,tf:'SESSION'})) : [];
-
-  // Sort by score (highest first) so dedup keeps strongest levels
-  const structural = [...wLvls,...dLvls,...h4Lvls,...h1Lvls,...pdhl,...asia,...london,...ny].sort((a,b)=>b.score-a.score);
-
-  // Dedupe within 0.15% — tight enough to keep distinct levels, loose enough to merge duplicates
-  const dd = [];
-  for(const l of structural){
-    if(!dd.find(d=>Math.abs(d.price-l.price)/l.price<0.0015)) dd.push(l);
-  }
-
-  // v4.9: Add Fibonacci retracement levels when there's a large gap in structure
-  // Use 4H candles for fib calculation (best balance of range and detail)
-  const fibSource = h4C || dC;
-  const fibs = findFibLevels(fibSource, dd, p);
-  const all = [...dd, ...fibs];
-
-  // Filter: keep all levels within 15% of current price, only strong/med beyond that
-  const filtered = all.filter(l => {
-    const dist = Math.abs(l.price - p) / p;
-    if(dist <= 0.20) return true;  // wider window to include fibs
-    return l.strength !== 'weak';
-  });
-
-  // Re-sort by price descending
-  filtered.sort((a,b)=>b.price-a.price);
-
-  // Return 20 above + 20 below current price
-  const above = filtered.filter(l=>l.price>p).slice(0,20);
-  const below = filtered.filter(l=>l.price<p).slice(-20).reverse();
-  return [...above,...below].sort((a,b)=>b.price-a.price);
-}
-
-// ── RENDER ────────────────────────────────────────────────
-
-function renderTop(t){
-  price=t.price;
-  document.getElementById('tb-price').textContent='$'+fmt(t.price);
-  const el=document.getElementById('tb-chg');
-  el.style.display='';el.textContent=(t.change>=0?'+':'')+t.change.toFixed(2)+'%';
-  el.style.background=t.change>=0?'rgba(0,230,118,.15)':'rgba(255,61,90,.15)';
-  el.style.color=t.change>=0?'#00e676':'#ff3d5a';
-}
-
-function renderHero(){
-  let wL=0,wS=0,activeW=0;
-  const totalW=TFS.reduce((s,t)=>s+t.w,0); // v5.1: use total weight as denominator (synced w/ bot.js)
-  TFS.forEach(tf=>{const r=results[tf.l];if(!r)return;if(r.type!=='NONE')activeW+=tf.w;if(r.sig==='LONG')wL+=tf.w;if(r.sig==='SHORT')wS+=tf.w;});
-  const loaded=Object.keys(results).length,diff=wL-wS;
-  const pct=totalW>0?Math.round(Math.max(wL,wS)/totalW*100):0;
-  const label=pct>=75?'HIGH':pct>=50?'MED':'LOW';
-  // v4.9: Don't show directional hero below 30% confidence — prevents
-  // misleading LONG/SHORT display when only one low-weight TF has a signal
-  // while price is just sitting at a level unconfirmed
-  const MIN_HERO_CONF = 30;
-  let sig,cls;
-  if(diff>0&&loaded>=2&&pct>=MIN_HERO_CONF){sig='LONG ▲';cls='long';}
-  else if(diff<0&&loaded>=2&&pct>=MIN_HERO_CONF){sig='SHORT ▼';cls='short';}
-  else if(diff!==0&&loaded>=2&&pct<MIN_HERO_CONF){sig='AT LEVEL';cls='neutral';}
-  else{sig='NEUTRAL';cls='neutral';}
-  document.getElementById('hero').className='hero '+cls;
-  document.getElementById('hero-dir').textContent=sig;
-  document.getElementById('hero-tfs').textContent=loaded+' / '+TFS.length+' TFs';
-  const confEl=document.getElementById('hero-conf');
-  confEl.textContent=pct+'%';
-  confEl.className='hero-conf '+(pct>=75?'high':pct>=50?'med':'');
-  document.getElementById('hero-conflbl').textContent=label+' CONF';
-  const best=[...TFS].sort((a,b)=>b.w-a.w).find(tf=>results[tf.l]&&results[tf.l].type!=='NONE');
-  const confPfx = activeW>0 ? `[${pct}% conf · ${label}] ` : '';
-  document.getElementById('hero-reason').textContent=best?(confPfx+results[best.l].reason):'No active DMS setup';
-
-  // ── CONFLICT WARNING ──────────────────────────────────────────────────
-  // Show a warning on the hero card when the 15m signal contradicts
-  // the Session Story and/or HTF direction
-  const conflictEl = document.getElementById('hero-conflict');
-  if(conflictEl){
-    const s = coinState[activeCoin];
-    const storyDir = s?.lastStory?.storyDir || 'UNCLEAR';
-    const htfDir   = s?.htfDir || 'UNCLEAR';
-    const heroSig  = diff > 0 ? 'LONG' : diff < 0 ? 'SHORT' : null;
-
-    if(heroSig && loaded >= 2){
-      const storyConflicts = (heroSig==='LONG'  && storyDir==='DOWN') ||
-                             (heroSig==='SHORT' && storyDir==='UP');
-      const htfConflicts   = (heroSig==='LONG'  && htfDir==='DOWN') ||
-                             (heroSig==='SHORT' && htfDir==='UP');
-
-      if(storyConflicts && htfConflicts){
-        // Both conflict — strong warning
-        conflictEl.className = 'hero-conflict strong';
-        conflictEl.innerHTML = `⚠ STRONG CONFLICT: HTF ${htfDir} + Session Story ${storyDir} — this ${heroSig} is counter-trend on both · wait for story alignment or reduce size`;
-        conflictEl.style.display = 'block';
-      } else if(storyConflicts){
-        conflictEl.className = 'hero-conflict';
-        conflictEl.innerHTML = `⚠ Story conflict: Session Story is ${storyDir} · ${heroSig} signal is counter-story — wait for confirmation or skip`;
-        conflictEl.style.display = 'block';
-      } else if(htfConflicts){
-        conflictEl.className = 'hero-conflict';
-        conflictEl.innerHTML = `⚠ HTF conflict: HTF direction is ${htfDir} · ${heroSig} signal is counter-trend — lower probability, tighter size`;
-        conflictEl.style.display = 'block';
-      } else if(heroSig && storyDir !== 'UNCLEAR' && htfDir !== 'UNCLEAR'){
-        // Both agree — show confirmation
-        const matchDir = heroSig === 'LONG' ? 'UP' : 'DOWN';
-        if(storyDir === matchDir && htfDir === matchDir){
-          conflictEl.className = 'hero-conflict';
-          conflictEl.style.borderColor = 'rgba(0,230,118,.25)';
-          conflictEl.style.background  = 'rgba(0,230,118,.05)';
-          conflictEl.style.color = '#00e676';
-          conflictEl.innerHTML = `✓ Aligned: HTF ${htfDir} + Session Story ${storyDir} confirm this ${heroSig}`;
-          conflictEl.style.display = 'block';
-        } else {
-          conflictEl.style.display = 'none';
-        }
-      } else {
-        conflictEl.style.display = 'none';
-      }
-    } else {
-      conflictEl.style.display = 'none';
-    }
-  }
-}
-
-function renderNM(nm){
-  const el=document.getElementById('nm-val');
-  el.className='nm-val '+nm.dir;
-  el.textContent=nm.dir==='UP'?'UP ▲':nm.dir==='DOWN'?'DOWN ▼':'UNCLEAR';
-  document.getElementById('nm-sub').textContent=nm.reason;
-
-  // Story section
-  const story = nm.story;
-  const divider = document.getElementById('nm-divider');
-  const lbl = document.getElementById('nm-story-lbl');
-  const storyEl = document.getElementById('nm-story');
-  if(!story || !storyEl){ if(divider) divider.style.display='none'; if(lbl) lbl.style.display='none'; if(storyEl){ storyEl.style.display='none'; storyEl.innerHTML=''; } return; }
-
-  divider.style.display='block';
-  lbl.style.display='block';
-  storyEl.style.display='flex';
-
-  const rowsHtml = story.rows.map(r =>
-    `<div class="story-row">
-      <div class="story-icon ${r.icon}">${r.icon==='gain'?'✓':r.icon==='fail'?'✗':'~'}</div>
-      <div class="story-text">${r.text}</div>
-    </div>`
-  ).join('');
-
-  storyEl.innerHTML = rowsHtml +
-    `<div class="story-conclusion">${story.conclusion}</div>`;
-}
-
-function renderCards(){
-  // v5.23 (2026-05-08): Strength score per signal. Hand-tuned formula combining
-  // multi-TF confidence, HTF agreement, conviction body, level quality, range,
-  // exhaustion, R:R, and funding alignment. See scoreSignal() in signals.js.
-  // Validation note: tested against 11 reconstructed historical bot trades —
-  // STRONG/SOLID won 100%, MODERATE 80%, WEAK 0%. Small N; pending more data.
-  const s = coinState[activeCoin];
-  document.getElementById('tf-cards').innerHTML=TFS.map(tf=>{
-    const r=results[tf.l];
-    const isCollapsed = tf.l !== '15m' ? ' collapsed' : '';
-    if(!r)return`<div class="tfc none${isCollapsed}" onclick="this.classList.toggle('collapsed')"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type NONE">···</span><span class="tfc-toggle">▼</span><span class="tfc-sig WAIT" style="margin-left:auto">—</span></div><div class="tfc-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div></div>`;
-    const cls=r.sig==='LONG'?'long':r.sig==='SHORT'?'short':'neutral';
-    const tl=r.type==='FAIL_GAIN'?'FAIL TO GAIN':r.type==='FAIL_LOSE'?'FAIL TO LOSE':r.type==='BLIND_ENTRY'?'CONFIRMED ENTRY':r.type==='BREAKOUT'?'BREAKOUT':r.type==='AT_LEVEL'?'AT LEVEL':'NO SETUP';
-    const rrBadge=r.rr?`<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:2px 6px;border-radius:4px;background:rgba(255,193,7,.1);color:#ffc107;border:1px solid rgba(255,193,7,.2);margin-left:auto">R:R ${r.rr}</span>`:'';
-    const lvlScore=r.score?`<span style="font-family:'IBM Plex Mono',monospace;font-size:8px;color:#3d5068;margin-left:6px">score ${r.score}</span>`:'';
-    // Compute strength score for non-NEUTRAL signals (fires the v5.23 formula).
-    let strengthBadge = '';
-    if (r.sig !== 'NEUTRAL') {
-      const ss = scoreSignal({
-        coinState: { price: s?.price, htfDir: s?.htfDir, range48h: s?.range48h, exhaustion48h: s?.exhaustion48h, fundingRate: s?.fundingRate },
-        dmsResult: r,
-        allResults: results,
-        entryCandles: null,   // ADX bonus skipped on dashboard side; small effect
-      });
-      const tooltip = Object.entries(ss.breakdown).map(([k,v]) => `${k}: ${v>=0?'+':''}${v}`).join('  ·  ');
-      strengthBadge = `<span title="${tooltip}" style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:2px 7px;border-radius:4px;background:${ss.color}22;color:${ss.color};border:1px solid ${ss.color}55;margin-left:6px;font-weight:600">${ss.label} ${ss.score}</span>`;
-    }
-    return`<div class="tfc ${cls}${isCollapsed}" onclick="this.classList.toggle('collapsed')"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type ${r.type}">${tl}</span><span class="tfc-toggle">▼</span>${rrBadge}</div><div class="tfc-head" style="margin-top:5px;margin-bottom:0">${r.sig!=='NEUTRAL'?`<span class="tfc-sig ${r.sig}">${r.sig}</span>`:''}${strengthBadge}<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:${r.strength==='strong'?'#00e676':r.strength==='med'?'#ffc107':'#3d5068'};margin-left:4px">${r.strength||''}</span>${lvlScore}</div><div class="tfc-reason" style="margin-top:6px">${r.reason}</div>${r.detail?`<div class="tfc-reason" style="color:#3d5068;margin-top:3px;font-size:8px">${r.detail}</div>`:''
-    }${r.level?`<div class="tfc-prices"><span class="tcp"><span class="tcp-l">LVL</span>$${fmt(r.level)}</span>${r.target?`<span class="tcp"><span class="tcp-l">TP</span><span style="color:${r.sig==='LONG'?'#00e676':'#ff3d5a'}">$${fmt(r.target)}</span></span>`:''  }${r.stopPrice?`<span class="tcp"><span class="tcp-l">SL</span><span style="color:#ff6b6b">$${fmt(r.stopPrice)}</span></span>`:''}</div>`:''}</div>`;
-  }).join('');
-}
-
-function renderLevelItem(l){
-  const isR=l.price>price,dist=((l.price-price)/price*100).toFixed(2),cls=isR?'R':'S';
-  const strengthCol=l.strength==='strong'?'#00e676':l.strength==='med'?'#ffc107':'#5d7a99';
-  const flippedTag = l.flippedType === 'flipped_support' ? '<span style="font-size:8px;color:#64b5f6;margin-left:4px">↕ FLIPPED SUP</span>'
-    : l.flippedType === 'flipped_resistance' ? '<span style="font-size:8px;color:#64b5f6;margin-left:4px">↕ FLIPPED RES</span>' : '';
-  const fibTag = l.isFib ? '<span style="font-size:8px;color:#ce93d8;margin-left:4px">◆ FIB</span>' : '';
-  const fibBorder = l.isFib ? 'border-left:2px solid rgba(206,147,216,.3);' : '';
-  return`<div class="lvl-item${!l.tested?' untested':''}" style="${fibBorder}"><span class="lvl-badge ${cls}">${isR?'RES':'SUP'}</span><div class="lvl-info"><div class="lvl-tf">${l.tf||'—'} · ${l.source||''}${!l.tested&&!l.isFib?'<span class="lvl-untag">● UNTESTED</span>':''}${flippedTag}${fibTag}</div></div><div class="lvl-right"><div class="lvl-price ${cls}">$${fmt(l.price)}</div><div class="lvl-dist">${dist>0?'+':''}${dist}% · <span style='color:${strengthCol}'>${l.strength||''}</span></div></div></div>`;
-}
-
-function renderLevels(){
-  if(!allLevels.length){document.getElementById('lvl-list').innerHTML='<div class="empty">No levels found</div>';return;}
-
-  // Proximity zone: nearest 4 resistance + 4 support levels
-  const above = allLevels.filter(l=>l.price>price).slice(-4).reverse(); // closest 4 above
-  const below = allLevels.filter(l=>l.price<=price).slice(0,4);         // closest 4 below
-  const nearbyIds = new Set([...above,...below].map(l=>l.price));
-
-  let html = '';
-  if(above.length || below.length){
-    html += '<div style="padding:8px 16px 4px;font-family:\'IBM Plex Mono\',monospace;font-size:9px;color:#ffc107;letter-spacing:.1em">▬ NEAREST LEVELS</div>';
-    html += above.map(l=>renderLevelItem(l)).join('');
-    html += `<div style="padding:6px 16px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#00e676;text-align:center;border-top:1px solid #1a2230;border-bottom:1px solid #1a2230;background:#0a0e13">► PRICE: $${fmt(price)} ◄</div>`;
-    html += below.map(l=>renderLevelItem(l)).join('');
-    html += '<div style="padding:8px 16px 4px;margin-top:10px;font-family:\'IBM Plex Mono\',monospace;font-size:9px;color:#5d7a99;letter-spacing:.1em;border-top:1px solid #1a2230">▬ ALL LEVELS</div>';
-  }
-
-  // All levels (skip ones already shown in proximity zone)
-  html += allLevels.filter(l=>!nearbyIds.has(l.price)).map(l=>renderLevelItem(l)).join('');
-  document.getElementById('lvl-list').innerHTML = html;
-}
-
-// ── SIGNAL LOG (persisted to localStorage) ───────────────
-const LOG_KEY    = 'dms_signal_log';
-const DEDUP_KEY  = 'dms_signal_dedup'; // persists across refreshes
-
-function loadDedup(){ try{ return JSON.parse(localStorage.getItem(DEDUP_KEY)||'{}'); }catch{ return {}; } }
-function saveDedup(d){ localStorage.setItem(DEDUP_KEY, JSON.stringify(d)); }
-
-// Window: 4h for trap signals, 8h for blind entries
-// Returns true if signal was already fired recently and should be suppressed
-function isDedupSuppressed(coinId, tf, type, level){
-  const d = loadDedup();
-  const key = `${coinId}:${tf}:${type}:${Math.round(level)}`;
-  const window = type === 'BLIND_ENTRY' ? 28800000 : 14400000; // 8h / 4h
-  const now = Date.now();
-  // v5.0 FIX #3: Prune based on each entry's actual window, not a fixed 8h
-  // Old code used 28800000 for all prune checks, meaning 4h entries lingered for 8h
-  let changed = false;
-  for(const k of Object.keys(d)){
-    const entryWindow = k.includes(':BLIND_ENTRY:') ? 28800000 : 14400000;
-    if(now - d[k] > entryWindow){ delete d[k]; changed=true; }
-  }
-  if(changed) saveDedup(d);
-  return d[key] && (now - d[key]) < window;
-}
-
-function markDedupFired(coinId, tf, type, level){
-  const d = loadDedup();
-  const key = `${coinId}:${tf}:${type}:${Math.round(level)}`;
-  d[key] = Date.now();
-  saveDedup(d);
-}
-const MAX_LOG = 50;
-
-function loadLog(){
-  try{ return JSON.parse(localStorage.getItem(LOG_KEY)||'[]'); }catch{ return []; }
-}
-function saveLog(entries){ localStorage.setItem(LOG_KEY, JSON.stringify(entries)); }
-
-function addLog(sig, tf, reason, type, level, target, rr, stopPrice, coinId){
-  coinId = coinId || activeCoin;
-  if(type==='NONE') return;
-  const entries = loadLog();
-  const now = new Date();
-  const dateStr = now.toLocaleDateString('en-GB',{day:'2-digit',month:'short'});
-  const timeStr = now.toTimeString().slice(0,5);
-
-  // Avoid duplicate: scan last 20 entries for same sig+tf+type+level+coin within 4h
-  const window4h = 14400000;
-  const recentDup = entries.slice(0,20).find(e =>
-    e.sig === sig && e.tf === tf && e.coin === coinId && e.type === type
-    && Math.abs((e.level||0) - (level||0)) < level * 0.005
-    && (now - new Date(e.ts)) < window4h
-  );
-  if(recentDup) return;
-
-  const s = coinState[coinId];
-  const entry = {
-    id: now.getTime(),
-    ts: now.toISOString(),
-    date: dateStr,
-    time: timeStr,
-    coin: coinId,
-    sig, tf, type, level, target, rr,
-    stopPrice: stopPrice || null,
-    reason: reason.slice(0,120),
-    entryPrice: s ? s.price : price,
-    status: 'open' // open | hit | stopped
-  };
-  // ── EXIT RULE: opposite signal on SAME COIN = flag open trades ────
-  // Chris Hunter: "If it fails to make a new low, exit your short"
-  // When a LONG fires, any open SHORT on the SAME coin = mark REVIEW EXIT
-  if(sig === 'LONG' || sig === 'SHORT'){
-    const opposite = sig === 'LONG' ? 'SHORT' : 'LONG';
-    entries.forEach(e => {
-      if(e.sig === opposite && e.status === 'open' && e.coin === coinId){
-        e.status = 'review_exit';
-        e.exitNote = `⚠ ${sig} signal fired on ${tf} — consider exiting this ${opposite}`;
-      }
-    });
-  }
-
-  entries.unshift(entry);
-  if(entries.length > MAX_LOG) entries.pop();
-  saveLog(entries);
-  renderLog();
-}
-
-function updateLogStatus(id, status){
-  const entries = loadLog();
-  const e = entries.find(x=>x.id===id);
-  if(e){ e.status=status; saveLog(entries); renderLog(); }
-}
-
-function clearLog(){
-  if(!confirm('Clear all signal history?')) return;
-  localStorage.removeItem(LOG_KEY);
-  renderLog();
-}
-
-function clearDedup(){
-  localStorage.removeItem(DEDUP_KEY);
-  // Also clear in-memory sentAlerts for all coins
-  Object.values(coinState).forEach(s => s.sentAlerts = {});
-  showToast('Signal lock cleared', 'All signals can now re-fire', false);
-}
-
-function renderLog(){
-  const entries = loadLog();
-  const el = document.getElementById('log-list');
-  if(!entries.length){ el.innerHTML='<div class="empty">No signals logged yet</div>'; return; }
-
-  el.innerHTML = entries.map(e=>{
-    const cls = e.sig==='LONG'?'long':e.sig==='SHORT'?'short':'neutral';
-    // Stale detection: mark signals older than 4h or where level has been broken
-    const ageMs = Date.now() - new Date(e.ts).getTime();
-    const isOld = ageMs > 4 * 3600000;
-    const coinPrice = e.coin && coinState[e.coin] ? coinState[e.coin].price : 0;
-    const levelBroken = e.status === 'open' && e.level && coinPrice > 0 && (
-      (e.sig === 'LONG' && coinPrice < e.level * 0.98) ||
-      (e.sig === 'SHORT' && coinPrice > e.level * 1.02)
-    );
-    const isStale = e.status === 'open' && (isOld || levelBroken);
-    const staleTag = isStale ? `<span style="font-size:8px;color:#5d7a99;background:#1a2230;padding:1px 5px;border-radius:3px;margin-left:4px">${levelBroken?'LEVEL BROKEN':'STALE'}</span>` : '';
-    const staleOpacity = isStale ? 'opacity:0.45;' : '';
-    const statusLabel = e.status === 'review_exit' ? '⚠ REVIEW EXIT' : e.status.toUpperCase();
-    const statusBadge = `<span class="log-status ${e.status}">${statusLabel}</span>`;
-    const rrBadge = e.rr ? `<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#ffc107">R:R ${e.rr}</span>` : '';
-    const prices = [
-      e.entryPrice ? `<span class="log-p"><span class="log-pl">ENTRY</span>$${fmt(e.entryPrice)}</span>` : '',
-      e.level      ? `<span class="log-p"><span class="log-pl">LVL</span>$${fmt(e.level)}</span>` : '',
-      e.target     ? `<span class="log-p"><span class="log-pl">TP</span><span style="color:${e.sig==='LONG'?'#00e676':'#ff3d5a'}">$${fmt(e.target)}</span></span>` : '',
-      e.stopPrice  ? `<span class="log-p"><span class="log-pl">SL</span><span style="color:#ff6b6b">$${fmt(e.stopPrice)}</span></span>` : '',
-    ].filter(Boolean).join('');
-
-    // Status update buttons (only for open trades)
-    const exitNoteEl = e.exitNote ? `<div style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#ff9800;margin-top:5px;padding:4px 8px;background:rgba(255,152,0,.05);border-radius:4px;border:1px solid rgba(255,152,0,.15)">${e.exitNote}</div>` : '';
-    // Trade button data — encode signal info for click-to-trade
-    const coinSym = (e.coin&&COINS[e.coin]) ? COINS[e.coin].shortLabel : 'BTC';
-    const tradeBtn = (e.status==='open' && e.sig !== 'NEUTRAL' && e.stopPrice) ? `
-        <button onclick="prefillTrade('${coinSym}','${e.sig}',${e.stopPrice||0},${e.target||0})" style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:4px 12px;border-radius:5px;border:1px solid rgba(255,193,7,.4);background:rgba(255,193,7,.1);color:#ffc107;cursor:pointer;font-weight:600">⚡ TRADE</button>` : '';
-    const btns = e.status==='open' ? `
-      <div style="display:flex;gap:6px;margin-top:8px">
-        ${tradeBtn}
-        <button onclick="updateLogStatus(${e.id},'hit')" style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:4px 10px;border-radius:5px;border:1px solid rgba(0,230,118,.3);background:rgba(0,230,118,.08);color:#00e676;cursor:pointer">✓ TP HIT</button>
-        <button onclick="updateLogStatus(${e.id},'stopped')" style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:4px 10px;border-radius:5px;border:1px solid rgba(255,61,90,.3);background:rgba(255,61,90,.08);color:#ff3d5a;cursor:pointer">✗ STOPPED</button>
-      </div>` : '';
-
-    return `<div class="log-item ${cls}" style="${staleOpacity}">
-      <div class="log-head">
-        <span class="log-coin" style="font-size:9px;font-weight:700;letter-spacing:.06em;background:#1a2230;padding:2px 5px;border-radius:3px;color:#7b8fa8;margin-right:4px">${(e.coin&&COINS[e.coin])?COINS[e.coin].shortLabel:'BTC'}</span><span class="log-sig ${e.sig}">${e.sig}</span>
-        <span class="log-tf">${e.tf}</span>
-        ${rrBadge}
-        ${statusBadge}${staleTag}
-        <span class="log-time2">${e.date} ${e.time}</span>
-      </div>
-      <div class="log-prices">${prices}</div>
-      <div class="log-reason">${e.reason}</div>
-      ${exitNoteEl}
-      ${btns}
-    </div>`;
-  }).join('');
-}
-
-// ── AUTO-OUTCOME DETECTION ───────────────────────────────
-// On each refresh, check open log entries against current price
-// If price has hit TP or SL level → auto-mark as hit/stopped
-function checkAutoOutcomes(coinId){
-  const s = coinState[coinId];
-  if(!s || s.price <= 0) return;
-  const entries = loadLog();
-  let changed = false;
-
-  entries.forEach(e => {
-    if(e.status !== 'open') return;
-    if(e.coin !== coinId) return;
-    if(!e.target && !e.stopPrice) return;
-
-    const p = s.price;
-    // For LONG: TP hit if price >= target, stopped if price <= SL
-    // For SHORT: TP hit if price <= target, stopped if price >= SL
-    if(e.sig === 'LONG'){
-      if(e.target && p >= e.target){
-        e.status = 'hit';
-        e.exitNote = `✓ Auto: TP hit at $${fmt(p)}`;
-        changed = true;
-      } else if(e.stopPrice && p <= e.stopPrice){
-        e.status = 'stopped';
-        e.exitNote = `✗ Auto: SL hit at $${fmt(p)}`;
-        changed = true;
-      }
-    } else if(e.sig === 'SHORT'){
-      if(e.target && p <= e.target){
-        e.status = 'hit';
-        e.exitNote = `✓ Auto: TP hit at $${fmt(p)}`;
-        changed = true;
-      } else if(e.stopPrice && p >= e.stopPrice){
-        e.status = 'stopped';
-        e.exitNote = `✗ Auto: SL hit at $${fmt(p)}`;
-        changed = true;
-      }
-    }
-  });
-
-  if(changed){
-    saveLog(entries);
-    renderLog();
-    renderStats();
-  }
-}
-
-// ── STATS ENGINE ──────────────────────────────────────────
-function calcStats(){
-  const entries = loadLog().filter(e => e.status === 'hit' || e.status === 'stopped');
-  if(!entries.length) return null;
-
-  const total  = entries.length;
-  const wins   = entries.filter(e=>e.status==='hit').length;
-  const losses = entries.filter(e=>e.status==='stopped').length;
-  const winRate = (wins/total*100).toFixed(0);
-
-  // By signal type
-  const byType = {};
-  entries.forEach(e => {
-    const k = e.type || 'UNKNOWN';
-    if(!byType[k]) byType[k] = {w:0,l:0};
-    e.status==='hit' ? byType[k].w++ : byType[k].l++;
-  });
-
-  // By timeframe
-  const byTF = {};
-  entries.forEach(e => {
-    const k = e.tf || '?';
-    if(!byTF[k]) byTF[k] = {w:0,l:0};
-    e.status==='hit' ? byTF[k].w++ : byTF[k].l++;
-  });
-
-  // By coin
-  const byCoin = {};
-  entries.forEach(e => {
-    const k = (e.coin && COINS[e.coin]) ? COINS[e.coin].shortLabel : 'BTC';
-    if(!byCoin[k]) byCoin[k] = {w:0,l:0};
-    e.status==='hit' ? byCoin[k].w++ : byCoin[k].l++;
-  });
-
-  // By session (hour of signal)
-  const bySession = {ASIA:{w:0,l:0},LONDON:{w:0,l:0},NY:{w:0,l:0},OTHER:{w:0,l:0}};
-  entries.forEach(e => {
-    const h = e.ts ? new Date(e.ts).getUTCHours() : -1;
-    const b = getSessionBoundaries();
-    let sess = 'OTHER';
-    if(h >= b.asiaOpen && h < b.asiaClose) sess = 'ASIA';
-    else if(h >= b.londonOpen && h < b.londonClose) sess = 'LONDON';
-    else if(h >= b.nyOpen && h < b.nyClose) sess = 'NY';
-    e.status==='hit' ? bySession[sess].w++ : bySession[sess].l++;
-  });
-
-  // Average R:R on wins vs losses
-  const winRR  = entries.filter(e=>e.status==='hit'&&e.rr).map(e=>+e.rr);
-  const lossRR = entries.filter(e=>e.status==='stopped'&&e.rr).map(e=>+e.rr);
-  const avgWinRR  = winRR.length  ? (winRR.reduce((a,b)=>a+b,0)/winRR.length).toFixed(1)  : null;
-  const avgLossRR = lossRR.length ? (lossRR.reduce((a,b)=>a+b,0)/lossRR.length).toFixed(1) : null;
-
-  // Streak (last 20)
-  const recent20 = entries.slice(0,20);
-  let curStreak=0, curStreakType='';
-  for(const e of recent20){
-    const w = e.status==='hit';
-    if(!curStreakType){ curStreakType=w?'W':'L'; curStreak=1; }
-    else if((curStreakType==='W')===w) curStreak++;
-    else break;
-  }
-
-  return { total, wins, losses, winRate, byType, byTF, byCoin, bySession,
-           avgWinRR, avgLossRR, streak: {count:curStreak, type:curStreakType},
-           recent20 };
-}
-
-function renderStats(){
-  const el = document.getElementById('stats-content');
-  if(!el) return;
-
-  // Count open/pending entries
-  const allEntries = loadLog();
-  const open = allEntries.filter(e=>e.status==='open').length;
-  const stats = calcStats();
-
-  if(!stats){
-    el.innerHTML = `<div class="empty" style="padding:40px 20px;text-align:center">
-      <div style="font-size:24px;margin-bottom:8px">📊</div>
-      <div style="color:#5d7a99;font-family:'IBM Plex Mono',monospace;font-size:10px">No completed trades yet</div>
-      <div style="color:#3d5068;font-family:'IBM Plex Mono',monospace;font-size:9px;margin-top:4px">${open} open · mark TP HIT or STOPPED in the Log tab</div>
-    </div>`;
-    return;
-  }
-
-  const wr = +stats.winRate;
-  const wrColor = wr>=60?'green':wr>=45?'yellow':'red';
-
-  // Type breakdown rows
-  const typeLabels = {FAIL_GAIN:'Fail to Gain',FAIL_LOSE:'Fail to Lose',BLIND_ENTRY:'Blind Entry',BREAKOUT:'Breakout'};
-  const typeRows = Object.entries(stats.byType)
-    .sort((a,b)=>(b[1].w+b[1].l)-(a[1].w+a[1].l))
-    .map(([k,v])=>{
-      const t=v.w+v.l, r=(v.w/t*100).toFixed(0);
-      const cls=+r>=60?'green':+r>=45?'yellow':'red';
-      return `<tr><td>${typeLabels[k]||k}</td><td>${v.w}W / ${v.l}L</td><td class="${cls}">${r}%</td></tr>`;
-    }).join('');
-
-  // TF breakdown rows
-  const tfRows = Object.entries(stats.byTF)
-    .sort((a,b)=>(b[1].w+b[1].l)-(a[1].w+a[1].l))
-    .map(([k,v])=>{
-      const t=v.w+v.l, r=(v.w/t*100).toFixed(0);
-      const cls=+r>=60?'green':+r>=45?'yellow':'red';
-      return `<tr><td>${k}</td><td>${v.w}W / ${v.l}L</td><td class="${cls}">${r}%</td></tr>`;
-    }).join('');
-
-  // Session breakdown rows
-  const sessRows = Object.entries(stats.bySession)
-    .filter(([,v])=>v.w+v.l>0)
-    .map(([k,v])=>{
-      const t=v.w+v.l, r=(v.w/t*100).toFixed(0);
-      const cls=+r>=60?'green':+r>=45?'yellow':'red';
-      const emoji = k==='ASIA'?'🌏':k==='LONDON'?'🇬🇧':k==='NY'?'🗽':k==='OTHER'?'🗽':'🌙';
-      const label = k==='OTHER' ? 'NEW YORK' : k;
-      return `<tr><td>${emoji} ${label}</td><td>${v.w}W / ${v.l}L</td><td class="${cls}">${r}%</td></tr>`;
-    }).join('');
-
-  // Streak dots
-  const streakDots = stats.recent20.map(e =>
-    `<div class="streak-dot" style="background:${e.status==='hit'?'#00e676':'#ff3d5a'}"></div>`
-  ).join('');
-
-  // Coin breakdown rows
-  const coinRows = Object.entries(stats.byCoin)
-    .sort((a,b)=>(b[1].w+b[1].l)-(a[1].w+a[1].l))
-    .map(([k,v])=>{
-      const t=v.w+v.l, r=(v.w/t*100).toFixed(0);
-      const cls=+r>=60?'green':+r>=45?'yellow':'red';
-      return `<tr><td>${k}</td><td>${v.w}W / ${v.l}L</td><td class="${cls}">${r}%</td></tr>`;
-    }).join('');
-
-  el.innerHTML = `
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="stat-val ${wrColor}">${stats.winRate}%</div>
-        <div class="stat-lbl">Win Rate</div>
-        <div class="stat-bar-wrap"><div class="stat-bar" style="width:${stats.winRate}%;background:${wr>=60?'#00e676':wr>=45?'#ffc107':'#ff3d5a'}"></div></div>
-        <div class="stat-sub">${stats.wins}W · ${stats.losses}L · ${stats.total} total</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-val white">${stats.streak.count}</div>
-        <div class="stat-lbl">${stats.streak.type==='W'?'Win':'Loss'} Streak</div>
-        <div class="stat-streak">${streakDots}</div>
-      </div>
-      ${stats.avgWinRR ? `
-      <div class="stat-card">
-        <div class="stat-val green">${stats.avgWinRR}</div>
-        <div class="stat-lbl">Avg R:R (wins)</div>
-        <div class="stat-sub">${stats.avgLossRR?`${stats.avgLossRR} avg R:R on losses`:''}</div>
-      </div>` : ''}
-      <div class="stat-card ${stats.avgWinRR ? '' : 'full'}">
-        <div class="stat-val white">${open}</div>
-        <div class="stat-lbl">Open Trades</div>
-        <div class="stat-sub">Auto-checking TP/SL on refresh</div>
-      </div>
-      <div class="stat-card full">
-        <div class="stat-lbl" style="margin-bottom:2px">By Signal Type</div>
-        <table class="stat-table"><tbody>${typeRows}</tbody></table>
-      </div>
-      <div class="stat-card full">
-        <div class="stat-lbl" style="margin-bottom:2px">By Timeframe</div>
-        <table class="stat-table"><tbody>${tfRows}</tbody></table>
-      </div>
-      ${sessRows ? `<div class="stat-card full">
-        <div class="stat-lbl" style="margin-bottom:2px">By Session</div>
-        <table class="stat-table"><tbody>${sessRows}</tbody></table>
-      </div>` : ''}
-      ${coinRows ? `<div class="stat-card full">
-        <div class="stat-lbl" style="margin-bottom:2px">By Coin</div>
-        <table class="stat-table"><tbody>${coinRows}</tbody></table>
-      </div>` : ''}
-      <div class="stat-card full" id="equity-curve-card">
-        <div class="stat-lbl" style="margin-bottom:6px">Equity Curve (Closed Trades)</div>
-        <canvas id="equity-canvas" width="600" height="200" style="width:100%;height:160px;border-radius:6px"></canvas>
-        <div id="equity-stats" style="margin-top:6px"></div>
-      </div>
-    </div>`;
-
-  // Draw equity curve after DOM update
-  setTimeout(drawEquityCurve, 50);
-}
-
-function drawEquityCurve(){
-  const canvas = document.getElementById('equity-canvas');
-  const statsEl = document.getElementById('equity-stats');
-  if(!canvas || !statsEl) return;
-
-  const closed = loadClosedTrades();
-  if(closed.length < 2){
-    statsEl.innerHTML = '<div style="color:#5d7a99;font-size:9px;font-family:\'IBM Plex Mono\',monospace">Need at least 2 closed trades for equity curve</div>';
-    return;
-  }
-
-  // Build equity series (oldest → newest, cumulative P&L)
-  const trades = [...closed].reverse(); // oldest first
-  const equityPts = [{ pnl: 0, ts: null }]; // start at 0
-  let cumPnl = 0;
-  trades.forEach(t => {
-    cumPnl += t.pnl;
-    equityPts.push({ pnl: cumPnl, ts: t.ts });
-  });
-
-  // Calculate max drawdown
-  let peak = -Infinity, maxDD = 0, maxDDpeak = 0;
-  let ddStart = 0, ddEnd = 0, ddPeakIdx = 0;
-  equityPts.forEach((pt, i) => {
-    if(pt.pnl > peak){ peak = pt.pnl; ddPeakIdx = i; }
-    const dd = peak - pt.pnl;
-    if(dd > maxDD){ maxDD = dd; maxDDpeak = peak; ddStart = ddPeakIdx; ddEnd = i; }
-  });
-
-  // Current drawdown from peak
-  const currentPeak = Math.max(...equityPts.map(p => p.pnl));
-  const currentDD = currentPeak - equityPts[equityPts.length - 1].pnl;
-
-  // Draw on canvas
-  const ctx = canvas.getContext('2d');
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = canvas.offsetWidth * dpr;
-  canvas.height = canvas.offsetHeight * dpr;
-  ctx.scale(dpr, dpr);
-  const W = canvas.offsetWidth;
-  const H = canvas.offsetHeight;
-  const pad = { t: 10, b: 20, l: 40, r: 10 };
-
-  const vals = equityPts.map(p => p.pnl);
-  const minV = Math.min(0, ...vals);
-  const maxV = Math.max(0, ...vals);
-  const range = maxV - minV || 1;
-
-  function x(i){ return pad.l + (i / (equityPts.length - 1)) * (W - pad.l - pad.r); }
-  function y(v){ return pad.t + (1 - (v - minV) / range) * (H - pad.t - pad.b); }
-
-  // Background
-  ctx.fillStyle = '#0a1628';
-  ctx.fillRect(0, 0, W, H);
-
-  // Zero line
-  ctx.strokeStyle = '#1a2d45';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([4, 4]);
-  ctx.beginPath();
-  ctx.moveTo(pad.l, y(0));
-  ctx.lineTo(W - pad.r, y(0));
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  // Max drawdown shaded area
-  if(maxDD > 0 && ddEnd > ddStart){
-    ctx.fillStyle = 'rgba(255,61,90,0.1)';
-    ctx.beginPath();
-    ctx.moveTo(x(ddStart), y(equityPts[ddStart].pnl));
-    for(let i = ddStart; i <= ddEnd; i++) ctx.lineTo(x(i), y(equityPts[i].pnl));
-    ctx.lineTo(x(ddEnd), y(equityPts[ddStart].pnl));
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  // Fill under curve
-  const finalPnl = equityPts[equityPts.length - 1].pnl;
-  const gradient = ctx.createLinearGradient(0, y(maxV), 0, y(minV));
-  if(finalPnl >= 0){
-    gradient.addColorStop(0, 'rgba(0,230,118,0.25)');
-    gradient.addColorStop(1, 'rgba(0,230,118,0.02)');
-  } else {
-    gradient.addColorStop(0, 'rgba(255,61,90,0.02)');
-    gradient.addColorStop(1, 'rgba(255,61,90,0.25)');
-  }
-  ctx.beginPath();
-  ctx.moveTo(x(0), y(0));
-  equityPts.forEach((pt, i) => ctx.lineTo(x(i), y(pt.pnl)));
-  ctx.lineTo(x(equityPts.length - 1), y(0));
-  ctx.closePath();
-  ctx.fillStyle = gradient;
-  ctx.fill();
-
-  // Equity line
-  ctx.beginPath();
-  ctx.strokeStyle = finalPnl >= 0 ? '#00e676' : '#ff3d5a';
-  ctx.lineWidth = 2;
-  equityPts.forEach((pt, i) => {
-    if(i === 0) ctx.moveTo(x(i), y(pt.pnl));
-    else ctx.lineTo(x(i), y(pt.pnl));
-  });
-  ctx.stroke();
-
-  // Dots on each trade
-  equityPts.forEach((pt, i) => {
-    if(i === 0) return;
-    const win = trades[i - 1].pnl >= 0;
-    ctx.beginPath();
-    ctx.arc(x(i), y(pt.pnl), 3, 0, Math.PI * 2);
-    ctx.fillStyle = win ? '#00e676' : '#ff3d5a';
-    ctx.fill();
-  });
-
-  // Y axis labels
-  ctx.fillStyle = '#5d7a99';
-  ctx.font = '9px IBM Plex Mono, monospace';
-  ctx.textAlign = 'right';
-  ctx.fillText('$' + maxV.toFixed(0), pad.l - 4, y(maxV) + 3);
-  ctx.fillText('$' + minV.toFixed(0), pad.l - 4, y(minV) + 3);
-  if(minV < 0 && maxV > 0) ctx.fillText('$0', pad.l - 4, y(0) + 3);
-
-  // Trade count label
-  ctx.fillStyle = '#3d5068';
-  ctx.textAlign = 'center';
-  ctx.font = '8px IBM Plex Mono, monospace';
-  ctx.fillText(`${trades.length} trades`, W / 2, H - 2);
-
-  // Stats below chart
-  const totalPnl = cumPnl;
-  const avgTrade = totalPnl / trades.length;
-  const winners = trades.filter(t => t.pnl >= 0).length;
-  const losers = trades.length - winners;
-  const avgWin = winners > 0 ? trades.filter(t => t.pnl >= 0).reduce((s, t) => s + t.pnl, 0) / winners : 0;
-  const avgLoss = losers > 0 ? trades.filter(t => t.pnl < 0).reduce((s, t) => s + t.pnl, 0) / losers : 0;
-  const profitFactor = Math.abs(avgLoss) > 0 ? (avgWin * winners) / Math.abs(avgLoss * losers) : Infinity;
-
-  statsEl.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-family:'IBM Plex Mono',monospace;font-size:9px">
-      <div style="color:#5d7a99">Total P&L</div>
-      <div style="color:${totalPnl>=0?'#00e676':'#ff3d5a'};text-align:right">${totalPnl>=0?'+':''}$${totalPnl.toFixed(2)}</div>
-      <div style="color:#5d7a99">Avg Trade</div>
-      <div style="color:${avgTrade>=0?'#00e676':'#ff3d5a'};text-align:right">${avgTrade>=0?'+':''}$${avgTrade.toFixed(2)}</div>
-      <div style="color:#5d7a99">Avg Win / Loss</div>
-      <div style="text-align:right"><span style="color:#00e676">+$${avgWin.toFixed(2)}</span> / <span style="color:#ff3d5a">$${avgLoss.toFixed(2)}</span></div>
-      <div style="color:#5d7a99">Profit Factor</div>
-      <div style="color:${profitFactor>=1?'#00e676':'#ff3d5a'};text-align:right">${profitFactor === Infinity ? '∞' : profitFactor.toFixed(2)}</div>
-      <div style="color:#5d7a99">Max Drawdown</div>
-      <div style="color:#ff3d5a;text-align:right">-$${maxDD.toFixed(2)}</div>
-      <div style="color:#5d7a99">Current DD</div>
-      <div style="color:${currentDD>0?'#ff3d5a':'#00e676'};text-align:right">${currentDD>0?'-$'+currentDD.toFixed(2):'$0.00'}</div>
-    </div>`;
-}
-
-// ── REBUILD EQUITY CURVE FROM HYPERLIQUID FILLS ──────────
-// Fetches ALL fills from HL API (main + HIP-3 dexes) from a configurable start date,
-// groups closing fills into round-trip trades, and replaces the closedTrades in localStorage.
-// This produces an equity curve that matches the verified daily reports.
-async function rebuildFromHL() {
-  const btn = document.getElementById('rebuild-btn');
-  if (!btn) return;
-  btn.textContent = 'SYNCING...';
-  btn.disabled = true;
-  btn.style.opacity = '0.5';
-
-  try {
-    // For fills we only need the public address — no wallet/signing required
-    const queryAddr = (
-      HL.masterAddress ||
-      HL.address ||
-      localStorage.getItem('hl_master_addr') ||
-      ''
-    ).trim().toLowerCase() || null;
-    if (!queryAddr) {
-      showToast('Set your HL address in Settings first', '', true);
-      return;
-    }
-
-    // Fetch fills starting from April 1, 2026 (covers full bot history)
-    // Use a wide window to capture everything; API returns fills in time order
-    const startMs = new Date('2026-04-01T00:00:00Z').getTime();
-    const endMs = Date.now();
-    const API = HL.API || 'https://api.hyperliquid.xyz';
-
-    // Fetch from both main dex and HIP-3 dexes
-    const dexes = [null, ...(HL.HIP3_DEXES || ['xyz'])];
-    const allFills = [];
-    const seenTids = new Set(); // deduplicate fills that appear in both dex queries
-
-    for (const dex of dexes) {
-      // HL API limits to ~2000 fills per request; paginate by time
-      let curStart = startMs;
-      let page = 0;
-      while (curStart < endMs && page < 20) { // safety: max 20 pages
-        const body = { type: 'userFillsByTime', user: queryAddr, startTime: curStart, endTime: endMs };
-        if (dex) body.dex = dex;
-        const r = await fetch(API + '/info', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        });
-        if (!r.ok) break;
-        const fills = await r.json();
-        if (!Array.isArray(fills) || fills.length === 0) break;
-
-        for (const f of fills) {
-          if (!seenTids.has(f.tid)) {
-            seenTids.add(f.tid);
-            allFills.push(f);
-          }
-        }
-
-        // If we got fewer than 2000, we've fetched everything
-        if (fills.length < 2000) break;
-        // Otherwise, paginate forward from the last fill's time + 1ms
-        curStart = fills[fills.length - 1].time + 1;
-        page++;
-      }
-    }
-
-    if (allFills.length === 0) {
-      showToast('No fills found from Hyperliquid', '', true);
-      return;
-    }
-
-    // Sort all fills by time (oldest first)
-    allFills.sort((a, b) => a.time - b.time);
-    console.log(`HL Rebuild: ${allFills.length} total fills fetched`);
-
-    // Filter to closing fills only (closedPnl !== 0)
-    const closeFills = allFills.filter(f => parseFloat(f.closedPnl || '0') !== 0);
-    console.log(`HL Rebuild: ${closeFills.length} closing fills`);
-
-    if (closeFills.length === 0) {
-      showToast('No closed trades found', '', true);
-      return;
-    }
-
-    // Group closing fills into trade clusters (same coin, within 2 seconds)
-    const clusters = [];
-    for (const f of closeFills) {
-      const last = clusters.length ? clusters[clusters.length - 1] : null;
-      if (last && last.coin === f.coin && Math.abs(f.time - last.endTs) < 2000) {
-        last.fills.push(f);
-        last.endTs = f.time;
-      } else {
-        clusters.push({ coin: f.coin, fills: [f], startTs: f.time, endTs: f.time });
-      }
-    }
-
-    // Build closedTrades array from clusters
-    const newClosed = [];
-    for (const cl of clusters) {
-      let totalSize = 0, totalPnl = 0, weightedPx = 0, totalFee = 0;
-      let side = null;
-      for (const f of cl.fills) {
-        const sz = parseFloat(f.sz || '0');
-        const px = parseFloat(f.px || '0');
-        totalSize += sz;
-        weightedPx += sz * px;
-        totalPnl += parseFloat(f.closedPnl || '0');
-        totalFee += parseFloat(f.fee || '0');
-        if (!side) side = f.side === 'B' ? 'SHORT' : 'LONG';
-      }
-      const avgExitPx = totalSize > 0 ? weightedPx / totalSize : 0;
-
-      // Estimate entry from P&L
-      let entryPx = 0;
-      if (totalPnl !== 0 && totalSize > 0) {
-        if (side === 'LONG') entryPx = avgExitPx - totalPnl / totalSize;
-        else entryPx = avgExitPx + totalPnl / totalSize;
-      }
-
-      // Net PnL = closedPnl - fees
-      const netPnl = totalPnl - totalFee;
-
-      const reason = totalPnl > 0 ? 'tp_hit' : 'sl_hit';
-
-      newClosed.push({
-        coin: cl.coin, side, size: totalSize,
-        entry: entryPx, exit: avgExitPx, pnl: netPnl,
-        ts: new Date(cl.startTs).toISOString(), reason,
-        fee: totalFee, grossPnl: totalPnl
-      });
-    }
-
-    // Sort newest first (same order as the app expects)
-    newClosed.sort((a, b) => new Date(b.ts) - new Date(a.ts));
-
-    // Replace localStorage
-    saveClosedTrades(newClosed);
-
-    // Rebuild signal log from closed trades so calcStats() works
-    // (the STATS tab reads from signal log for win/loss tables + from closedTrades for equity curve)
-    const symToId = SYM_TO_COIN_ID;
-    const newLog = newClosed.map(t => {
-      const coinId = symToId[t.coin] || t.coin;
-      const h = new Date(t.ts).getUTCHours();
-      return {
-        ts: t.ts,
-        coin: coinId,
-        sig: t.side,
-        status: t.pnl >= 0 ? 'hit' : 'stopped',
-        type: 'BLIND_ENTRY', // best guess — fills don't carry signal type
-        tf: '4H',            // best guess — fills don't carry timeframe
-        rr: null,
-        exitPrice: t.exit,
-        pnl: t.pnl,
-        exitNote: `HL fill: ${t.pnl >= 0 ? 'TP' : 'SL'} at $${t.exit.toFixed(2)} | P&L: ${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)}`
-      };
-    });
-    // Signal log expects newest first
-    saveLog(newLog);
-    console.log(`HL Rebuild: ${newClosed.length} trades saved, signal log rebuilt with ${newLog.length} entries`);
-
-    // Calculate and show summary
-    const totalNet = newClosed.reduce((s, t) => s + t.pnl, 0);
-    const wins = newClosed.filter(t => t.pnl >= 0).length;
-    showToast(
-      `Rebuilt: ${newClosed.length} trades from HL`,
-      `Net P&L: ${totalNet >= 0 ? '+' : ''}$${totalNet.toFixed(2)} | ${wins}W/${newClosed.length - wins}L`,
-      totalNet < 0
-    );
-
-    // Refresh stats, equity curve, and log tab
-    renderStats();
-    if (typeof renderLog === 'function') renderLog();
-
-  } catch (e) {
-    console.error('HL Rebuild error:', e);
-    showToast('Rebuild failed: ' + e.message, '', true);
-  } finally {
-    btn.textContent = 'SYNC HL';
-    btn.disabled = false;
-    btn.style.opacity = '1';
-  }
-}
-
-function setStatus(s,t){
-  document.getElementById('dot').className='dot '+(s==='ok'?'ok':s==='err'?'err':'');
-  document.getElementById('status-txt').textContent=t;
-}
-
-// ── MAIN ──────────────────────────────────────────────────
-// Progressive: each TF renders as soon as its data arrives.
-// Daily fetched first (fast) → used for PDH/PDL context on all TFs.
-// Weekly fetched in parallel but renders independently.
-
-function processTF(i, candles, dCandles, coinId, lowerCandles){
-  coinId = coinId || activeCoin;
-  const s = coinState[coinId];
-  const tf = TFS[i];
-  const a = atr(candles);
-  // Pass htfDir + asiaLevels as plain object (v4.9 fix: String objects break === comparison)
-  const htfCarrier = { dir: s.htfDir || 'UNCLEAR', __asiaLevels: s.asiaLevels || [] };
-  const coinCfg = COINS[coinId] || {};
-  const coinMinRR = coinCfg.minRR || 1.0;
-  const coinMinStopPct = coinCfg.minStopPct || 0.005;
-  const coinFeeEst = coinCfg.feeEst || 0.05;
-  // v5.24: per-asset retest tuning (breakDistFloorPct, minBreakCloses)
-  const coinOpts = { breakDistFloorPct: coinCfg.breakDistFloorPct, minBreakCloses: coinCfg.minBreakCloses };
-  const d = dms(candles, a, dCandles, tf.l, htfCarrier, lowerCandles || null, coinMinRR, coinMinStopPct, coinFeeEst, coinOpts);
-  s.results[tf.l] = d;
-  // Alerts fire for all coins regardless of active view
-  if(d.type!=='NONE' && d.type!=='AT_LEVEL'){
-    // v4.9: Cross-TF conflict prevention — if a tradeable signal already fired
-    // in one direction this scan cycle, block opposite direction on other TFs
-    if(s._firedDir && d.sig !== 'NEUTRAL' && d.sig !== s._firedDir){
-      console.log(`CONFLICT-BLOCKED: ${tf.l} ${d.sig} suppressed — already fired ${s._firedDir} this cycle`);
-    } else {
-    // PRIMARY DEDUP: localStorage-backed — survives page refreshes
-    // Same coin+tf+type+level can't re-fire within 4h (8h for blind entries)
-    if(!isDedupSuppressed(coinId, tf.l, d.type, d.level)){
-      markDedupFired(coinId, tf.l, d.type, d.level);
-      // Track committed direction for this scan cycle
-      if(d.sig !== 'NEUTRAL' && d.type === 'BLIND_ENTRY') s._firedDir = d.sig;
-      maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, coinId, s, d.stopPrice);
-      addLog(d.sig, tf.l, d.reason, d.type, d.level, d.target, d.rr, d.stopPrice, coinId);
-      // ── AUTO-TRADE: trigger Hyperliquid execution if enabled ──
-      if(HL.enabled && HL.wallet && d.sig !== 'NEUTRAL' && d.stopPrice){
-        // Compute overall coin confidence (v5.1: totalWeight denominator — synced w/ bot.js & renderHero)
-        let wL=0, wS=0, aW=0;
-        const totalW=TFS.reduce((sum,t)=>sum+t.w,0);
-        TFS.forEach(t=>{ const r=s.results[t.l]; if(!r)return; if(r.type!=='NONE')aW+=t.w; if(r.sig==='LONG')wL+=t.w; if(r.sig==='SHORT')wS+=t.w; });
-        let conf = totalW>0 ? Math.round(Math.max(wL,wS)/totalW*100) : 0;
-        const baseMinConf = parseInt(localStorage.getItem('hl_min_conf') || '50');
-        const majorSig = wL > wS ? 'LONG' : wS > wL ? 'SHORT' : null;
-        const SYM = { bitcoin:'BTC', hyperliquid:'HYPE', sp500:'SPX', gold:'GOLD', crude:'CRUDE' };
-        const sym = SYM[coinId] || coinId;
-
-        // v5.11: Counter-trend gate loosened from v4.9 hard block.
-        // Retest signals can catch regime reversals; allow counter-trend
-        // when confidence is strong enough (multi-TF backing).
-        const htfDir = s.htfDir || 'UNCLEAR';
-        const storyDir = s.lastStory?.storyDir || 'UNCLEAR';
-        const withTrend = (d.sig === 'LONG' && htfDir === 'UP') || (d.sig === 'SHORT' && htfDir === 'DOWN');
-        const counterTrend = (d.sig === 'LONG' && htfDir === 'DOWN') || (d.sig === 'SHORT' && htfDir === 'UP');
-        const storyAgrees = (d.sig === 'LONG' && storyDir === 'UP') || (d.sig === 'SHORT' && storyDir === 'DOWN');
-        const storyConflicts = (d.sig === 'LONG' && storyDir === 'DOWN') || (d.sig === 'SHORT' && storyDir === 'UP');
-        const COUNTER_CONF_MIN = 40;
-        const counterTrendBlock = counterTrend && conf < COUNTER_CONF_MIN;
-
-        if(counterTrendBlock){
-          console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: counter-trend (HTF ${htfDir}), conf ${conf}% < ${COUNTER_CONF_MIN}% (v5.11 retest gate)`);
-        } else if(storyConflicts && htfDir === 'UNCLEAR'){
-          // Scenario A: HTF unclear but story says opposite — block
-          console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: story ${storyDir} conflicts, HTF unclear — counter-structure`);
-        // v5.4: SP500 session-scaled sizing (synced w/ bot.js).
-        // Replaces the flat outside-US-session block with a tiered cap: STRONG UP+US $750,
-        // UP+US $500, UP+non-US $200, otherwise block. Stashes the chosen cap on coinState
-        // so executeTrade picks it up via the v5.4 override.
-        } else if(coinId === 'sp500' && d.sig === 'LONG' && (() => {
-          const { cap, tier } = sp500EffectiveCap('LONG', conf, s.results);
-          if (cap <= 0) {
-            console.log(`HL auto-trade BLOCKED ${sym} LONG: ${tier} -- v5.4 session-scaled sizing`);
-            return true; // block
-          }
-          coinState[coinId].effectiveMaxNotional = cap;
-          console.log(`HL: ${sym} LONG sizing tier '${tier}' -> maxNotional=$${cap} (conf ${conf}%) [v5.4]`);
-          return false; // allow
-        })()){
-          // blocked by v5.4 session-scaled sizing (cap = 0)
-        // v5.1: GOLD session filter (synced w/ bot.js)
-        } else if(coinId === 'gold' && d.sig === 'LONG' && !(new Date().getUTCHours() >= 13 && new Date().getUTCHours() < 20)){
-          console.log(`HL auto-trade BLOCKED ${sym} LONG: outside gold session (${new Date().getUTCHours()}:00 UTC)`);
-        // v5.3: Regime-aware directional blocking (synced w/ bot.js)
-        // When 1W + 1D both agree on direction, block counter-regime trades with <80% confidence
-        } else if((() => {
-          const weeklyResult = s.results['1W'];
-          const dailyResult = s.results['1D'];
-          const weeklyDir = weeklyResult?.sig;
-          const dailyDir = dailyResult?.sig;
-          if (weeklyDir && dailyDir && weeklyDir === dailyDir && weeklyDir !== 'NEUTRAL') {
-            if (d.sig !== weeklyDir && conf < 80) {
-              console.log(`HL REGIME BLOCK: ${sym} ${d.sig} blocked — 1W+1D both ${weeklyDir}, conf ${conf}% < 80% (v5.3)`);
-              showToast(`REGIME BLOCK: ${sym} ${d.sig}`, `1W+1D ${weeklyDir === 'LONG' ? 'bullish' : 'bearish'}, conf ${conf}% < 80%`, true);
-              return true;
-            }
-            if (d.sig !== weeklyDir) {
-              console.log(`HL: ${sym} ${d.sig} ALLOWED despite regime ${weeklyDir} — conf ${conf}% >= 80% (v5.3)`);
-            }
-          }
-          return false;
-        })()){
-          // blocked by regime filter above
-        } else {
-        // v5.11: log when counter-trend is allowed through (conf >= COUNTER_CONF_MIN)
-        if(counterTrend){
-          console.log(`HL: ${sym} ${d.sig} counter-trend ALLOWED — conf ${conf}% >= ${COUNTER_CONF_MIN}% (v5.11 retest gate, HTF ${htfDir})`);
-        }
-        // v5.13: Range-awareness filter — downgrade confidence near 48h range extremes (BTC only)
-        if (coinId === 'bitcoin') {
-          const range = s?.range48h;
-          if (range && range.high > range.low) {
-            const rangeSize = range.high - range.low;
-            const currentPx = s.price || 0;
-            if (currentPx > 0 && rangeSize > 0) {
-              const pricePos = (currentPx - range.low) / rangeSize;
-              const badEntry = (d.sig === 'SHORT' && pricePos < 0.30) || (d.sig === 'LONG' && pricePos > 0.70);
-              if (badEntry) {
-                const oldConf = conf;
-                conf = Math.max(conf - 12, 0);
-                console.log(`HL RANGE-AWARE: ${sym} ${d.sig} conf ${oldConf}% -> ${conf}% — price at ${(pricePos*100).toFixed(0)}% of 48h range [v5.13]`);
-              }
-            }
-          }
-        }
-
-        // v5.13: Funding rate signal amplifier — boost when carry aligns with signal
-        {
-          const fundingRate = s?.fundingRate;
-          if (fundingRate != null && Math.abs(fundingRate) > 0.0001) {
-            const fundingFavors = fundingRate > 0 ? 'SHORT' : 'LONG';
-            if (d.sig === fundingFavors) {
-              const oldConf = conf;
-              conf = Math.min(conf + 8, 100);
-              console.log(`HL FUNDING BOOST: ${sym} ${d.sig} conf ${oldConf}% -> ${conf}% — funding ${(fundingRate*100).toFixed(4)}%/8h [v5.13]`);
-            }
-          }
-        }
-
-        // v5.13: BTC time-of-day filter — reduce confidence during US session (13-20 UTC)
-        if (coinId === 'bitcoin') {
-          const utcHour = new Date().getUTCHours();
-          if (utcHour >= 13 && utcHour < 20) {
-            const oldConf = conf;
-            conf = Math.max(conf - 10, 0);
-            console.log(`HL TIME-OF-DAY: ${sym} ${d.sig} conf ${oldConf}% -> ${conf}% — US session (${utcHour}:00 UTC) [v5.13]`);
-          }
-        }
-
-        // Scenario B: story conflicts but HTF agrees — remove with-trend bonus
-        // Scenario C: both agree — keep with-trend bonus
-        const effectiveWithTrend = withTrend && !storyConflicts;
-        const minConf = effectiveWithTrend ? Math.max(baseMinConf - 15, 25) : storyConflicts ? Math.min(baseMinConf + 15, 80) : baseMinConf;
-        const trendLabel = counterTrend ? 'COUNTER-TREND(allowed)' : effectiveWithTrend ? 'WITH-TREND' : storyConflicts ? 'COUNTER-STORY' : 'NEUTRAL-TREND';
-
-        if(conf < minConf){
-          console.log(`HL auto-trade SKIP ${sym} ${d.sig}: conf ${conf}% < ${minConf}% (${trendLabel}, base ${baseMinConf}%)`);
-        } else if(d.sig !== majorSig){
-          console.log(`HL auto-trade SKIP ${sym}: signal ${d.sig} != majority ${majorSig}`);
-        } else if(HL.activeTrades[coinId]){
-          const existing = HL.activeTrades[coinId];
-          if(existing.side === d.sig){
-            // Same direction — SKIP (max 1 position per coin to limit exposure)
-            console.log(`HL auto-trade SKIP ${sym}: already in ${existing.side} (no stacking)`);
-          } else {
-            // ── POSITION-AWARE: Opposite direction — auto-close existing position ──
-            console.log(`HL POSITION-AWARE: CLOSE ${existing.side} ${sym} — opposite ${d.sig} signal fired (${tf.l}, conf ${conf}%)`);
-            showToast(`AUTO-CLOSE ${existing.side} ${sym}`, `Opposite ${d.sig} signal (${conf}%)`, true);
-            const isLong = existing.side === 'LONG';
-            const px = coinState[coinId].price;
-            const slip = px * 0.01;
-            const closePx = isLong ? px - slip : px + slip;
-            HL.placeOrder(existing.asset, !isLong, existing.size, closePx, { limit: { tif: 'Ioc' } }, true).then(async result => {
-              if(!result){ console.error('HL auto-close returned null'); return; }
-              if(result.status !== 'err' && (result.filled || result.totalSz)){
-                const exitPrice = result.avgPx ? +result.avgPx : px;
-                const pnl = isLong ? (exitPrice - existing.entry) * existing.size : (existing.entry - exitPrice) * existing.size;
-                const closed = loadClosedTrades();
-                closed.unshift({ coin: existing.asset, side: existing.side, size: existing.size,
-                  entry: existing.entry, exit: exitPrice, pnl, ts: new Date().toISOString(), reason: 'opposite_signal' });
-                saveClosedTrades(closed);
-                delete HL.activeTrades[coinId]; HL.saveActiveTrades();
-                showToast(`CLOSED ${existing.side} ${sym}: P&L $${pnl.toFixed(2)}`, '', pnl < 0);
-                // Now open the new opposite trade
-                HL.executeTrade(coinId, { ...d, tf: tf.l }, conf).then(r => {
-                  if(r) { showToast(`REVERSED: ${d.sig} ${sym}`, '', d.sig === 'SHORT'); HL.syncPositions(); }
-                }).catch(e => console.error('HL reverse trade error:', e));
-              } else {
-                console.error('HL auto-close failed:', result); showToast(`Auto-close ${sym} failed`, '', true);
-              }
-            }).catch(e => { console.error('HL auto-close error:', e); showToast('Auto-close error: ' + e.message, '', true); });
-          }
-        } else {
-          // Check max concurrent positions (limit exposure)
-          const MAX_POSITIONS = 4;
-          const openCount = Object.keys(HL.activeTrades).length;
-          if(openCount >= MAX_POSITIONS){
-            console.log(`HL auto-trade SKIP ${sym}: max ${MAX_POSITIONS} positions reached (${openCount} open)`);
-          } else {
-            console.log(`HL auto-trade FIRE ${sym} ${d.sig} | conf: ${conf}% (min: ${minConf}%, ${trendLabel}) | SL: ${d.stopPrice} | positions: ${openCount+1}/${MAX_POSITIONS}`);
-            showToast(`AUTO: ${d.sig} ${sym} (${conf}% ${trendLabel})`, `SL: $${fmt(d.stopPrice)}`, d.sig === 'SHORT');
-            HL.executeTrade(coinId, { ...d, tf: tf.l }, conf).then(r => {
-              if(r) { showToast(`FILLED: ${d.sig} ${sym}`, '', d.sig === 'SHORT'); HL.syncPositions(); }
-              else showToast(`AUTO-TRADE: ${sym} order not filled`, '', true);
-            }).catch(e=>{ console.error('HL auto-trade error:', e); showToast('AUTO-TRADE ERROR: ' + e.message, '', true); });
-          }
-        }
-      }
-      } // close counterTrend else
-    }
-  }
-  } // close cross-TF conflict else
-  // Only re-render UI if this coin is the one currently being viewed
-  if(coinId === activeCoin){
-    syncActiveState();
-    renderHero();
-    renderCards();
-  }
-  // Auto-outcome check runs for all coins (not just active)
-  checkAutoOutcomes(coinId);
-}
-
-// ── PER-COIN RUN LOOP ─────────────────────────────────────
-async function runCoin(coinId){
-  const s = coinState[coinId];
-  if(s.running) return;
-  s.running = true;
-  const isActive = coinId === activeCoin;
-
-  // Show spinner only for active coin
-  if(isActive){
-    document.getElementById('fab').classList.add('spin');
-    setStatus('loading','Fetching '+COINS[coinId].shortLabel+'...');
-  }
-
-  try{
-    const td = await getPrice(coinId);
-    s.price = td.price; s.change = td.change;
-    if(isActive){ syncActiveState(); renderTop(td); }
-
-    // Smart refresh: HTF (1W, 1D) every 15min, LTF (4H, 1H, 15m) every cycle
+async function getPrice(coinId){
+  const coin = COINS[coinId];
+  if(coin.exchange === 'hyperliquid'){
+    // Use latest 1h candle for price, daily for 24h change
     const now = Date.now();
-    const htfStale = !s.lastHTFRefresh || (now - s.lastHTFRefresh) > 15 * 60 * 1000;
-    const fetchIndices = htfStale ? [0,1,2,3,4] : [2,3,4]; // skip 1W/1D when fresh
-
-    const allFetches = fetchIndices.map(i =>
-      getCandles(TFS[i], coinId)
-        .then(c => ({ i, c }))
-        .catch(e => { console.warn(COINS[coinId].shortLabel, TFS[i].l, e.message); return { i, c:null }; })
-    );
-    const allResults = await Promise.all(allFetches);
-
-    const wEntry = allResults.find(r=>r.i===0);
-    const dEntry = allResults.find(r=>r.i===1);
-    const h4Entry = allResults.find(r=>r.i===2);
-    const h1Entry = allResults.find(r=>r.i===3);
-    const m15Entry = allResults.find(r=>r.i===4);
-
-    // Use fresh data or cached HTF candles
-    const dCandles = dEntry?.c || s.dailyCandles || null;
-    const wCandles = wEntry?.c || s.cachedWeekly || null;
-
-    // Cache HTF candles and mark refresh time
-    if(dEntry?.c) s.dailyCandles = dEntry.c;
-    if(wEntry?.c) s.cachedWeekly = wEntry.c;
-    if(htfStale && (dEntry?.c || wEntry?.c)) {
-      s.lastHTFRefresh = now;
-      console.log(COINS[coinId].shortLabel, 'HTF refreshed');
-    }
-
-    // v4.9: Reset cross-TF conflict tracker for this scan cycle
-    s._firedDir = null;
-
-    // v5.0 FIX #1: Reset htfDir BEFORE computation so stale values don't persist
-    // when nextMove() returns falsy (e.g. insufficient candle data)
-    s.htfDir = 'UNCLEAR';
-    let nm;
-    if(h4Entry?.c && h1Entry?.c)      nm = nextMove(h4Entry.c, h1Entry.c);
-    else if(h4Entry?.c)               nm = nextMove(h4Entry.c, h4Entry.c);
-    else if(dCandles)                  nm = nextMove(dCandles, dCandles);
-    if(nm){
-      s.htfDir = nm.dir;
-    }
-
-    // v5.13: Compute 48h price range for range-awareness filter
-    if (h4Entry?.c && h4Entry.c.length >= 13) {
-      const rangeSlice = h4Entry.c.slice(-13);
-      let rangeHigh = -Infinity, rangeLow = Infinity;
-      for (const k of rangeSlice) {
-        if (Number.isFinite(k.h) && k.h > rangeHigh) rangeHigh = k.h;
-        if (Number.isFinite(k.l) && k.l < rangeLow) rangeLow = k.l;
+    const r = await fetch(HL_API + '/info', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'candleSnapshot', req: { coin: coin.apiSym, interval: '1h', startTime: now - 7200000, endTime: now } })
+    });
+    if(!r.ok) throw new Error('HL price: ' + r.status);
+    const candles = await r.json();
+    if(!Array.isArray(candles) || candles.length === 0) throw new Error('HL price: no candles');
+    const price = +candles[candles.length - 1].c;
+    // 24h change from daily candles
+    const r2 = await fetch(HL_API + '/info', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'candleSnapshot', req: { coin: coin.apiSym, interval: '1d', startTime: now - 172800000, endTime: now } })
+    });
+    let change = 0;
+    if(r2.ok){
+      const daily = await r2.json();
+      if(Array.isArray(daily) && daily.length >= 2){
+        const prevClose = +daily[daily.length - 2].c;
+        if(prevClose > 0) change = ((price - prevClose) / prevClose * 100);
       }
-      s.range48h = { high: rangeHigh, low: rangeLow };
-    } else {
-      s.range48h = null;
     }
-
-    // v5.23 (2026-05-08): Compute 48h exhaustion so scoreSignal() can apply the
-    // late-cycle penalty. Already imported from signals.js as part of v5.22.
-    s.exhaustion48h = (h4Entry?.c && h4Entry.c.length >= 13)
-      ? trendExhaustion48h(h4Entry.c)
-      : { movePct: 0, highPct: 0, lowPct: 0 };
-
-    // v5.13: Fetch funding rate for confidence amplifier (non-blocking)
-    hlFundingRate(COINS[coinId].apiSym).then(rate => { s.fundingRate = rate; }).catch(() => { s.fundingRate = null; });
-
-    // v4.9: Build lower-TF candle data for LTF alignment checks on 1W/1D only
-    // 4H/1H/15m signals are left untouched — working well for BTC/SPX/HYPE
-    const lowerTFCandles = {};
-    if(h4Entry?.c) lowerTFCandles['4H'] = h4Entry.c;
-    if(h1Entry?.c) lowerTFCandles['1H'] = h1Entry.c;
-    const hasLower = Object.keys(lowerTFCandles).length > 0 ? lowerTFCandles : null;
-
-    // Process each TF — pass dCandles as context (may be null if 1D failed, graceful)
-    if(dCandles) processTF(1, dCandles, dCandles, coinId, hasLower);
-    if(wCandles && dCandles) processTF(0, wCandles, dCandles, coinId, hasLower);
-    if(h4Entry?.c && dCandles) processTF(2, h4Entry.c, dCandles, coinId);
-    if(h1Entry?.c && dCandles) processTF(3, h1Entry.c, dCandles, coinId);
-    if(m15Entry?.c && dCandles) processTF(4, m15Entry.c, dCandles, coinId);
-
-    // ── v4.9: MULTI-TF CONFLUENCE DETECTION ──────────────────────────────
-    // After all TFs processed, check if 2+ TFs broke the same level in the same
-    // direction. This is the highest conviction DMS signal — fire with boosted priority.
-    (function checkMultiTFConfluence(){
-      const breakoutTypes = ['BLIND_ENTRY', 'BREAKOUT', 'FAIL_GAIN', 'FAIL_LOSE'];
-      const signals = [];
-      for(const tf of TFS){
-        const r = s.results[tf.l];
-        if(!r || !r.level || r.sig === 'NEUTRAL') continue;
-        if(!breakoutTypes.includes(r.type)) continue;
-        signals.push({ tf: tf.l, weight: tf.w, sig: r.sig, level: r.level, target: r.target, rr: r.rr, stopPrice: r.stopPrice, type: r.type });
-      }
-      if(signals.length < 2) return;
-      // Group by level (within 0.5%) and direction
-      for(let i = 0; i < signals.length; i++){
-        const matches = [signals[i]];
-        for(let j = i+1; j < signals.length; j++){
-          if(signals[j].sig === signals[i].sig && Math.abs(signals[j].level - signals[i].level) / signals[i].level < 0.005){
-            matches.push(signals[j]);
-          }
-        }
-        if(matches.length < 2) continue;
-        // Found multi-TF confluence!
-        const sig = matches[0].sig;
-        const level = matches[0].level;
-        const tfList = matches.map(m => m.tf).join('+');
-        const bestRR = matches.map(m => m.rr).filter(Boolean).sort((a,b) => +b - +a)[0] || null;
-        const bestStop = matches.map(m => m.stopPrice).filter(Boolean)[0] || null;
-        const bestTarget = matches.map(m => m.target).filter(Boolean)[0] || null;
-        if(isDedupSuppressed(coinId, 'MULTI', 'BLIND_ENTRY', level)) return;
-        markDedupFired(coinId, 'MULTI', 'BLIND_ENTRY', level);
-        const coinLabel = COINS[coinId] ? COINS[coinId].shortLabel : coinId.toUpperCase();
-        const px = s.price || 0;
-        // Log it
-        addLog(sig, tfList, `MULTI-TF BREAKOUT: ${tfList} at $${fmt(level)} — ${matches.length} TFs confirm ${sig}`, 'BLIND_ENTRY', level, bestTarget, bestRR, bestStop, coinId);
-        // Alert (Telegram + toast)
-        const icon = sig === 'LONG' ? '\u{1F7E2}' : '\u{1F534}';
-        const tpLine = bestTarget ? `\nTake Profit: <b>$${fmt(bestTarget)}</b>` : '';
-        const slLine = bestStop ? `\nStop Loss: <b>$${fmt(bestStop)}</b>` : '';
-        const rrLine = bestRR ? `\nR:R <b>${bestRR}</b>` : '';
-        const msg = `${icon} <b>MULTI-TF ${sig}</b> \u{26A1} ${coinLabel} [${tfList}]\n${matches.length} timeframes confirm at $${fmt(level)}\n\nEntry now: <b>$${fmt(px)}</b>\nLevel: <b>$${fmt(level)}</b>${tpLine}${slLine}${rrLine}\n\n<a href="https://tbracko.github.io/dms-signal">Open DMS</a>`;
-        sendTelegram(msg);
-        showToast(`\u{26A1} MULTI-TF ${sig} ${coinLabel} [${tfList}]`, `${matches.length} TFs at $${fmt(level)}`, sig === 'SHORT');
-        // Auto-trade with high conviction override (skip if already in position)
-        if(HL.enabled && HL.wallet && bestStop && !HL.activeTrades[coinId]){
-          const multiConf = 80; // Multi-TF = high conviction override
-          const tradeSignal = { sig, level, target: bestTarget, rr: bestRR, stopPrice: bestStop, type: 'BLIND_ENTRY', tf: tfList };
-          console.log(`HL MULTI-TF FIRE ${coinLabel} ${sig} | ${tfList} | level: $${fmt(level)} | SL: $${fmt(bestStop)}`);
-          HL.executeTrade(coinId, tradeSignal, multiConf).then(r => {
-            if(r) { showToast(`FILLED: MULTI-TF ${sig} ${coinLabel}`, '', sig === 'SHORT'); HL.syncPositions(); }
-          }).catch(e => console.error('HL multi-TF trade error:', e));
-        }
-        return; // only fire once per scan cycle
-      }
-    })();
-
-    // Levels — compute FIRST so buildStory uses fresh data for this coin
-    if(m15Entry?.c){
-      s.candles15m = m15Entry.c;
-      s.asiaLevels = [...getAsiaLevels(m15Entry.c), ...getLondonLevels(m15Entry.c), ...getNYLevels(m15Entry.c)];
-    }
-    const h4Candles = h4Entry?.c || null;
-    const h1Candles = h1Entry?.c || null;
-    if(wCandles && dCandles) s.allLevels = collectLevels(wCandles, dCandles, s.price, s.candles15m, h4Candles, h1Candles);
-    else if(dCandles)        s.allLevels = collectLevels(dCandles, dCandles, s.price, s.candles15m, h4Candles, h1Candles);
-
-    // HTF Story — uses freshly computed levels + htfDir (already set above)
-    // nm was already computed before processTF; reuse it for rendering
-    if(nm){
-      const story = buildStory(s.allLevels, h4Entry?.c || [], h1Entry?.c || [], s.price);
-      nm.story = story;
-      s.lastStory = { dir: nm.dir, reason: nm.reason, story, storyDir: story?.storyDir || 'UNCLEAR' };
-      if(isActive){ syncActiveState(); renderNM(nm); }
-    }
-
-    if(isActive){
-      syncActiveState();
-      renderLevels();
-      if(s.candles15m) renderSessionBanner(s.candles15m, coinId);
-    }
-
-    if(isActive){
-      const now = new Date().toTimeString().slice(0,8);
-      setStatus('ok',COINS[coinId].shortLabel+' Live · '+now);
-      document.getElementById('last-upd').textContent=now;
-    }
-  }catch(e){
-    console.error(coinId, e);
-    if(isActive) setStatus('err', e.message.slice(0,50));
+    return { price, change };
   }
-  s.running = false;
-  if(isActive) document.getElementById('fab').classList.remove('spin');
-}
-
-// ── SCHEDULER: runs all coins independently ──────────────
-function scheduleAll(){
-  const coinIds = Object.keys(COINS);
-  coinIds.forEach((coinId, idx) => {
-    const s = coinState[coinId];
-    if(s.timer) clearTimeout(s.timer);
-    // Stagger coins by half REFRESH interval to spread API load
-    const delay = REFRESH + idx * (REFRESH/2);
-    s.timer = setTimeout(()=>{ runCoin(coinId).then(()=>{
-      s.timer = setTimeout(()=>runCoin(coinId).then(()=>scheduleAll()),REFRESH);
-    }); }, delay);
-  });
-}
-
-// Legacy run() — runs active coin only (used by FAB manual refresh)
-async function run(){ return runCoin(activeCoin); }
-function manualRefresh(){
-  // Reset alerts for active coin and refresh
-  const s = cs();
-  s.sentAlerts = {};
-  clearTimeout(s.timer);
-  runCoin(activeCoin).then(scheduleAll);
-}
-function schedule(){} // no-op, replaced by scheduleAll
-
-// ── WEBSOCKET: Real-time 15m candle updates ──────────────
-function connectWS(coinId){
-  const s=coinState[coinId];
-  const coin=COINS[coinId];
-  const sym=coin.apiSym;
-
-  function handleCandle(candle, isClosed){
-    s.price=candle.c;
-    if(coinId===activeCoin){
-      document.getElementById('tb-price').textContent='$'+fmt(candle.c);
-    }
-    if(s.candles15m&&s.candles15m.length){
-      const last=s.candles15m[s.candles15m.length-1];
-      if(last.t===candle.t) s.candles15m[s.candles15m.length-1]=candle;
-      else if(isClosed) s.candles15m.push(candle);
-    }
-    if(isClosed && s.candles15m && s.candles15m.length>20){
-      const dCandles = s.dailyCandles || null;
-      processTF(4, s.candles15m, dCandles, coinId);
-      checkAutoOutcomes(coinId);
-      s.wsCloseCount = (s.wsCloseCount || 0) + 1;
-      if(s.wsCloseCount % 4 === 0){
-        runCoin(coinId).catch(e=>console.warn('BG refresh',coinId,e));
-      }
-    }
-    // v5.0 FIX #10: Per-coin trailing stop throttle (was global, delaying other coins)
-    const now = Date.now();
-    if(HL.enabled && HL.wallet && HL.activeTrades[coinId]){
-      if(!HL._lastTrailCheck) HL._lastTrailCheck = {};
-      const lastCheck = HL._lastTrailCheck[coinId] || 0;
-      if(now - lastCheck > 30000){
-        HL._lastTrailCheck[coinId] = now;
-        HL.trailStops().catch(e => console.warn('trailStops error:', e));
-      }
-    }
-    // ── Equity auto-sync: refresh every 5 minutes ──
-    if(HL.wallet && (!HL._lastEquitySync || now - HL._lastEquitySync > 5 * 60 * 1000)){
-      HL.syncEquity().catch(e => console.warn('syncEquity error:', e));
-    }
-    // ── Position sync: check every 60s to detect TP/SL fills ──
-    if(HL.wallet && (!HL._lastPosSync || now - HL._lastPosSync > 60000)){
-      HL._lastPosSync = now;
-      HL.syncPositions()
-        .then(() => HL.processPendingTrims())   // v5.5: execute any queued manual-position trims
-        .catch(e => console.warn('syncPositions error:', e));
-    }
-    // ── Fill history check: every 5min to catch missed closes ──
-    if(HL.wallet && (!HL._lastFillCheck || now - HL._lastFillCheck > 5 * 60 * 1000)){
-      HL._lastFillCheck = now;
-      HL.checkFillHistory().catch(e => console.warn('checkFillHistory error:', e));
-    }
+  if(coin.exchange === 'bybit'){
+    const r = await fetch(`${BYBIT}/tickers?category=spot&symbol=${coin.apiSym}`);
+    if(!r.ok) throw new Error('Bybit price: '+r.status);
+    const json = await r.json();
+    const t = json.result?.list?.[0];
+    if(!t) throw new Error('Bybit price: no data');
+    const price = +t.lastPrice;
+    const prevPrice = +t.prevPrice24h || price;
+    const change = prevPrice > 0 ? ((price - prevPrice) / prevPrice * 100) : 0;
+    return { price, change };
   }
-
-  try{
-    // Hyperliquid coins (GOLD, SPX) have no public WS — rely on REST polling
-    if(coin.exchange==='hyperliquid'){
-      console.log('No WS for', coinId, '(Hyperliquid) — using REST polling');
-      return;
-    }
-    let ws;
-    if(coin.exchange==='bybit'){
-      // Bybit public WS — subscribe to 15m kline
-      ws=new WebSocket('wss://stream.bybit.com/v5/public/spot');
-      ws.onopen=function(){
-        ws.send(JSON.stringify({ op:'subscribe', args:['kline.15.'+sym] }));
-      };
-      ws.onmessage=function(evt){
-        try{
-          const msg=JSON.parse(evt.data);
-          if(!msg.data||!msg.topic) return;
-          const d=msg.data[0];
-          if(!d) return;
-          const candle={t:+d.start, o:+d.open, h:+d.high, l:+d.low, c:+d.close,
-            bh:Math.max(+d.open,+d.close), bl:Math.min(+d.open,+d.close)};
-          handleCandle(candle, d.confirm);
-        }catch(e){console.warn('Bybit WS parse',e);}
-      };
-    } else {
-      // Binance WS
-      ws=new WebSocket('wss://stream.binance.com:9443/ws/'+sym.toLowerCase()+'@kline_15m');
-      ws.onmessage=function(evt){
-        try{
-          const d=JSON.parse(evt.data);
-          if(!d.k) return;
-          const k=d.k;
-          const candle={t:k.t,o:+k.o,h:+k.h,l:+k.l,c:+k.c,bh:Math.max(+k.o,+k.c),bl:Math.min(+k.o,+k.c)};
-          handleCandle(candle, k.x);
-        }catch(e){console.warn('WS parse',e);}
-      };
-    }
-    // v5.0 FIX #9: Exponential backoff for WS reconnection (5s, 10s, 20s, 40s, cap 60s)
-    if(!connectWS._backoff) connectWS._backoff = {};
-    // Wrap existing onopen to reset backoff on successful connect
-    const _origOnOpen = ws.onopen;
-    ws.onopen=function(evt){
-      connectWS._backoff[coinId] = 5000; // reset on success
-      if(_origOnOpen) _origOnOpen.call(ws, evt);
-    };
-    ws.onclose=function(){
-      const prev = connectWS._backoff[coinId] || 5000;
-      const delay = Math.min(prev, 60000);
-      console.log(`WS closed for ${coinId} — reconnecting in ${delay/1000}s`);
-      connectWS._backoff[coinId] = Math.min(delay * 2, 60000);
-      setTimeout(()=>connectWS(coinId), delay);
-    };
-    ws.onerror=function(){ws.close();};
-  }catch(e){console.warn('WS error',coinId,e);}
+  const r = await fetch(`${BINANCE}/ticker/24hr?symbol=${coin.apiSym}`);
+  if(!r.ok) throw new Error('Price: '+r.status);
+  const d = await r.json();
+  return { price: +d.lastPrice, change: +d.priceChangePercent };
 }
 
-// ── HYPERLIQUID AUTO-TRADING MODULE ───────────────────────
+
+// -- UTILITIES + SIGNAL ENGINE -------------------------------------------------
+// v5.21 (2026-05-08): Pure signal-engine functions (dms, detectRetest, atr,
+// calcADX, level helpers, session helpers, conviction helpers, exhaustion,
+// nextMove) plus per-coin filter configs (CHOP_FILTER, MAX_HOLD_HOURS,
+// FUNDING_EXIT_THRESHOLD, BREAKOUT_QUALITY, EXHAUSTION_THRESHOLDS) extracted
+// to ./signals.js as a shared module. Plan item #5 of the May 8 health-check.
+// Behaviour identical to v5.20 — pure refactor, validated by 46-test suite.
+const {
+  fmt, atr, calcADX, trendExhaustion48h,
+  isSwingHigh, isSwingLow, detectFlippedLevel, scoreLevel, classifyStrength,
+  countLevelTests, findVPeaks, findPDHL,
+  getSessionBoundaries, getCurrentSession,
+  getAsiaRange, getAsiaLevels, getNYRange, getNYLevels, getLondonRange, getLondonLevels,
+  findFibLevels, findDMCLevels, findNextLevel, findStopLevel, calcRR,
+  hasRejection, hasStrongBodyBounce, hasMomentumAgainst, hasLTFAlignment,
+  detectRetest, dms, nextMove,
+  CHOP_FILTER, MAX_HOLD_HOURS, FUNDING_EXIT_THRESHOLD, BREAKOUT_QUALITY, EXHAUSTION_THRESHOLDS,
+} = require('./signals');
+
+
+// ==============================================================================
+// ##  HYPERLIQUID TRADING MODULE                                            ##
+// ==============================================================================
+
 const HL = {
-  API: 'https://api.hyperliquid.xyz',
   wallet: null,
   address: '',
-  masterAddress: '',   // master account where funds & positions live
-  assetMap: {},        // "BTC" -> index
-  szDecimals: {},      // "BTC" -> decimal places for size
+  masterAddress: '',
+  assetMap: {},
+  szDecimals: {},
   enabled: false,
+  activeTrades: {},
+  cachedEquity: 0,
+  _lastEquitySync: 0,
   tradesToday: 0,
   lastTradeDay: '',
-  activeTrades: {},    // coinId -> { oid, side, size, asset }
-  cachedEquity: 0,     // auto-synced from live HL balance
-  _lastEquitySync: 0,  // timestamp of last equity sync
 
-  // ── Minimal msgpack encoder (handles our specific action structures) ──
+  // v5.0: Post-loss cooldown -- tracks last SL time per coin (ms timestamp)
+  lastSlTime: {},   // coinId -> timestamp of last SL hit
+  COOLDOWN_MS: parseInt(process.env.COOLDOWN_MS || '7200000'), // v5.1: 2h default (was 10m — too short to prevent re-entry on same failed signal)
+
+  // v5.0: Daily P&L limit tracking
+  dailyPnl: 0,
+  dailyPnlDate: '',
+  // v5.25: Daily loss limit scales with equity (DAILY_LOSS_PCT from coins-config.js, default 3%).
+  // Computed dynamically: -(equity × DAILY_LOSS_PCT). Env override still works as a flat dollar fallback.
+  DAILY_LOSS_LIMIT: null,  // set dynamically in syncEquity(); null = not yet computed
+  DAILY_LOSS_REDUCE: 0.5, // reduce size to 50% after hitting limit
+
+  // v5.1: Counter-trend blocking -- remembers last profitable trade direction per coin
+  lastWinDir: {},    // coinId -> 'LONG' or 'SHORT'
+  lastWinTime: {},   // coinId -> ms timestamp of the profitable close
+  COUNTER_TREND_WINDOW: 86400000,  // 24h window to boost counter-trend confidence
+  COUNTER_TREND_CONF_BOOST: 25,    // +25% confidence needed for counter-trend after recent win
+
+  // v5.1: Per-asset rolling loss circuit breaker
+  consecutiveLosses: {},  // coinId -> count of consecutive losses
+  MAX_CONSEC_LOSSES: parseInt(process.env.MAX_CONSEC_LOSSES || '3'), // pause after N consecutive losses
+
+  // v5.15: Post-exhaustion re-entry filter — blocks same-direction entry after consecutive TPs
+  tpCloseLog: {},  // coinId -> [{ts: ms, side: 'LONG'|'SHORT'}] — recent TP closes
+  EXHAUSTION_TP_COUNT: parseInt(process.env.EXHAUSTION_TP_COUNT || '2'),     // require N+ TP closes to trigger
+  EXHAUSTION_COOLDOWN_MS: parseInt(process.env.EXHAUSTION_COOLDOWN_MS || '14400000'), // 4h cooldown after last TP
+
+  // v5.1: Trailing-stop failure tracking (prevents 1000-alert spam)
+  trailFailCount: {},     // coinId -> consecutive failure count
+  lastTrailFailAlert: {}, // coinId -> ms timestamp of last alert sent
+  TRAIL_ALERT_THROTTLE_MS: 1800000, // 30 min between failure alerts
+  MAX_TRAIL_FAILURES: 3,  // after N failures, disable trailing for this trade
+
+  // -- MSGPACK encoder (matches app exactly) --
   msgpack(obj) {
     const buf = [];
     const writeStr = (s) => {
@@ -3075,29 +606,88 @@ const HL = {
     return new Uint8Array(buf);
   },
 
-  // ── Initialize: create wallet + fetch asset meta ──
+  // -- Compute action hash for phantom agent signing --
+  computeActionHash(action, nonce, vaultAddress) {
+    const packed = this.msgpack(action);
+    const nonceBuf = new Uint8Array(8);
+    let n = BigInt(nonce);
+    for (let i = 7; i >= 0; i--) { nonceBuf[i] = Number(n & 0xFFn); n >>= 8n; }
+    let vaultBuf;
+    if (vaultAddress) {
+      const addrBytes = ethers.utils.arrayify(vaultAddress);
+      vaultBuf = new Uint8Array(1 + addrBytes.length);
+      vaultBuf[0] = 1;
+      vaultBuf.set(addrBytes, 1);
+    } else {
+      vaultBuf = new Uint8Array([0]);
+    }
+    const combined = new Uint8Array(packed.length + nonceBuf.length + vaultBuf.length);
+    combined.set(packed);
+    combined.set(nonceBuf, packed.length);
+    combined.set(vaultBuf, packed.length + nonceBuf.length);
+    return ethers.utils.keccak256(combined);
+  },
+
+  // -- Sign L1 action (phantom agent EIP-712) --
+  async signL1Action(action, nonce, vaultAddress) {
+    const hash = this.computeActionHash(action, nonce, vaultAddress || null);
+    const domain = {
+      name: 'Exchange', version: '1',
+      chainId: 1337,
+      verifyingContract: '0x0000000000000000000000000000000000000000'
+    };
+    const types = {
+      Agent: [
+        { name: 'source', type: 'string' },
+        { name: 'connectionId', type: 'bytes32' }
+      ]
+    };
+    const value = { source: 'a', connectionId: hash };
+    const sig = await this.wallet._signTypedData(domain, types, value);
+    return ethers.utils.splitSignature(sig);
+  },
+
+  // -- Float to wire: match Python SDK --
+  floatToWire(x) {
+    const s = parseFloat(parseFloat(x).toPrecision(5)).toString();
+    if (s.includes('.')) return s.replace(/\.?0+$/, '') || '0';
+    return s;
+  },
+
+  // -- Build order type wire --
+  orderTypeToWire(orderType) {
+    if (orderType.limit) {
+      return { limit: { tif: orderType.limit.tif } };
+    } else if (orderType.trigger) {
+      return { trigger: {
+        isMarket: orderType.trigger.isMarket,
+        triggerPx: this.floatToWire(orderType.trigger.triggerPx),
+        tpsl: orderType.trigger.tpsl
+      }};
+    }
+    return orderType;
+  },
+
+  // -- Initialize HL module --
   async init() {
-    const key = localStorage.getItem('hl_wallet_key');
-    if (!key || typeof ethers === 'undefined') return false;
+    if (!HL_PRIVATE_KEY) {
+      console.log('HL: No private key configured, auto-trade disabled.');
+      return false;
+    }
     try {
-      this.wallet = new ethers.Wallet(key);
+      this.wallet = new ethers.Wallet(HL_PRIVATE_KEY);
       this.address = this.wallet.address;
-      this.masterAddress = localStorage.getItem('hl_master_addr') || '';
+      this.masterAddress = HL_MASTER_ADDR;
       await this.fetchMeta();
-      this.enabled = localStorage.getItem('hl_auto_trade') === 'true';
+      this.enabled = AUTO_TRADE;
       this.tradesToday = 0;
       this.lastTradeDay = new Date().toDateString();
-      // Load persisted activeTrades BEFORE sync so we can detect closes across restarts
       this.loadActiveTrades();
-      console.log('HL loaded persisted trades:', Object.keys(this.activeTrades).length, '→', JSON.stringify(this.activeTrades));
-      // Sync with real positions so auto-trader knows what's already open
+      this.loadManualSeen();  // v5.7: restore manual-position detection state across restarts
+      console.log('HL loaded persisted trades:', Object.keys(this.activeTrades).length, '->', JSON.stringify(this.activeTrades));
+      await this.syncEquity();  // v5.25: must run before syncPositions so dynamic caps use real equity
       await this.syncPositions();
-      // v5.5: Execute any pending manual-position trims queued by syncPositions (if policy='trim')
-      await this.processPendingTrims();
-      // Check fill history to catch any TP/SL closes we missed while offline
-      await this.checkFillHistory();
-      // Auto-sync account equity for position sizing
-      await this.syncEquity();
+      await this.processPendingTrims();   // v5.5: trim any oversized manual positions found at startup
       console.log('HL ready:', this.address, '| Master:', this.masterAddress || 'not set', '| Auto:', this.enabled, '| Equity: $' + this.cachedEquity.toFixed(2), '| Assets:', Object.keys(this.assetMap).join(', '));
       return true;
     } catch (e) {
@@ -3106,14 +696,15 @@ const HL = {
     }
   },
 
-  // ── Fetch asset universe (maps name -> index) ──
   async fetchMeta() {
     // Fetch all perp metas (main + HIP-3 dexes like xyz:GOLD)
-    const res = await fetch(this.API + '/info', {
+    const res = await fetch(HL_API + '/info', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'allPerpMetas' })
     });
     const allMetas = await res.json();
+    // Dex 0 = main validator perps (assetId = index)
+    // Dex N (N>=1) = HIP-3: assetId = 100000 + N * 10000 + index_in_meta
     allMetas.forEach((dex, dexIdx) => {
       dex.universe.forEach((a, i) => {
         const assetId = dexIdx === 0 ? i : (100000 + dexIdx * 10000 + i);
@@ -3121,75 +712,123 @@ const HL = {
         this.szDecimals[a.name] = a.szDecimals;
       });
     });
-    console.log('HL meta:', Object.keys(this.assetMap).length, 'assets loaded');
+    console.log('HL meta: ' + Object.keys(this.assetMap).length + ' assets loaded (' + allMetas.length + ' dexes)');
+    if (this.assetMap['xyz:GOLD'] !== undefined) console.log('  xyz:GOLD -> assetId', this.assetMap['xyz:GOLD'], 'szDec', this.szDecimals['xyz:GOLD']);
   },
 
-  // ── Get account balance (perps + spot, supports unified accounts) ──
+  // -- Get balance (perps + spot) --
   async getBalance() {
     if (!this.wallet) return 0;
     const queryAddr = (this.masterAddress || this.address).toLowerCase();
-    // Fetch perps clearinghouse + spot balances in parallel
     const [perpsRes, spotRes] = await Promise.all([
-      fetch(this.API + '/info', {
+      fetch(HL_API + '/info', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr })
       }),
-      fetch(this.API + '/info', {
+      fetch(HL_API + '/info', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'spotClearinghouseState', user: queryAddr })
       })
     ]);
-    // v5.7: fail loudly on HTTP error rather than letting undefined propagate into $0 equity
+    // v5.7: surface HTTP errors explicitly — silent .json() on an HTTP 429/500 used to
+    // produce undefined → parseFloat('0') → 0 equity, which looked like a real wallet drain
+    // and tripped downstream guards.
     if (!perpsRes.ok) throw new Error(`perps clearinghouseState HTTP ${perpsRes.status}`);
     if (!spotRes.ok)  throw new Error(`spotClearinghouseState HTTP ${spotRes.status}`);
     const perpsData = await perpsRes.json();
     const spotData = await spotRes.json();
-    console.log('HL perps response:', JSON.stringify(perpsData).slice(0, 500));
-    console.log('HL spot response:', JSON.stringify(spotData).slice(0, 500));
-    // Perps balance: try multiple possible fields
+    // v5.5 fix: true equity = spot USDC balance (HIP-3 quirk: perps accountValue includes
+    // unrealized P&L which inflates equity during winning streaks, leading to oversized entries).
+    // Spot clearinghouse USDC is the actual settled cash balance.
+    // Fallback: if spot has no USDC (e.g. all deployed to perps margin), use perps accountValue.
     const ms = perpsData.marginSummary || {};
     const perpsVal = parseFloat(ms.accountValue || '0');
-    // Cross margin balance (unified accounts store balance here)
     const cms = perpsData.crossMarginSummary || {};
     const crossVal = parseFloat(cms.accountValue || '0');
-    // Spot: sum USDC/USDT balances
     let spotVal = 0;
     if (spotData.balances) {
       for (const b of spotData.balances) {
         if (b.coin === 'USDC' || b.coin === 'USDT') spotVal += parseFloat(b.total || '0');
       }
     }
-    // Unified accounts: crossMarginSummary already includes spot — don't double-count
-    // Use the highest non-zero value, not sum, to avoid double-counting
-    const total = Math.max(perpsVal, crossVal, spotVal);
-    console.log('HL balance — perps:', perpsVal, 'cross:', crossVal, 'spot:', spotVal, '→ total:', total);
-    return total;
+    // Primary: spot USDC (settled cash). Fallback: perps accountValue if spot is empty.
+    if (spotVal > 0) return spotVal;
+    return Math.max(perpsVal, crossVal);
   },
 
-  // ── Persist activeTrades to/from localStorage ──
+  async syncEquity() {
+    try {
+      const bal = await this.getBalance();
+      if (bal > 0) {
+        this.cachedEquity = bal;
+        this._lastEquitySync = Date.now();
+        // v5.25: Recompute daily loss limit from equity (3% default, env override for flat $)
+        if (process.env.DAILY_LOSS_LIMIT) {
+          this.DAILY_LOSS_LIMIT = parseFloat(process.env.DAILY_LOSS_LIMIT);
+        } else {
+          this.DAILY_LOSS_LIMIT = -(bal * DAILY_LOSS_PCT);
+        }
+        console.log('HL equity synced: $' + bal.toFixed(2) + ' | daily loss limit: $' + this.DAILY_LOSS_LIMIT.toFixed(2));
+      }
+    } catch (e) { console.warn('HL syncEquity failed:', e.message); }
+  },
+
+  // -- Persist active trades to file (replaces localStorage) --
   saveActiveTrades() {
-    try { localStorage.setItem('hl_active_trades', JSON.stringify(this.activeTrades)); }
-    catch(e) { console.error('HL saveActiveTrades FAILED (localStorage quota/perms?):', e.message); }
+    // v5.7: atomic write (tmp + rename) so a crash mid-write can't leave a half-written file.
+    // Log any failure (was previously silent — if disk filled or perms broke, in-memory state
+    // silently diverged from disk and the next session lost position tracking).
+    try {
+      const tmp = ACTIVE_TRADES_FILE + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(this.activeTrades));
+      fs.renameSync(tmp, ACTIVE_TRADES_FILE);
+    } catch(e) {
+      console.error('HL saveActiveTrades FAILED:', e.message);
+      sendTelegram(`⚠️ <b>saveActiveTrades failed</b>\n${e.message}\n\nIn-memory state may diverge from disk. Check disk/permissions.`).catch(()=>{});
+    }
   },
   loadActiveTrades() {
     try {
-      const raw = localStorage.getItem('hl_active_trades');
-      if (raw) this.activeTrades = JSON.parse(raw);
-    } catch(e) { console.error('HL loadActiveTrades FAILED — resetting:', e.message); this.activeTrades = {}; }
+      if (fs.existsSync(ACTIVE_TRADES_FILE)) {
+        this.activeTrades = JSON.parse(fs.readFileSync(ACTIVE_TRADES_FILE, 'utf8'));
+      }
+    } catch(e) {
+      console.error('HL loadActiveTrades FAILED, resetting to empty:', e.message);
+      this.activeTrades = {};
+    }
   },
 
-  // ── HIP-3 dexes we trade on (for querying positions, orders, fills) ──
+  // v5.7: Persist manualInheritedSeen to disk so bot restarts don't re-detect
+  // the same manual position and spam duplicate SL/TP orders.
+  saveManualSeen() {
+    try {
+      fs.writeFileSync(MANUAL_SEEN_FILE, JSON.stringify(this.manualInheritedSeen || {}));
+    } catch(e) { console.error('HL saveManualSeen FAILED:', e.message); }
+  },
+  loadManualSeen() {
+    try {
+      if (fs.existsSync(MANUAL_SEEN_FILE)) {
+        this.manualInheritedSeen = JSON.parse(fs.readFileSync(MANUAL_SEEN_FILE, 'utf8'));
+        console.log('HL: loaded manualInheritedSeen:', Object.keys(this.manualInheritedSeen).length, 'entries');
+      }
+    } catch(e) {
+      console.error('HL loadManualSeen FAILED, resetting to empty:', e.message);
+      this.manualInheritedSeen = {};
+    }
+  },
+
+  // -- HIP-3 dexes we trade on (for querying positions, orders, fills) --
   HIP3_DEXES: ['xyz'],
 
-  // ── Fetch trigger orders (SL/TP) — queries main + HIP-3 dexes ──
+  // -- Fetch trigger orders (SL/TP) -- queries main + HIP-3 dexes --
   async fetchTriggerOrders() {
     try {
       const queryAddr = (this.masterAddress || this.address).toLowerCase();
       const requests = [
-        fetch(this.API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'frontendOpenOrders', user: queryAddr }) }),
         ...this.HIP3_DEXES.map(dex =>
-          fetch(this.API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ type: 'frontendOpenOrders', user: queryAddr, dex }) }))
       ];
       const responses = await Promise.all(requests);
@@ -3199,24 +838,38 @@ const HL = {
         if (Array.isArray(data)) allOrders.push(...data);
       }
       return allOrders;
-    } catch(e) { console.warn('fetchTriggerOrders error:', e); return []; }
+    } catch(e) { console.warn('fetchTriggerOrders error:', e.message); return []; }
   },
 
-  // ── Sync activeTrades with real Hyperliquid positions (main + HIP-3 dexes) ──
+  // -- Sync positions with real HL state (main + HIP-3 dexes) --
+  _syncInFlight: false,  // v5.7: re-entrancy guard — prevents concurrent syncPositions from racing
+
   async syncPositions() {
+    // v5.7: Re-entrancy guard — if a sync is already running, skip this call.
+    // Prevents the TOCTOU race where two concurrent calls both see alreadyAlerted=false
+    // and place duplicate SL/TP orders on manual positions.
+    if (this._syncInFlight) {
+      console.log('HL syncPositions: skipping — already in flight');
+      return;
+    }
+    this._syncInFlight = true;
     try {
       const queryAddr = (this.masterAddress || this.address).toLowerCase();
-      // v5.7: allSettled — partial failure of a HIP-3 dex no longer blanks out the whole sync.
+      // v5.7: allSettled so a single HIP-3 dex outage cannot blank out the entire sync
+      // (previously: if xyz dex timed out, Promise.all rejected and the catch below wiped
+      // activeTrades tracking, causing trailStops to see stale state on next cycle).
+      // Main-dex position fetch is MANDATORY: if it fails, bail out cleanly.
       const settled = await Promise.allSettled([
-        fetch(this.API + '/info', {
+        fetch(HL_API + '/info', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr })
         }),
         ...this.HIP3_DEXES.map(dex =>
-          fetch(this.API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr, dex }) }))
       ]);
       const mainSettled = settled[0];
+      const hip3Settled = settled.slice(1);
       if (mainSettled.status !== 'fulfilled' || !mainSettled.value.ok) {
         const reason = mainSettled.status !== 'fulfilled' ? mainSettled.reason?.message : `HTTP ${mainSettled.value.status}`;
         console.warn('HL syncPositions: main dex fetch failed, skipping cycle:', reason);
@@ -3224,31 +877,34 @@ const HL = {
       }
       const posRes = mainSettled.value;
       const hip3PosRes = [];
-      // v5.12 (2026-05-05): Track HIP-3 dex failures so we don't false-close positions
-      // (see bot.js syncPositions for the full bug write-up).
+      // v5.12 (2026-05-05): Track which HIP-3 dexes failed THIS cycle so we can avoid
+      // false TP/SL closure detection for positions that simply didn't fetch. Prior bug:
+      // a transient 502/timeout on xyz dex made GOLD/SP500 disappear from `positions`,
+      // and the closure loop below then sent phantom "TP HIT"/"SL HIT" Telegrams while
+      // the positions were still very much open on Hyperliquid.
       const failedHip3Dexes = new Set();
-      for (let i = 1; i < settled.length; i++) {
-        const s = settled[i];
-        const dex = this.HIP3_DEXES[i - 1];
+      for (let i = 0; i < hip3Settled.length; i++) {
+        const s = hip3Settled[i];
+        const dex = this.HIP3_DEXES[i];
         if (s.status === 'fulfilled' && s.value.ok) hip3PosRes.push(s.value);
         else {
           failedHip3Dexes.add(dex);
-          console.warn(`HL syncPositions: HIP-3 dex "${dex}" failed this cycle — positions on it will be preserved (no phantom-close alert)`);
+          console.warn(`HL syncPositions: HIP-3 dex "${dex}" fetch failed — positions on that dex will be PRESERVED (not flagged as closed) this cycle:`, s.status === 'fulfilled' ? `HTTP ${s.value.status}` : s.reason?.message);
         }
       }
       const trigOrders = await this.fetchTriggerOrders();
       const data = await posRes.json();
       const positions = [...(data.assetPositions || [])];
-      // Merge HIP-3 dex positions
+      // Merge HIP-3 positions
       for (const r of hip3PosRes) {
         try {
           const d = await r.json();
           if (d.assetPositions) positions.push(...d.assetPositions);
-        } catch (e) { console.warn('HL syncPositions HIP-3 parse failed:', e.message); }
+        } catch (e) { console.warn('HL syncPositions: HIP-3 JSON parse failed:', e.message); }
       }
-      const symToId = SYM_TO_COIN_ID;
+      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', 'S&P500': 'sp500', 'xyz:SP500': 'sp500', GOLD: 'gold', 'xyz:GOLD': 'gold', 'xyz:CL': 'crude', CRUDE: 'crude', CL: 'crude' };
 
-      // Build SL/TP map from trigger orders: { "BTC": { sl: price, tp: price } }
+      // Build SL/TP map from trigger orders
       const trigMap = {};
       if (Array.isArray(trigOrders)) {
         for (const o of trigOrders) {
@@ -3257,26 +913,16 @@ const HL = {
           if (!trigMap[coin]) trigMap[coin] = {};
           const trigPx = parseFloat(o.triggerPx || '0');
           if (trigPx <= 0) continue;
-          // Identify SL vs TP by orderType or tpsl field
           const ot = (o.orderType || '').toLowerCase();
-          if (ot.includes('stop') || o.tpsl === 'sl') {
-            trigMap[coin].sl = trigPx;
-          } else if (ot.includes('take profit') || o.tpsl === 'tp') {
-            trigMap[coin].tp = trigPx;
-          }
+          if (ot.includes('stop') || o.tpsl === 'sl') trigMap[coin].sl = trigPx;
+          else if (ot.includes('take profit') || o.tpsl === 'tp') trigMap[coin].tp = trigPx;
         }
       }
-      console.log('HL trigger orders map:', JSON.stringify(trigMap));
-      // v5.26 (2026-05-14): expose trigger-order map so renderTrades can surface SL/TP
-      // even for positions we deliberately don't track in activeTrades (manual-inherit
-      // ignore path, or any other reason an entry is missing).
-      this.lastTrigMap = trigMap;
 
       const oldTrades = { ...this.activeTrades };
       const nowOpen = new Set();
       this.activeTrades = {};
       if (!this.manualInheritedSeen) this.manualInheritedSeen = {};
-      const _inheritMode = _inheritManualPolicy();
       for (const p of positions) {
         const pos = p.position;
         if (!pos || parseFloat(pos.szi) === 0) continue;
@@ -3286,21 +932,16 @@ const HL = {
         const szi = parseFloat(pos.szi);
         const entry = parseFloat(pos.entryPx || '0');
         const trig = trigMap[pos.coin] || {};
-        // Preserve trailing stop state from previous sync if position still exists
         const prev = oldTrades[coinId];
 
-        // v5.5: Inherited-manual-position detection (synced w/ bot.js).
+        // v5.5: Inherited-manual-position detection.
         // When a position appears that we weren't already tracking (no prev trailState for this
         // side), classify as bot vs manual by comparing entry notional to the asset's maxNotional.
-        // If manual (notional > cap × MANUAL_NOTIONAL_MULT), apply hl_inherit_manual_positions policy.
+        // If manual (notional > cap × MANUAL_NOTIONAL_MULT), apply INHERIT_MANUAL_POSITIONS policy.
         const coinCfg = COINS[coinId];
         const notional = Math.abs(szi) * entry;
-        // v5.26 (2026-05-14): use equity-proportional cap when available (mirrors bot.js / coins-config.js v5.25).
-        // Falls back to legacy static maxNotional only if equityPct missing or equity not yet synced.
-        const eqForCap = (this.cachedEquity > 0) ? this.cachedEquity : 0;
-        const capBase = (coinCfg && coinCfg.equityPct && eqForCap > 0)
-          ? eqForCap * coinCfg.equityPct
-          : ((coinCfg && coinCfg.maxNotional) || 0);
+        // v5.25: dynamic cap from equity instead of static maxNotional
+        const capBase = getMaxNotional(coinCfg, this.cachedEquity > 0 ? this.cachedEquity : 100);
         const isSameAsPrev = prev && prev.side === (szi > 0 ? 'LONG' : 'SHORT') && prev.trailState;
         const isNewPosition = !isSameAsPrev;
         const isManualInherited = isNewPosition && capBase > 0 && notional > capBase * MANUAL_NOTIONAL_MULT;
@@ -3310,24 +951,49 @@ const HL = {
         if (isManualInherited) {
           const side = szi > 0 ? 'LONG' : 'SHORT';
           const ratio = (notional / capBase).toFixed(2);
-          if (_inheritMode === 'ignore') {
-            // v5.9 EMERGENCY KILL SWITCH (2026-04-22): inherit-protect placement
-            //   disabled — repeatedly placed duplicate SL/TPs and spammed telegrams
-            //   despite multiple guard layers. User manages SL/TP for manual trades.
+          if (INHERIT_MANUAL_POSITIONS === 'ignore') {
+            // v5.9 EMERGENCY KILL SWITCH (2026-04-22): The inherit-protect feature
+            //   has placed 14+ duplicate SL/TP orders across BTC + SP500 manual
+            //   positions despite v5.6/v5.7/v5.8 guards. Telegram is being spammed
+            //   on every refresh. The risk to capital from a misfiring auto-placer
+            //   on a leveraged position now outweighs the upside of having
+            //   automated SL on user-opened manual trades.
+            // BEHAVIOR: Detect manual positions, log once, register them in
+            //   activeTrades as 'manual-ignored' (so the bot won't try to trade the
+            //   same coin), but place ZERO orders and send ZERO telegram alerts.
+            //   The user manages SL/TP themselves for manual trades.
+            // To re-enable, restore the v5.8 placement block from git history.
             if (!alreadyAlerted) {
-              console.log(`HL INHERIT IGNORE (v5.9 kill-switch): ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — manual position detected, NO orders placed, NO telegram. User manages SL/TP.`);
               this.manualInheritedSeen[seenKey] = Date.now();
+              this.saveManualSeen();
+              console.log(`HL INHERIT IGNORE (v5.9 kill-switch): ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — manual position detected, NO orders placed, NO telegram. User manages SL/TP.`);
             }
-            continue; // skip — don't add to activeTrades (no trailing/management)
-          } else if (_inheritMode === 'trim') {
+            // v5.7 FIX: DO add manual positions to activeTrades with source='manual-ignored'.
+            // Previously, `continue` here skipped adding to activeTrades, which meant:
+            //   (a) maybeAutoTrade didn't see the position → fired executeTrade → placed DUPLICATE SL/TP
+            //   (b) exposure cap didn't count manual notional → bot could over-leverage
+            // Now: position is tracked (blocks new trades on same coin) but NOT trailed.
+            this.activeTrades[coinId] = {
+              asset: pos.coin,
+              side,
+              size: Math.abs(szi),
+              entry: entry,
+              sl: trig.sl || null,
+              tp: trig.tp || null,
+              initialSl: trig.sl || 0,
+              bestPrice: entry,
+              trailState: 'manual',  // special state — trailStops will skip this
+              source: 'manual-ignored'
+            };
+            continue; // skip further processing for this position (trim/manage paths)
+          } else if (INHERIT_MANUAL_POSITIONS === 'trim') {
             // Queue a trim to get notional back under cap, then track the trimmed remainder.
             if (!alreadyAlerted) {
-              console.log(`HL INHERIT TRIM: ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — scheduling reduce-only trim to $${capBase} [v5.5]`);
-              showToast(`✂️ TRIM ${pos.coin} ${side}`, `$${notional.toFixed(0)} → $${capBase}`, side === 'SHORT');
-              if (typeof sendTelegram === 'function') {
-                sendTelegram(`✂️ <b>TRIMMING MANUAL POSITION: ${pos.coin} ${side}</b>\nCurrent notional: $${notional.toFixed(0)} (${ratio}× cap)\nTarget: $${capBase}\nPlacing reduce-only order.`).catch(()=>{});
-              }
+              console.log(`HL INHERIT TRIM: ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — scheduling reduce-only trim to $${capBase}`);
+              sendTelegram(`✂️ <b>TRIMMING MANUAL POSITION: ${pos.coin} ${side}</b>\nCurrent notional: $${notional.toFixed(0)} (${ratio}× cap)\nTarget: $${capBase}\nPlacing reduce-only order.`).catch(()=>{});
               this.manualInheritedSeen[seenKey] = Date.now();
+              this.saveManualSeen();
+              // Queue the trim — run async so we don't block sync
               if (!this._pendingTrims) this._pendingTrims = [];
               this._pendingTrims.push({ coinId, side, currentSize: Math.abs(szi), currentEntry: entry, targetNotional: capBase });
             }
@@ -3348,11 +1014,10 @@ const HL = {
           }
           // 'manage' falls through to default behavior below (not recommended)
           if (!alreadyAlerted) {
-            console.log(`HL INHERIT MANAGE: ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — managing at full size (not recommended) [v5.5]`);
-            if (typeof sendTelegram === 'function') {
-              sendTelegram(`⚠️ <b>MANAGING OVERSIZED POSITION: ${pos.coin} ${side}</b>\nNotional $${notional.toFixed(0)} (${ratio}× cap)\nBot will apply its default SL/TP. Consider setting hl_inherit_manual_positions=ignore.`).catch(()=>{});
-            }
+            console.log(`HL INHERIT MANAGE: ${pos.coin} ${side} notional $${notional.toFixed(0)} = ${ratio}× cap $${capBase} — managing at full size (not recommended)`);
+            sendTelegram(`⚠️ <b>MANAGING OVERSIZED POSITION: ${pos.coin} ${side}</b>\nNotional $${notional.toFixed(0)} (${ratio}× cap)\nBot will apply its default SL/TP. Consider setting INHERIT_MANUAL_POSITIONS=ignore.`).catch(()=>{});
             this.manualInheritedSeen[seenKey] = Date.now();
+            this.saveManualSeen();
           }
         }
 
@@ -3361,7 +1026,6 @@ const HL = {
             ...prev,
             size: Math.abs(szi),
             entry: entry,
-            // Always update SL/TP from live trigger orders (most accurate)
             sl: trig.sl || prev.sl || null,
             tp: trig.tp || prev.tp || null
           };
@@ -3381,414 +1045,266 @@ const HL = {
         }
       }
 
-      // ── Detect TP/SL fills: positions that were in oldTrades but are now gone ──
+      // Detect closed positions
       for (const [coinId, old] of Object.entries(oldTrades)) {
-        if (nowOpen.has(coinId)) continue; // still open, skip
-        if (!old.entry || !old.asset) continue; // no real trade data
-        // v5.12 (2026-05-05): preserve positions whose HIP-3 dex failed this cycle.
+        if (nowOpen.has(coinId)) continue;
+        if (!old.entry || !old.asset) continue;
+        // v5.12 (2026-05-05): If this position lives on a HIP-3 dex whose fetch
+        // failed THIS cycle, do NOT flag it closed. Preserve the prev activeTrade
+        // entry so trail/exit tracking carries over to the next cycle.
         if (failedHip3Dexes.size > 0) {
           const dexFromAsset = (old.asset && old.asset.includes(':')) ? old.asset.split(':')[0] : null;
           const coinIsHIP3 = COINS[coinId] && COINS[coinId].isHIP3;
           if (coinIsHIP3 && dexFromAsset && failedHip3Dexes.has(dexFromAsset)) {
-            console.log(`HL syncPositions: PRESERVING ${old.asset} ${old.side} — dex "${dexFromAsset}" did not respond this cycle`);
+            console.log(`HL syncPositions: PRESERVING ${old.asset} ${old.side} — dex "${dexFromAsset}" did not respond this cycle (no phantom-close alert)`);
             this.activeTrades[coinId] = old;
             continue;
           }
         }
         const s = coinState[coinId];
-        // Use current price if valid, otherwise fall back to entry (never $0)
+        // Use current price if available and valid, otherwise fall back to entry (never $0)
         const exitPx = (s && s.price > 0) ? s.price : old.entry;
         const isLong = old.side === 'LONG';
         const pnl = isLong ? (exitPx - old.entry) * old.size : (old.entry - exitPx) * old.size;
-        // Detect TP/SL by proximity (within 2%) rather than directional check
+        // Detect TP/SL by proximity (within 2% of the level) rather than directional check
         let reason = 'auto_closed';
         const tpDist = old.tp ? Math.abs(exitPx - old.tp) / old.tp : Infinity;
         const slDist = old.sl ? Math.abs(exitPx - old.sl) / old.sl : Infinity;
         if (tpDist < 0.02 && tpDist <= slDist) reason = 'tp_hit';
         else if (slDist < 0.02 && slDist < tpDist) reason = 'sl_hit';
         else if (old.sl && ((isLong && exitPx <= old.sl) || (!isLong && exitPx >= old.sl))) reason = 'sl_hit';
-        // Record closed trade
+
         const closed = loadClosedTrades();
         closed.unshift({
           coin: old.asset, side: old.side, size: old.size,
-          entry: old.entry, exit: exitPx, pnl: pnl,
-          ts: new Date().toISOString(), reason: reason
+          entry: old.entry, exit: exitPx, pnl, ts: new Date().toISOString(), reason,
+          source: old.source || 'bot'  // v5.5 fix: propagate source for bot/manual P&L split
         });
         saveClosedTrades(closed);
+
         const emoji = reason === 'tp_hit' ? '✅' : reason === 'sl_hit' ? '🛑' : '📊';
         const label = reason === 'tp_hit' ? 'TP HIT' : reason === 'sl_hit' ? 'SL HIT' : 'CLOSED';
-        console.log(`HL ${label}: ${old.side} ${old.asset} | Entry: $${fmt(old.entry)} → Exit: ~$${fmt(exitPx)} | P&L: $${pnl.toFixed(2)}`);
-        showToast(`${emoji} ${label}: ${old.side} ${old.asset}`, `P&L: ${pnl>=0?'+':''}$${pnl.toFixed(2)}`, pnl < 0);
-        if(typeof sendTelegram === 'function'){
-          sendTelegram(`${emoji} ${label}: ${old.side} ${old.asset}\nEntry: $${fmt(old.entry)} → Exit: ~$${fmt(exitPx)}\nP&L: ${pnl>=0?'+':''}$${pnl.toFixed(2)}`);
+        console.log(`HL POSITION CLOSED: ${label} ${old.side} ${old.asset} | P&L: $${pnl.toFixed(2)}`);
+
+        // v5.0: Record SL cooldown timestamp for this coin
+        if (reason === 'sl_hit') {
+          this.lastSlTime[coinId] = Date.now();
+          console.log(`HL COOLDOWN: ${coinId} on cooldown for ${this.COOLDOWN_MS/1000}s after SL hit`);
         }
+
+        // v5.15: Record TP close for exhaustion filter
+        if (reason === 'tp_hit') {
+          if (!this.tpCloseLog[coinId]) this.tpCloseLog[coinId] = [];
+          this.tpCloseLog[coinId].push({ ts: Date.now(), side: old.side });
+          // Prune entries older than EXHAUSTION_COOLDOWN_MS to prevent unbounded growth
+          const cutoff = Date.now() - this.EXHAUSTION_COOLDOWN_MS;
+          this.tpCloseLog[coinId] = this.tpCloseLog[coinId].filter(e => e.ts >= cutoff);
+          console.log(`HL EXHAUSTION LOG: ${coinId} ${old.side} TP recorded (${this.tpCloseLog[coinId].filter(e => e.side === old.side).length} same-dir TPs in window)`);
+        }
+
+        // v5.1: Reset trail-failure tracking on position close (new trade starts clean)
+        this.trailFailCount[coinId] = 0;
+        delete this.lastTrailFailAlert[coinId];
+
+        // v5.1: Track consecutive losses and last winning direction per coin
+        if (pnl > 0) {
+          this.consecutiveLosses[coinId] = 0;
+          this.lastWinDir[coinId] = old.side;   // 'LONG' or 'SHORT'
+          this.lastWinTime[coinId] = Date.now();
+          console.log(`HL WIN TRACKER: ${coinId} last win direction=${old.side}, consecutive losses reset to 0`);
+        } else if (pnl < 0) {
+          this.consecutiveLosses[coinId] = (this.consecutiveLosses[coinId] || 0) + 1;
+          console.log(`HL LOSS TRACKER: ${coinId} consecutive losses=${this.consecutiveLosses[coinId]}/${this.MAX_CONSEC_LOSSES}`);
+          if (this.consecutiveLosses[coinId] >= this.MAX_CONSEC_LOSSES) {
+            console.warn(`HL CIRCUIT BREAKER: ${coinId} paused -- ${this.consecutiveLosses[coinId]} consecutive losses`);
+            const cbCoin = COINS[coinId];
+            await sendTelegram(`⏸ <b>${cbCoin?.label || coinId} CIRCUIT BREAKER</b>\n${this.consecutiveLosses[coinId]} consecutive losses -- auto-trading paused for this asset.`);
+          }
+        }
+
+        // v5.0: Track daily P&L
+        const pnlDay = new Date().toDateString();
+        if (pnlDay !== this.dailyPnlDate) { this.dailyPnl = 0; this.dailyPnlDate = pnlDay; }
+        this.dailyPnl += pnl;
+        const dailyStr = this.dailyPnl >= 0 ? `+$${this.dailyPnl.toFixed(2)}` : `-$${Math.abs(this.dailyPnl).toFixed(2)}`;
+
+        await sendTelegram(`${emoji} <b>${label}: ${old.side} ${old.asset}</b>\nEntry: $${fmt(old.entry)}\nExit: $${fmt(exitPx)}\nP&L: <b>$${pnl.toFixed(2)}</b>\nDaily P&L: ${dailyStr}`);
       }
 
-      // Persist to localStorage so we can detect closes across app restarts
       this.saveActiveTrades();
-      console.log('HL synced positions:', Object.keys(this.activeTrades).length, 'active →', JSON.stringify(this.activeTrades));
-    } catch (e) {
-      console.warn('HL syncPositions failed:', e);
-    }
-  },
 
-  // ── Check HL fill history to catch TP/SL closes we may have missed ──
-  async checkFillHistory() {
-    if (!this.wallet) return;
-    try {
-      const queryAddr = (this.masterAddress || this.address).toLowerCase();
-      // Fetch fills from the last 24 hours (main + HIP-3 dexes)
-      const startMs = Date.now() - 24 * 60 * 60 * 1000;
-      const requests = [
-        fetch(this.API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'userFillsByTime', user: queryAddr, startTime: startMs }) }),
-        ...this.HIP3_DEXES.map(dex =>
-          fetch(this.API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'userFillsByTime', user: queryAddr, startTime: startMs, dex }) }))
-      ];
-      const responses = await Promise.all(requests);
-      const fills = [];
-      for (const r of responses) {
-        const data = await r.json();
-        if (Array.isArray(data)) fills.push(...data);
-      }
-      if (fills.length === 0) return;
-
-      // Group fills by coin, find closing fills (reduceOnly or that bring position to 0)
-      // We look for fills we haven't already recorded in closedTrades
-      const closed = loadClosedTrades();
-      const recorded = new Set(closed.map(c => c.ts)); // existing timestamps
-      const symToId = SYM_TO_COIN_ID;
-
-      // Group consecutive fills by coin+dir to find close events
-      // HL marks closing fills with closedPnl !== "0" or closedPnl field
-      const closeFills = fills.filter(f => {
-        const pnl = parseFloat(f.closedPnl || '0');
-        return pnl !== 0; // non-zero closedPnl means this fill closed (part of) a position
-      });
-
-      if (closeFills.length === 0) return;
-
-      // Group by coin + cluster fills within 2 seconds (one close can be multiple fills)
-      const clusters = [];
-      for (const f of closeFills) {
-        const ts = f.time;
-        const last = clusters.length ? clusters[clusters.length - 1] : null;
-        if (last && last.coin === f.coin && Math.abs(ts - last.endTs) < 2000) {
-          last.fills.push(f);
-          last.endTs = ts;
-        } else {
-          clusters.push({ coin: f.coin, fills: [f], startTs: ts, endTs: ts });
-        }
-      }
-
-      let newCount = 0;
-      for (const cl of clusters) {
-        const coin = cl.coin;
-        const coinId = symToId[coin];
-        // Build a dedup key from coin + approximate timestamp (rounded to 10s)
-        const dedupKey = `${coin}_${Math.round(cl.startTs / 10000)}`;
-        // Check if we already have a close for this coin within ±60s
-        const alreadyRecorded = closed.some(c =>
-          c.coin === coin && Math.abs(new Date(c.ts).getTime() - cl.startTs) < 60000
-        );
-        if (alreadyRecorded) continue;
-
-        // Compute aggregate: total size, avg price, total P&L
-        let totalSize = 0, totalPnl = 0, weightedPx = 0;
-        let side = null;
-        for (const f of cl.fills) {
-          const sz = parseFloat(f.sz || '0');
-          const px = parseFloat(f.px || '0');
-          totalSize += sz;
-          weightedPx += sz * px;
-          totalPnl += parseFloat(f.closedPnl || '0');
-          // The fill direction is opposite to the closed position direction
-          if (!side) side = f.side === 'B' ? 'SHORT' : 'LONG'; // if buying to close, was SHORT
-        }
-        const avgExitPx = totalSize > 0 ? weightedPx / totalSize : 0;
-
-        // Try to find entry price from fill data or activeTrades
-        let entryPx = 0;
-        const at = this.activeTrades[coinId];
-        if (at && at.entry) entryPx = at.entry;
-        // Estimate from P&L if we don't have entry
-        if (!entryPx && totalPnl !== 0 && totalSize > 0) {
-          // pnl = (exit - entry) * size for long, (entry - exit) * size for short
-          if (side === 'LONG') entryPx = avgExitPx - totalPnl / totalSize;
-          else entryPx = avgExitPx + totalPnl / totalSize;
-        }
-
-        // Determine reason
-        let reason = 'auto_closed';
-        const oldTrade = at || {};
-        if (oldTrade.tp && ((side === 'LONG' && avgExitPx >= oldTrade.tp * 0.99) || (side === 'SHORT' && avgExitPx <= oldTrade.tp * 1.01))) {
-          reason = 'tp_hit';
-        } else if (oldTrade.sl && ((side === 'LONG' && avgExitPx <= oldTrade.sl * 1.01) || (side === 'SHORT' && avgExitPx >= oldTrade.sl * 0.99))) {
-          reason = 'sl_hit';
-        } else if (totalPnl > 0) {
-          reason = 'tp_hit'; // positive P&L likely means TP
-        } else if (totalPnl < 0) {
-          reason = 'sl_hit'; // negative P&L likely means SL
-        }
-
-        closed.unshift({
-          coin, side, size: totalSize,
-          entry: entryPx, exit: avgExitPx, pnl: totalPnl,
-          ts: new Date(cl.startTs).toISOString(), reason
-        });
-        newCount++;
-        const emoji = reason === 'tp_hit' ? '✅' : reason === 'sl_hit' ? '🛑' : '📊';
-        const label = reason === 'tp_hit' ? 'TP HIT' : reason === 'sl_hit' ? 'SL HIT' : 'CLOSED';
-        console.log(`HL FILL HISTORY ${label}: ${side} ${coin} | Exit: $${fmt(avgExitPx)} | P&L: $${totalPnl.toFixed(2)}`);
-
-        // v5.0 FIX: Bridge fill history → signal log so STATS tab gets updated
-        // Find the most recent open signal log entry for this coin+side and mark it
-        const logEntries = loadLog();
-        const matchIdx = logEntries.findIndex(e =>
-          e.status === 'open' && e.coin === coinId && e.sig === side
-        );
-        if (matchIdx >= 0) {
-          const newStatus = reason === 'tp_hit' ? 'hit' : 'stopped';
-          logEntries[matchIdx].status = newStatus;
-          logEntries[matchIdx].exitPrice = avgExitPx;
-          logEntries[matchIdx].pnl = totalPnl;
-          logEntries[matchIdx].exitNote = `${emoji} HL fill: ${label} at $${fmt(avgExitPx)} | P&L: $${totalPnl.toFixed(2)}`;
-          saveLog(logEntries);
-          console.log(`Signal log updated: ${coinId} ${side} → ${newStatus}`);
-        }
-      }
-
-      if (newCount > 0) {
-        saveClosedTrades(closed);
-        console.log(`HL fill history: found ${newCount} new closed trades`);
-        showToast(`Found ${newCount} closed trade(s) from fill history`, '', false);
-        renderLog();
-        renderStats();
-      }
-    } catch (e) {
-      console.warn('HL checkFillHistory error:', e);
-    }
-  },
-
-  // ── Auto-sync account equity for position sizing ──
-  // Fetches live equity from HL and caches it; refreshes every 5 minutes
-  async syncEquity() {
-    try {
-      const bal = await this.getBalance();
-      if (bal > 0) {
-        this.cachedEquity = bal;
-        this._lastEquitySync = Date.now();
-        // Also update the UI input so user sees the live value
-        const el = document.getElementById('account-size');
-        if (el) el.value = bal.toFixed(2);
-        localStorage.setItem('account_size', bal.toFixed(2));
-        console.log('HL equity synced: $' + bal.toFixed(2));
-      }
-    } catch (e) {
-      console.warn('HL syncEquity failed:', e);
-    }
-  },
-
-  // v5.5: Process any pending trim orders queued by syncPositions when an oversized
-  // manual position was detected with hl_inherit_manual_positions='trim'. Places a
-  // reduce-only IOC market order to bring notional back under the asset's maxNotional.
-  // Synced w/ bot.js:processPendingTrims.
-  async processPendingTrims() {
-    if (!this._pendingTrims || this._pendingTrims.length === 0) return;
-    const queue = this._pendingTrims;
-    this._pendingTrims = [];
-    const SYM = { bitcoin: 'BTC', hyperliquid: 'HYPE', sp500: 'S&P500', gold: 'GOLD', crude: 'CRUDE' };
-    for (const t of queue) {
-      try {
-        const coin = COINS[t.coinId];
-        if (!coin) continue;
-        const displayAsset = SYM[t.coinId] || coin.shortLabel || t.coinId;
-        const resolvedAsset = this.resolveAsset(displayAsset);
-        const szDec = (this.szDecimals[resolvedAsset] != null) ? this.szDecimals[resolvedAsset] : 4;
-        const targetSize = t.targetNotional / t.currentEntry;
-        const excessSize = t.currentSize - targetSize;
-        if (excessSize <= 0) {
-          console.log(`HL TRIM SKIP: ${resolvedAsset} already at or under cap`);
-          continue;
-        }
-        const sizeStep = Math.pow(10, -szDec);
-        const trimSize = Math.floor(excessSize / sizeStep) * sizeStep;
-        if (trimSize < sizeStep) {
-          console.log(`HL TRIM SKIP: ${resolvedAsset} excess ${excessSize} below minimum size step ${sizeStep}`);
-          continue;
-        }
-        const px = (coinState[t.coinId] && coinState[t.coinId].price) || t.currentEntry;
-        const isLong = t.side === 'LONG';
-        const slip = px * 0.005;
-        const trimPx = isLong ? px - slip : px + slip;
-        const isBuy = !isLong; // reduce-only opposite side
-        console.log(`HL TRIM EXEC: ${resolvedAsset} ${t.side} — closing ${trimSize.toFixed(szDec)} of ${t.currentSize} at ~$${fmt(trimPx)} (reduce-only IOC) [v5.5]`);
-        const result = await this.placeOrder(displayAsset, isBuy, trimSize, trimPx, { limit: { tif: 'Ioc' } }, true);
-        if (result && result.status !== 'err' && (result.filled || result.totalSz)) {
-          const avgPx = result.avgPx ? +result.avgPx : trimPx;
-          const newSize = t.currentSize - trimSize;
-          const newNotional = newSize * t.currentEntry;
-          console.log(`HL TRIM FILLED: ${resolvedAsset} trimmed ${trimSize.toFixed(szDec)} at $${fmt(avgPx)} — remaining size ${newSize.toFixed(szDec)} notional $${newNotional.toFixed(0)}`);
-          showToast(`✅ TRIM FILLED: ${resolvedAsset}`, `~$${newNotional.toFixed(0)} remaining`, false);
-          if (typeof sendTelegram === 'function') {
-            await sendTelegram(`✅ <b>TRIM FILLED: ${resolvedAsset} ${t.side}</b>\nTrimmed: ${trimSize.toFixed(szDec)} @ $${fmt(avgPx)}\nRemaining: ${newSize.toFixed(szDec)} (~$${newNotional.toFixed(0)})\nBot now managing at cap size.`);
-          }
-        } else {
-          console.warn(`HL TRIM FAIL: ${resolvedAsset} order result:`, JSON.stringify(result));
-          showToast(`❌ TRIM FAILED: ${resolvedAsset}`, 'Reduce-only rejected', true);
-          if (typeof sendTelegram === 'function') {
-            await sendTelegram(`❌ <b>TRIM FAILED: ${resolvedAsset} ${t.side}</b>\nReduce-only order rejected.\nPosition still oversized — manage manually or set hl_inherit_manual_positions=ignore.`);
+      // v5.7: Clean stale entries from manualInheritedSeen — remove keys for positions
+      // that no longer exist (coin closed or was reversed). This allows re-detection if
+      // the user opens a new manual position on the same asset later.
+      if (this.manualInheritedSeen) {
+        let cleaned = false;
+        for (const key of Object.keys(this.manualInheritedSeen)) {
+          const coinId = key.split(':')[0];
+          if (!nowOpen.has(coinId)) {
+            delete this.manualInheritedSeen[key];
+            cleaned = true;
+            console.log(`HL: cleaned stale manualInheritedSeen entry: ${key}`);
           }
         }
-      } catch (e) {
-        console.error('HL processPendingTrims error:', e.message || e);
+        if (cleaned) this.saveManualSeen();
       }
-    }
+
+      console.log('HL positions synced:', Object.keys(this.activeTrades).length, 'open');
+    } catch(e) { console.warn('HL syncPositions error:', e.message); }
+    finally { this._syncInFlight = false; }
   },
 
-  // ── Compute action hash for phantom agent signing ──
-  // Must match Python SDK: action_hash(action, vault_address, nonce, expires_after)
-  computeActionHash(action, nonce, vaultAddress) {
-    const packed = this.msgpack(action);
-    // Nonce as 8 bytes big-endian
-    const nonceBuf = new Uint8Array(8);
-    let n = BigInt(nonce);
-    for (let i = 7; i >= 0; i--) { nonceBuf[i] = Number(n & 0xFFn); n >>= 8n; }
-    // Vault address: 0x00 if no vault, 0x01 + 20-byte address if vault
-    // This MUST match Python SDK: b"\x00" or b"\x01" + address_bytes
-    let vaultBuf;
-    if (vaultAddress) {
-      const addrBytes = ethers.utils.arrayify(vaultAddress);
-      vaultBuf = new Uint8Array(1 + addrBytes.length);
-      vaultBuf[0] = 1; // 0x01 flag
-      vaultBuf.set(addrBytes, 1);
-    } else {
-      vaultBuf = new Uint8Array([0]); // 0x00 = no vault
-    }
-    // expires_after: None in normal usage = no extra bytes
-    // Concatenate: packed + nonce + vault
-    const combined = new Uint8Array(packed.length + nonceBuf.length + vaultBuf.length);
-    combined.set(packed);
-    combined.set(nonceBuf, packed.length);
-    combined.set(vaultBuf, packed.length + nonceBuf.length);
-    return ethers.utils.keccak256(combined);
-  },
-
-  // ── Sign L1 action (phantom agent EIP-712) ──
-  // vaultAddress = master account when agent wallet is trading on behalf
-  async signL1Action(action, nonce, vaultAddress) {
-    const hash = this.computeActionHash(action, nonce, vaultAddress || null);
-    const domain = {
-      name: 'Exchange', version: '1',
-      chainId: 1337,
-      verifyingContract: '0x0000000000000000000000000000000000000000'
-    };
-    const types = {
-      Agent: [
-        { name: 'source', type: 'string' },
-        { name: 'connectionId', type: 'bytes32' }
-      ]
-    };
-    const value = { source: 'a', connectionId: hash };
-    const sig = await this.wallet._signTypedData(domain, types, value);
-    return ethers.utils.splitSignature(sig);
-  },
-
-  // ── Float to wire: match Python SDK's Decimal.normalize() — strips trailing zeros ──
-  floatToWire(x) {
-    // Hyperliquid requires at most 5 significant figures for prices
-    const s = parseFloat(parseFloat(x).toPrecision(5)).toString();
-    if (s.includes('.')) return s.replace(/\.?0+$/, '') || '0';
-    return s;
-  },
-
-  // ── Build order type wire — key order must match Python SDK exactly ──
-  orderTypeToWire(orderType) {
-    if (orderType.limit) {
-      return { limit: { tif: orderType.limit.tif } };
-    } else if (orderType.trigger) {
-      // Key order: isMarket, triggerPx, tpsl (must match Python SDK)
-      return { trigger: {
-        isMarket: orderType.trigger.isMarket,
-        triggerPx: this.floatToWire(orderType.trigger.triggerPx),
-        tpsl: orderType.trigger.tpsl
-      }};
-    }
-    return orderType;
-  },
-
-  // ── Translate short coin symbols to HL asset names (for HIP-3 assets) ──
-  resolveAsset(asset) {
-    // Check explicit mappings FIRST — SPX exists on main dex but we want xyz:SP500
-    const hlMap = { GOLD: 'xyz:GOLD', 'S&P500': 'xyz:SP500', SPX: 'xyz:SP500', CRUDE: 'xyz:CL' };
-    if (hlMap[asset]) return hlMap[asset];
-    return asset;
-  },
-
-  // ── Place a single order ──
+  // -- Place an order --
   async placeOrder(asset, isBuy, size, price, orderType, reduceOnly = false) {
-    asset = this.resolveAsset(asset);
     const assetIdx = this.assetMap[asset];
-    if (assetIdx === undefined) throw new Error('Unknown asset: ' + asset);
+    if (assetIdx === undefined) throw new Error('Unknown asset: ' + asset + ' (loaded: ' + Object.keys(this.assetMap).join(',') + ')');
     const szDec = this.szDecimals[asset] || 3;
-    // Format numbers matching Python SDK: Decimal.normalize() strips trailing zeros
     const sizeStr = this.floatToWire(parseFloat(size.toFixed(szDec)));
     const priceStr = this.floatToWire(price);
-    // Build order wire — key order: a, b, p, s, r, t (NO "c" field — omitted per SDK)
     const orderWire = { a: assetIdx, b: isBuy, p: priceStr, s: sizeStr, r: reduceOnly, t: this.orderTypeToWire(orderType) };
     const action = { type: 'order', orders: [orderWire], grouping: 'na' };
     const nonce = Date.now();
-    // Agent wallets do NOT use vaultAddress — the agent→master link is established at registration
-    // vaultAddress is only for actual Hyperliquid vault contracts
     const signature = await this.signL1Action(action, nonce, null);
+    if (!signature || !signature.r) throw new Error('Signing failed -- null signature');
     const payload = { action, nonce, signature: { r: signature.r, s: signature.s, v: signature.v } };
-    console.log('HL order wire:', JSON.stringify(action));
-    const res = await fetch(this.API + '/exchange', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    const result = await res.json();
-    console.log('HL order result:', asset, isBuy ? 'BUY' : 'SELL', sizeStr, '@', priceStr, '→', JSON.stringify(result));
+    console.log('HL order:', asset, isBuy ? 'BUY' : 'SELL', sizeStr, '@', priceStr, reduceOnly ? '(reduce)' : '', 'assetIdx:', assetIdx);
 
-    // Parse Hyperliquid response — top-level status:"ok" does NOT mean the order filled
-    // The real status is inside result.response.data.statuses[0]
+    let res;
+    try {
+      res = await fetch(HL_API + '/exchange', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    } catch (fetchErr) {
+      throw new Error('HL API fetch failed: ' + fetchErr.message);
+    }
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '(empty)');
+      throw new Error('HL API HTTP ' + res.status + ': ' + body.slice(0, 200));
+    }
+
+    let result;
+    try {
+      result = await res.json();
+    } catch (parseErr) {
+      throw new Error('HL API response not valid JSON (HTTP ' + res.status + ')');
+    }
+    if (!result) throw new Error('HL API returned null (HTTP ' + res.status + ')');
+
+    // Log raw response for debugging
+    console.log('HL response:', JSON.stringify(result).slice(0, 300));
+
     if (result.status === 'ok' && result.response?.data?.statuses) {
       const s = result.response.data.statuses[0];
       if (s?.error) {
-        console.error('HL order inner error:', s.error);
+        console.error('HL order error:', s.error);
         return { status: 'err', response: s.error };
       }
       if (s?.filled) {
-        console.log('HL order FILLED:', s.filled.totalSz, '@', s.filled.avgPx);
+        console.log('HL FILLED:', s.filled.totalSz, '@', s.filled.avgPx);
         return { status: 'ok', filled: true, totalSz: s.filled.totalSz, avgPx: s.filled.avgPx, oid: s.filled.oid, raw: result };
       }
       if (s?.resting) {
-        console.log('HL order RESTING (not filled):', s.resting.oid);
+        console.log('HL RESTING:', s.resting.oid);
         return { status: 'ok', filled: false, resting: true, oid: s.resting.oid, raw: result };
       }
     }
+    // Unexpected response shape -- return as-is but log a warning
+    if (result.status === 'err') {
+      console.error('HL API error:', result.response || result);
+      return { status: 'err', response: result.response || JSON.stringify(result).slice(0, 200) };
+    }
+    console.warn('HL unexpected response shape:', JSON.stringify(result).slice(0, 300));
     return result;
   },
 
-  // ── Execute full trade: entry + SL + TP ──
-  async executeTrade(coinId, signal, confidence) {
-    const SYM = { bitcoin: 'BTC', hyperliquid: 'HYPE', sp500: 'S&P500', gold: 'GOLD', crude: 'CRUDE' };
-    const asset = SYM[coinId];
-    if (!asset || !this.enabled || !this.wallet) return null;
-    // v5.31: equityPct 0 = asset disabled (no auto-trade). GOLD off as of v5.31.
-    const _coin = COINS[coinId];
-    if (_coin && !(_coin.equityPct > 0)) { console.log('HL: '+coinId+' auto-trade disabled (equityPct 0) — skipping'); return null; }
+  // -- Fetch open orders (main + HIP-3 dexes) --
+  async fetchOpenOrders() {
+    // v5.1 FIX: Use frontendOpenOrders instead of openOrders.
+    // The standard openOrders endpoint does NOT return the orderType field, so
+    // trigger orders (Stop Market / TP) are indistinguishable from limit orders.
+    // frontendOpenOrders returns orderType + isTrigger + triggerPx fields,
+    // which cancelTriggerOrders needs to filter correctly.
+    const queryAddr = (this.masterAddress || this.address).toLowerCase();
+    const requests = [
+      fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'frontendOpenOrders', user: queryAddr }) }),
+      ...this.HIP3_DEXES.map(dex =>
+        fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'frontendOpenOrders', user: queryAddr, dex }) }))
+    ];
+    const responses = await Promise.all(requests);
+    const allOrders = [];
+    for (const r of responses) {
+      const data = await r.json();
+      if (Array.isArray(data)) allOrders.push(...data);
+    }
+    return allOrders;
+  },
 
-    // v5.4: Pick up session-scaled cap set by the caller (SP500 long tiering). Falls back to
-    // the static COINS[coinId].maxNotional. One-shot: cleared after read so it can't leak.
-    const _coinCfgForCap = COINS[coinId] || {};
-    let effectiveMaxNotional = _coinCfgForCap.maxNotional || 0;
+  // -- Cancel an order --
+  async cancelOrder(asset, oid) {
+    const assetIdx = this.assetMap[asset];
+    if (assetIdx === undefined) return;
+    const action = { type: 'cancel', cancels: [{ a: assetIdx, o: oid }] };
+    const nonce = Date.now();
+    const signature = await this.signL1Action(action, nonce, null);
+    const payload = { action, nonce, signature: { r: signature.r, s: signature.s, v: signature.v } };
+    const res = await fetch(HL_API + '/exchange', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return await res.json();
+  },
+
+  // -- Cancel all trigger orders for an asset --
+  // v5.1 FIX: Use isTrigger flag from frontendOpenOrders (standard openOrders lacks orderType)
+  async cancelTriggerOrders(asset) {
+    try {
+      const orders = await this.fetchOpenOrders();
+      // A trigger order has isTrigger === true OR orderType containing "Stop"/"Take"
+      // (some HL responses only set one of these, so check both for safety)
+      const triggers = orders.filter(o => {
+        if (o.coin !== asset) return false;
+        if (o.isTrigger === true) return true;
+        if (o.orderType && /Stop|Take|Trigger/i.test(o.orderType)) return true;
+        return false;
+      });
+      if (triggers.length > 0) {
+        console.log(`HL cancelTriggerOrders: ${asset} found ${triggers.length} trigger order(s) to cancel`);
+      }
+      for (const o of triggers) {
+        try {
+          await this.cancelOrder(asset, o.oid);
+        } catch (e) {
+          console.warn(`cancelTriggerOrders: failed to cancel oid ${o.oid}:`, e.message);
+        }
+      }
+      return triggers.length;
+    } catch (e) { console.warn('cancelTriggerOrders error:', e.message); return 0; }
+  },
+
+  // -- Execute full trade: market entry + SL + TP --
+  async executeTrade(coinId, signal, confidence) {
+    const coin = COINS[coinId];
+    const asset = coin?.asset;
+    if (!asset || !this.enabled || !this.wallet) return null;
+
+    // v5.31: equityPct 0 = asset DISABLED (no auto-trade). Canonical off-switch —
+    // lets an asset be turned off via coins-config.js without removing it (keeps
+    // scanning + dashboard, preserves tuning notes). GOLD disabled here as of v5.31.
+    if (!(coin.equityPct > 0)) { console.log(`HL: ${coinId} auto-trade disabled (equityPct 0) — skipping entry`); return null; }
+
+    // v5.25: Dynamic maxNotional from equity × equityPct (coins-config.js).
+    // v5.4 session-scaled override still works — it overrides the dynamic base if set.
+    const equity = this.cachedEquity > 0 ? this.cachedEquity : 100;
+    let effectiveMaxNotional = getMaxNotional(coin, equity);
     const _scaledCap = coinState[coinId] && coinState[coinId].effectiveMaxNotional;
     if (typeof _scaledCap === 'number' && _scaledCap > 0) {
       effectiveMaxNotional = _scaledCap;
-      if (_scaledCap !== (_coinCfgForCap.maxNotional || 0)) {
-        console.log(`HL: ${asset} session-scaled cap $${_scaledCap} (default $${_coinCfgForCap.maxNotional || 0}) [v5.4]`);
+      if (_scaledCap !== getMaxNotional(coin, equity)) {
+        console.log(`HL: ${asset} session-scaled cap $${_scaledCap} (equity-based $${getMaxNotional(coin, equity).toFixed(0)}) [v5.4]`);
       }
     }
     if (coinState[coinId] && 'effectiveMaxNotional' in coinState[coinId]) {
@@ -3798,30 +1314,116 @@ const HL = {
     // Daily trade limit
     const today = new Date().toDateString();
     if (today !== this.lastTradeDay) { this.tradesToday = 0; this.lastTradeDay = today; }
-    const maxTrades = parseInt(localStorage.getItem('hl_max_trades') || '10');
-    if (this.tradesToday >= maxTrades) {
-      console.warn('HL: daily trade limit reached (' + maxTrades + ')');
+    if (this.tradesToday >= MAX_TRADES_DAY) {
+      console.warn('HL: daily trade limit reached (' + MAX_TRADES_DAY + ')');
       return null;
     }
 
-    // Skip if already in a position for this coin (unless same direction = adding)
-    const existingTrade = this.activeTrades[coinId];
-    if (existingTrade && existingTrade.side !== signal.sig) {
-      console.log('HL: already in opposite trade for', coinId, '— use position-aware logic');
+    // v5.0: Post-loss cooldown check (#3)
+    const lastSl = this.lastSlTime[coinId];
+    if (lastSl && (Date.now() - lastSl) < this.COOLDOWN_MS) {
+      const remaining = Math.round((this.COOLDOWN_MS - (Date.now() - lastSl)) / 1000);
+      console.warn(`HL: ${coinId} on post-loss cooldown (${remaining}s remaining), skipping`);
+      logMissedSignal(coinId, signal.sig, confidence, 'post-loss-cooldown', { remainingSec: remaining, filter: `cooldown ${remaining}s remaining` });
       return null;
     }
+
+    // v5.1: Per-asset rolling loss circuit breaker
+    const consecLosses = this.consecutiveLosses[coinId] || 0;
+    if (consecLosses >= this.MAX_CONSEC_LOSSES) {
+      console.warn(`HL CIRCUIT BREAKER: ${coinId} blocked -- ${consecLosses} consecutive losses (max ${this.MAX_CONSEC_LOSSES}). Manual review needed.`);
+      logMissedSignal(coinId, signal.sig, confidence, 'circuit-breaker', { consecLosses, maxConsecLosses: this.MAX_CONSEC_LOSSES, filter: 'consecutive loss circuit breaker' });
+      await sendTelegram(`⏸ <b>${coin.label} PAUSED</b>\n${consecLosses} consecutive losses -- trading paused until a manual reset or profitable close.`);
+      return null;
+    }
+
+    // v5.1: Counter-trend blocking after recent profitable trade
+    // If the last profitable trade on this coin was in the opposite direction within 24h,
+    // require higher confidence to enter (prevents flipping against a validated trend)
+    const recentWinDir = this.lastWinDir[coinId];
+    const recentWinTime = this.lastWinTime[coinId];
+    if (recentWinDir && recentWinTime && (Date.now() - recentWinTime) < this.COUNTER_TREND_WINDOW) {
+      if (signal.sig !== recentWinDir) {
+        const requiredConf = MIN_CONFIDENCE + this.COUNTER_TREND_CONF_BOOST;
+        if (confidence < requiredConf) {
+          console.warn(`HL COUNTER-TREND BLOCK: ${coinId} -- last win was ${recentWinDir} ${((Date.now()-recentWinTime)/3600000).toFixed(1)}h ago, ${signal.sig} needs conf ${requiredConf}% (has ${confidence}%)`);
+          logMissedSignal(coinId, signal.sig, confidence, 'counter-trend-block', { lastWinDir: recentWinDir, requiredConf, filter: `last win ${recentWinDir}, needs ${requiredConf}% conf` });
+          return null;
+        }
+        console.log(`HL: ${coinId} counter-trend ${signal.sig} allowed -- conf ${confidence}% >= ${requiredConf}% (last win ${recentWinDir})`);
+      }
+    }
+
+    // v5.15: Post-exhaustion re-entry filter
+    // After 2+ TP closes on the same coin+direction within the cooldown window, block same-direction
+    // re-entry. Prevents chasing exhausted moves (e.g. Apr 29→30 GOLD re-short after 3 TPs → SL).
+    {
+      const tpLog = this.tpCloseLog[coinId];
+      if (tpLog && tpLog.length > 0) {
+        const now = Date.now();
+        const cutoff = now - this.EXHAUSTION_COOLDOWN_MS;
+        // Count same-direction TP closes within the window
+        const sameDirTPs = tpLog.filter(e => e.side === signal.sig && e.ts >= cutoff);
+        if (sameDirTPs.length >= this.EXHAUSTION_TP_COUNT) {
+          const lastTpTs = Math.max(...sameDirTPs.map(e => e.ts));
+          const remaining = Math.round((lastTpTs + this.EXHAUSTION_COOLDOWN_MS - now) / 1000);
+          const hoursAgo = ((now - lastTpTs) / 3600000).toFixed(1);
+          console.warn(`HL EXHAUSTION BLOCK: ${coinId} ${signal.sig} — ${sameDirTPs.length} TP closes in same direction within ${this.EXHAUSTION_COOLDOWN_MS/3600000}h window (last ${hoursAgo}h ago). Cooldown ${remaining}s remaining.`);
+          logMissedSignal(coinId, signal.sig, confidence, 'post-exhaustion-block', {
+            sameDirTpCount: sameDirTPs.length,
+            lastTpHoursAgo: hoursAgo,
+            cooldownRemainingSec: remaining,
+            filter: `${sameDirTPs.length} same-dir TPs, cooldown ${remaining}s`
+          });
+          return null;
+        }
+      }
+    }
+
+    // v5.3: Combined notional exposure limit
+    // Prevents total account blow-up on correlated reversals (e.g. all shorts hit SL together)
+    // Apr 12 had $1,060 combined notional on $145 equity (7.3×) — cap at 8× to allow similar trades
+    {
+      const maxTotalNotional = (this.cachedEquity > 0 ? this.cachedEquity : 100) * 8;
+      let totalOpenNotional = 0;
+      for (const [cId, t] of Object.entries(this.activeTrades)) {
+        const px = coinState[cId]?.price || t.entry || 0;
+        totalOpenNotional += Math.abs(t.size * px);
+      }
+      // Estimate new trade notional from risk sizing (rough upper bound: maxNotional or equity * riskPct / minStopPct)
+      // v5.4: use effectiveMaxNotional (session-scaled for SP500 longs) instead of the static coin cap.
+      const estimatedNewNotional = effectiveMaxNotional > 0 ? effectiveMaxNotional : (this.cachedEquity || 100) * 2;
+      if (totalOpenNotional + estimatedNewNotional > maxTotalNotional) {
+        console.warn(`HL EXPOSURE CAP: ${coinId} blocked — open notional $${totalOpenNotional.toFixed(0)} + est. $${estimatedNewNotional.toFixed(0)} > max $${maxTotalNotional.toFixed(0)} (8× equity) (v5.3)`);
+        logMissedSignal(coinId, signal.sig, confidence, 'exposure-cap', { openNotional: totalOpenNotional, estNewNotional: estimatedNewNotional, maxTotalNotional, filter: '8× equity exposure cap (v5.3)' });
+        await sendTelegram(`🛡 <b>EXPOSURE CAP: ${coin.label}</b>\nOpen notional: $${totalOpenNotional.toFixed(0)}\nMax allowed: $${maxTotalNotional.toFixed(0)} (8× equity)\nTrade skipped.`);
+        return null;
+      }
+    }
+
+    // v5.0: Daily P&L limit check (#8)
+    const pnlDay = new Date().toDateString();
+    if (pnlDay !== this.dailyPnlDate) { this.dailyPnl = 0; this.dailyPnlDate = pnlDay; }
 
     const { sig, level, stopPrice, rr, type } = signal;
     let { target } = signal;
     if (!stopPrice) { console.warn('HL: no stop price, skipping'); return null; }
 
     const isBuy = sig === 'LONG';
-    // v5.0 FIX #5: Use freshest available price (WS should be recent, but guard against stale)
-    const currentPrice = coinState[coinId]?.price;
+    // v5.0 FIX #5: Fetch fresh price instead of using potentially stale coinState
+    // coinState price could be 30-60s old from last scan cycle
+    let currentPrice;
+    try {
+      const freshData = await getPrice(coinId);
+      currentPrice = freshData?.price || coinState[coinId]?.price;
+    } catch (e) {
+      currentPrice = coinState[coinId]?.price;
+      console.warn('HL: fresh price fetch failed, using cached:', e.message);
+    }
     if (!currentPrice) { console.warn('HL: no price for', coinId); return null; }
 
-    // Dynamic R:R cap: with-trend trades get more room (4:1), counter-trend capped tighter (2.5:1)
-    const htfDir = coinState[coinId].htfDir || 'UNCLEAR';
+    // Dynamic R:R cap
+    const htfDir = coinState[coinId]?.htfDir || 'UNCLEAR';
     const withTrend = (sig === 'LONG' && htfDir === 'UP') || (sig === 'SHORT' && htfDir === 'DOWN');
     const maxRR = withTrend ? 4.0 : 2.5;
     const risk = Math.abs(currentPrice - stopPrice);
@@ -3830,66 +1432,106 @@ const HL = {
       const actualReward = Math.abs(target - currentPrice);
       if (actualReward > maxReward) {
         target = isBuy ? currentPrice + maxReward : currentPrice - maxReward;
-        console.log(`HL: capped TP to R:R ${maxRR} (${withTrend?'with':'counter'}-trend) →`, target.toFixed(1));
+        console.log(`HL: capped TP to R:R ${maxRR} (${withTrend?'with':'counter'}-trend) ->`, target.toFixed(1));
       }
     }
 
-    // v5.3: Combined notional exposure limit (synced w/ bot.js)
-    // Prevents total account blow-up on correlated reversals
-    {
-      const eqForCap = (this.cachedEquity > 0) ? this.cachedEquity : parseFloat(localStorage.getItem('account_size') || '100');
-      const maxTotalNotional = eqForCap * 8;
-      let totalOpenNotional = 0;
-      for (const [cId, t] of Object.entries(this.activeTrades)) {
-        const px = coinState[cId]?.price || t.entry || 0;
-        totalOpenNotional += Math.abs(t.size * px);
+    // Position sizing
+    const accountSize = this.cachedEquity > 0 ? this.cachedEquity : 100;
+    let riskPct = RISK_PCT;
+
+    // v5.0: Reduce position size by 50% if daily loss limit breached (#8)
+    // v5.25: DAILY_LOSS_LIMIT is computed in syncEquity(); fallback to -(3% equity) if null
+    const dailyLossLimit = this.DAILY_LOSS_LIMIT != null ? this.DAILY_LOSS_LIMIT : -(accountSize * DAILY_LOSS_PCT);
+    if (this.dailyPnl <= dailyLossLimit) {
+      riskPct = RISK_PCT * this.DAILY_LOSS_REDUCE;
+      console.warn(`HL: daily P&L $${this.dailyPnl.toFixed(2)} <= limit $${this.DAILY_LOSS_LIMIT} -- reducing risk to ${riskPct}%`);
+    }
+
+    const riskAmount = accountSize * riskPct / 100;
+    let effectiveStopPrice = stopPrice;
+
+    // v5.7: Trend-exhaustion modifier — tighten SL and halve size on late-cycle entries
+    // Set by maybeAutoTrade when the 48h directional move exceeds the tighten threshold.
+    const exhaustionMod = coinState[coinId]?.exhaustionModifier;
+    if (exhaustionMod?.tightenSL) {
+      const maxSlPct = 0.015; // cap at 1.5% from entry
+      const maxSlDist = currentPrice * maxSlPct;
+      const origSlDist = Math.abs(currentPrice - stopPrice);
+      if (origSlDist > maxSlDist) {
+        effectiveStopPrice = isBuy ? currentPrice - maxSlDist : currentPrice + maxSlDist;
+        console.log(`HL EXHAUSTION: ${asset} SL tightened from ${stopPrice.toFixed(1)} (${(origSlDist/currentPrice*100).toFixed(2)}%) to ${effectiveStopPrice.toFixed(1)} (${maxSlPct*100}%) [v5.7]`);
       }
-      // v5.4: use session-scaled effectiveMaxNotional (set above) instead of the static coin cap
-      const estimatedNewNotional = effectiveMaxNotional > 0 ? effectiveMaxNotional : eqForCap * 2;
-      if (totalOpenNotional + estimatedNewNotional > maxTotalNotional) {
-        console.warn(`HL EXPOSURE CAP: ${coinId} blocked — open $${totalOpenNotional.toFixed(0)} + est. $${estimatedNewNotional.toFixed(0)} > max $${maxTotalNotional.toFixed(0)} (8× equity) (v5.3)`);
-        showToast(`EXPOSURE CAP: ${coinId}`, `Open $${totalOpenNotional.toFixed(0)} > $${maxTotalNotional.toFixed(0)}`, true);
+    }
+    // Clean up one-shot modifier
+    if (coinState[coinId]?.exhaustionModifier) delete coinState[coinId].exhaustionModifier;
+
+    const slDistance = Math.abs(currentPrice - effectiveStopPrice);
+    // v5.0: Use per-coin minStopPct instead of hard 0.3%
+    const minStopDist = currentPrice * (coin.minStopPct || 0.005);
+    if (slDistance < minStopDist) { console.warn('HL: SL too tight (' + (slDistance/currentPrice*100).toFixed(3) + '% < ' + ((coin.minStopPct||0.005)*100).toFixed(1) + '%)'); return null; }
+
+    // v5.20 (2026-05-08): Max-loss-per-trade gate. If level-based SL implies > MAX_LOSS_PCT
+    // adverse move (= > MAX_LOSS_PCT loss as fraction of notional), skip the trade. Trusts the
+    // level analysis but passes when reward asymmetry is too poor (the May 3 HYPE pattern).
+    const slDistPct = slDistance / currentPrice;
+    if (slDistPct > MAX_LOSS_PCT) {
+      console.warn(`HL: ${asset} ${sig} SKIP — SL ${(slDistPct*100).toFixed(2)}% > ${(MAX_LOSS_PCT*100).toFixed(1)}% max-loss cap (v5.20)`);
+      logMissedSignal(coinId, signal.sig, confidence, 'max-loss-cap', { slDistPct: +slDistPct.toFixed(4), maxLossPct: MAX_LOSS_PCT, filter: `v5.20 max-loss-per-trade ${(MAX_LOSS_PCT*100).toFixed(1)}%` });
+      await sendTelegram(`📏 <b>SKIP: ${asset} ${sig}</b>\nLevel-based SL ${(slDistPct*100).toFixed(2)}% from entry exceeds ${(MAX_LOSS_PCT*100).toFixed(1)}% max-loss cap.\nReward asymmetry too poor after fees.`);
+      return null;
+    }
+
+    let size = riskAmount / slDistance;
+
+    // v5.7: Trend-exhaustion size reduction — halve position when entering a late-cycle move
+    if (exhaustionMod?.sizeMultiplier && exhaustionMod.sizeMultiplier < 1) {
+      const oldSize = size;
+      size *= exhaustionMod.sizeMultiplier;
+      console.log(`HL EXHAUSTION: ${asset} size reduced ${oldSize.toFixed(6)} -> ${size.toFixed(6)} (×${exhaustionMod.sizeMultiplier}) [v5.7]`);
+    }
+
+    const szDec = this.szDecimals[asset] || 3;
+
+    // v5.0: Cap max notional for HIP-3 assets (#4)
+    // v5.0.1: Added verbose logging + hard enforcement to catch bypass bugs
+    // v5.4: maxNotional = session-scaled effectiveMaxNotional (set above) to support SP500 long tiers.
+    const maxNotional = effectiveMaxNotional;
+    console.log(`HL: ${asset} sizing: raw size=${size.toFixed(szDec)} notional=$${(size*currentPrice).toFixed(0)} maxNotional=${maxNotional} coinId=${coinId}`);
+    if (maxNotional > 0) {
+      const notional = size * currentPrice;
+      if (notional > maxNotional) {
+        const oldSize = size;
+        size = maxNotional / currentPrice;
+        console.log(`HL: CAPPED ${asset} notional $${notional.toFixed(0)} -> $${maxNotional} (size ${oldSize.toFixed(szDec)} -> ${size.toFixed(szDec)})`);
+      }
+    }
+
+    // v5.0.1: Safety-net double-check — hard block if notional still exceeds 1.1x cap after rounding
+    // This catches any edge case where the cap above was bypassed
+    if (maxNotional > 0) {
+      const finalNotional = parseFloat(size.toFixed(szDec)) * currentPrice;
+      if (finalNotional > maxNotional * 1.1) {
+        console.error(`HL: HARD BLOCK ${asset} — notional $${finalNotional.toFixed(0)} exceeds ${maxNotional}*1.1 after rounding! This should not happen.`);
+        await sendTelegram(`🚨 <b>HARD BLOCK: ${asset}</b>\nNotional $${finalNotional.toFixed(0)} exceeds cap $${maxNotional} after rounding.\nTrade rejected. Check maxNotional logic.`);
         return null;
       }
     }
 
-    // Position sizing: risk-based — use live equity if available, fallback to manual setting
-    const manualSize = parseFloat(localStorage.getItem('account_size') || '100');
-    const accountSize = (this.cachedEquity > 0) ? this.cachedEquity : manualSize;
-    const riskPct = parseFloat(localStorage.getItem('risk_pct') || '1');
-    const riskAmount = accountSize * riskPct / 100;
-    const slDistance = Math.abs(currentPrice - stopPrice);
-    // v5.1: Use per-coin minStopPct (synced w/ bot.js)
-    const coinCfg = COINS[coinId] || {};
-    const minStopDist = currentPrice * (coinCfg.minStopPct || 0.005);
-    if (slDistance < minStopDist) { console.warn(`HL: SL too tight (${(slDistance/currentPrice*100).toFixed(3)}% < ${((coinCfg.minStopPct||0.005)*100).toFixed(1)}%)`); return null; }
-
-    let size = riskAmount / slDistance;
-    const resolvedAsset = this.resolveAsset(asset);
-    const szDec = this.szDecimals[resolvedAsset] || 3;
     const minSize = Math.pow(10, -szDec);
     if (size < minSize) { console.warn('HL: size too small:', size); return null; }
 
-    // v5.1: maxNotional cap for HIP-3 assets (synced w/ bot.js)
-    // v5.4: uses session-scaled effectiveMaxNotional for SP500 long tiering
-    const maxNotional = effectiveMaxNotional;
-    if (maxNotional > 0) {
-      const notional = size * currentPrice;
-      if (notional > maxNotional) {
-        size = maxNotional / currentPrice;
-        console.log(`HL: ${asset} capped to maxNotional $${maxNotional} (was $${notional.toFixed(0)})`);
-      }
-    }
-
-    // v5.1: HIP-3 assets use GTC limit at 0.05% through spread, standard uses IOC with 1% slippage (synced w/ bot.js)
-    const isHIP3 = coinCfg.isHIP3 || false;
+    // v5.0: HIP-3 assets use GTC limit at best bid/ask instead of IOC taker (#1)
+    const isHIP3 = coin.isHIP3 || false;
     let entryPx, entryOrderType;
     if (isHIP3) {
+      // Place limit at 0.05% through the spread for quick fill without taker fee
       const limitSlip = currentPrice * 0.0005;
       entryPx = isBuy ? currentPrice + limitSlip : currentPrice - limitSlip;
       entryOrderType = { limit: { tif: 'Gtc' } };
       console.log(`HL: ${asset} using GTC limit order @ ${entryPx.toFixed(1)} (HIP-3 fee optimization)`);
     } else {
+      // Standard: IOC limit with 1% slippage (taker)
       const slip = currentPrice * 0.01;
       entryPx = isBuy ? currentPrice + slip : currentPrice - slip;
       entryOrderType = { limit: { tif: 'Ioc' } };
@@ -3898,18 +1540,21 @@ const HL = {
     try {
       // 1. Entry order (IOC for standard, GTC limit for HIP-3)
       const entryRes = await this.placeOrder(asset, isBuy, size, entryPx, entryOrderType);
+      if (!entryRes) { console.error('HL entry returned null'); return null; }
       if (entryRes.status === 'err') { console.error('HL entry failed:', entryRes.response); return null; }
-      // v5.0 FIX #8: For IOC, explicitly reject resting orders
+      // v5.0 FIX #8: For IOC, explicitly reject resting orders (shouldn't happen, but handle edge cases)
       if (!isHIP3 && entryRes.resting) {
         console.error('HL entry resting instead of filling (IOC) — cancelling');
-        try { await this.cancelOrder(asset, entryRes.oid); } catch(e) { console.warn('cancel resting entry failed:', e); }
+        try { await this.cancelOrder(asset, entryRes.oid); } catch(e){}
         return null;
       }
+      // For GTC orders, resting is OK (will fill shortly); for IOC, must be filled immediately
       if (!isHIP3 && (entryRes.filled === false || (!entryRes.filled && !entryRes.totalSz))) { console.error('HL entry not filled'); return null; }
       // For HIP-3 GTC: if resting, wait 5s then check if filled
       if (isHIP3 && entryRes.resting && !entryRes.filled) {
         console.log('HL: HIP-3 GTC order resting, waiting 5s for fill...');
         await new Promise(r => setTimeout(r, 5000));
+        // Check position to see if filled
         await this.syncPositions();
         if (!this.activeTrades[coinId]) {
           console.warn('HL: HIP-3 GTC order not filled after 5s, cancelling');
@@ -3918,21 +1563,22 @@ const HL = {
         }
       }
 
-      // 2. Stop Loss (full position, trigger market)
-      const slPx = isBuy ? stopPrice * 0.98 : stopPrice * 1.02;
+      // 2. Stop Loss (full position)
+      // v5.7: use effectiveStopPrice (may be tightened by exhaustion filter)
+      const slPx = isBuy ? effectiveStopPrice * 0.98 : effectiveStopPrice * 1.02;
       const slRes = await this.placeOrder(asset, !isBuy, size, slPx,
-        { trigger: { isMarket: true, triggerPx: stopPrice, tpsl: 'sl' } }, true);
+        { trigger: { isMarket: true, triggerPx: effectiveStopPrice, tpsl: 'sl' } }, true);
       if (!slRes || slRes.status === 'err') {
         console.error('HL SL placement failed:', slRes ? slRes.response : 'null');
-        showToast(`SL FAILED for ${sig} ${asset} — place manually!`, '', true);
+        await sendTelegram(`⚠️ <b>SL FAILED for ${sig} ${asset}</b>\nTrade open WITHOUT stop loss -- place manually!`);
       }
 
-      // 3. v5.2: 3-STAGE PARTIAL TP LADDER (was 2-stage 50/50 in v5.1) — synced w/ bot.js
+      // 3. v5.2: 3-STAGE PARTIAL TP LADDER (was 2-stage 50/50 in v5.0)
       // TP1: 34% at 1.0R, TP2: 33% at 1.8R, TP3: remaining 33% trails via trailStops()
       // v5.2: HIP-3 assets use limit trigger (isMarket:false) for TP to avoid taker fees
       // SL remains isMarket:true for guaranteed fills — TP can afford to miss occasionally
       if (target) {
-        const riskDist = Math.abs(currentPrice - stopPrice);
+        const riskDist = Math.abs(currentPrice - effectiveStopPrice);
         const tp1Price = isBuy ? currentPrice + riskDist * 1.0 : currentPrice - riskDist * 1.0;  // 1R
         const tp2Price = isBuy ? currentPrice + riskDist * 1.8 : currentPrice - riskDist * 1.8;  // 1.8R
         // TP3 = remaining 33% handled by trailStops() — no order placed
@@ -3946,29 +1592,31 @@ const HL = {
         const tpTriggerType = isHIP3 ? false : true;  // isMarket: false = limit trigger
         const tpSlippage = isHIP3 ? 0.002 : 0.02;     // 0.2% cushion for HIP-3, 2% for standard
 
-        if (tp1Size >= minSize) {
+        if (tp1Size >= Math.pow(10, -szDec)) {
           const tp1Px = isBuy ? tp1Price * (1 + tpSlippage) : tp1Price * (1 - tpSlippage);
           const tp1Res = await this.placeOrder(asset, !isBuy, tp1Size, tp1Px,
             { trigger: { isMarket: tpTriggerType, triggerPx: tp1Price, tpsl: 'tp' } }, true);
           if (!tp1Res || tp1Res.status === 'err') {
             console.error('HL TP1 placement failed:', tp1Res ? tp1Res.response : 'null');
+            await sendTelegram(`⚠️ <b>TP1 FAILED for ${sig} ${asset}</b>\nTrade open without TP1`);
           } else {
             console.log(`HL: TP1 placed: ${tp1Size} of ${size.toFixed(szDec)} @ $${fmt(tp1Price)} (34% at 1.0R)${isHIP3 ? ' [limit trigger]' : ''}`);
           }
         }
 
-        if (tp2Size >= minSize) {
+        if (tp2Size >= Math.pow(10, -szDec)) {
           const tp2Px = isBuy ? tp2Price * (1 + tpSlippage) : tp2Price * (1 - tpSlippage);
           const tp2Res = await this.placeOrder(asset, !isBuy, tp2Size, tp2Px,
             { trigger: { isMarket: tpTriggerType, triggerPx: tp2Price, tpsl: 'tp' } }, true);
           if (!tp2Res || tp2Res.status === 'err') {
             console.error('HL TP2 placement failed:', tp2Res ? tp2Res.response : 'null');
+            await sendTelegram(`⚠️ <b>TP2 FAILED for ${sig} ${asset}</b>\nTrade open without TP2`);
           } else {
             console.log(`HL: TP2 placed: ${tp2Size} of ${size.toFixed(szDec)} @ $${fmt(tp2Price)} (33% at 1.8R)${isHIP3 ? ' [limit trigger]' : ''}`);
           }
         }
 
-        if (tp1Size < minSize && tp2Size < minSize) {
+        if (tp1Size < Math.pow(10, -szDec) && tp2Size < Math.pow(10, -szDec)) {
           // Size too small to split into 3 — place single full TP at target with fee-optimized trigger
           const tpPx = isBuy ? target * (1 + tpSlippage) : target * (1 - tpSlippage);
           await this.placeOrder(asset, !isBuy, size, tpPx,
@@ -3977,119 +1625,79 @@ const HL = {
         }
       }
 
-      // Track active trade with trailing stop state
+      // Track active trade
       const actualEntry = entryRes.avgPx ? +entryRes.avgPx : currentPrice;
       this.activeTrades[coinId] = {
         asset, side: sig, size, entry: actualEntry,
-        sl: stopPrice, tp: target,
-        initialSl: stopPrice,
-        bestPrice: actualEntry, // tracks best price seen for trailing
-        trailState: 'initial', // initial → breakeven → trailing
-        tpStage: 3,            // v5.2: 3-stage TP ladder (34% TP1 at 1R, 33% TP2 at 1.8R, 33% trail)
-        originalSize: size,    // v5.3: track original size for TP fill detection
-        tp1Detected: false,    // v5.3: tracks whether TP1 has filled (forces breakeven SL)
-        tp2Hit: false          // v5.3: tracks whether TP2 has filled (triggers wider trail)
+        sl: effectiveStopPrice, tp: target,
+        initialSl: effectiveStopPrice,
+        bestPrice: actualEntry,
+        trailState: 'initial',
+        partialTp: true,   // v5.0: partial TP is now default
+        tpStage: 3,        // v5.2: 3-stage TP ladder (34% TP1 at 1R, 33% TP2 at 1.8R, 33% trail)
+        originalSize: size, // v5.0: track original size for trailing logic
+        tp1Detected: false, // v5.3: tracks whether TP1 has filled (forces breakeven SL)
+        tp2Hit: false,      // v5.3: tracks whether TP2 has filled (triggers wider trail)
+        entryTs: Date.now() // v5.16: entry timestamp for time-based exit
       };
       this.saveActiveTrades();
       this.tradesToday++;
 
-      // Log to signal log
-      const tradeNote = `AUTO-TRADE: ${sig} ${asset} | Size: ${size.toFixed(szDec)} | Entry: $${fmt(currentPrice)} | SL: $${fmt(stopPrice)}${target ? ' | TP: $' + fmt(target) : ''} | R:R ${rr || '?'}`;
-      console.log(tradeNote);
-
-      // Toast notification
-      showToast('TRADE: ' + sig + ' ' + asset + ' @ $' + fmt(currentPrice), 'SL: $' + fmt(stopPrice) + (target ? ' | TP: $' + fmt(target) : ''), sig === 'SHORT');
+      const exhaustionNote = (effectiveStopPrice !== stopPrice) ? `\n⚡ Exhaustion filter: SL tightened from $${fmt(stopPrice)} to $${fmt(effectiveStopPrice)}` : '';
+      const tradeMsg = `${isBuy ? '🟢' : '🔴'} <b>AUTO-TRADE: ${sig} ${asset}</b>\nEntry: <b>$${fmt(actualEntry)}</b>\nSize: ${size.toFixed(szDec)}\nSL: <b>$${fmt(effectiveStopPrice)}</b>${target ? '\nTP: <b>$' + fmt(target) + '</b>' : ''}\nR:R ${rr || '?'}${exhaustionNote}\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
+      console.log(`HL TRADE: ${sig} ${asset} | Size: ${size.toFixed(szDec)} | Entry: $${fmt(actualEntry)} | SL: $${fmt(effectiveStopPrice)}${target ? ' | TP: $' + fmt(target) : ''}${effectiveStopPrice !== stopPrice ? ' [EXHAUSTION-TIGHTENED]' : ''}`);
+      await sendTelegram(tradeMsg);
 
       return entryRes;
     } catch (e) {
       console.error('HL trade error:', e);
-      showToast('TRADE FAILED: ' + e.message);
+      await sendTelegram(`❌ <b>TRADE FAILED: ${sig} ${asset}</b>\n${e.message}`);
       return null;
     }
   },
 
-  // ── Fetch open orders (main + HIP-3 dexes) ──
-  async fetchOpenOrders() {
-    const queryAddr = (this.masterAddress || this.address).toLowerCase();
-    const requests = [
-      fetch(this.API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'openOrders', user: queryAddr }) }),
-      ...this.HIP3_DEXES.map(dex =>
-        fetch(this.API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'openOrders', user: queryAddr, dex }) }))
-    ];
-    const responses = await Promise.all(requests);
-    const allOrders = [];
-    for (const r of responses) {
-      const data = await r.json();
-      if (Array.isArray(data)) allOrders.push(...data);
-    }
-    return allOrders;
-  },
-
-  // ── Cancel an order by oid ──
-  async cancelOrder(asset, oid) {
-    asset = this.resolveAsset(asset);
-    const assetIdx = this.assetMap[asset];
-    if (assetIdx === undefined) return;
-    const action = { type: 'cancel', cancels: [{ a: assetIdx, o: oid }] };
-    const nonce = Date.now();
-    const signature = await this.signL1Action(action, nonce, null);
-    const payload = { action, nonce, signature: { r: signature.r, s: signature.s, v: signature.v } };
-    const res = await fetch(this.API + '/exchange', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    const result = await res.json();
-    console.log('HL cancel result:', asset, oid, JSON.stringify(result));
-    return result;
-  },
-
-  // ── Cancel all trigger orders for an asset (SL/TP) ──
-  async cancelTriggerOrders(asset) {
-    try {
-      const orders = await this.fetchOpenOrders();
-      const triggers = orders.filter(o => o.coin === asset && o.orderType && o.orderType !== 'Limit');
-      for (const o of triggers) {
-        await this.cancelOrder(asset, o.oid);
-      }
-      return triggers.length;
-    } catch (e) { console.warn('cancelTriggerOrders error:', e); return 0; }
-  },
-
-  // ── Trailing stop logic: called on each price update ──
-  // Moves SL to breakeven at 1:1 R, then trails at 1.5:1 distance
+  // -- Trailing stop logic --
   async trailStops() {
     if (!this.wallet || !this.enabled) return;
-    // v5.0 FIX #2: Fetch live positions to verify trades still open before modifying orders
+    // v5.0 FIX #2: Fetch live positions once to verify trades still open
     let livePositions;
     try {
       const queryAddr = (this.masterAddress || this.address).toLowerCase();
-      // v5.7: allSettled + main-must-succeed guard (matches bot.js fix).
+      // v5.7: allSettled so a HIP-3 dex outage doesn't crash the whole trail cycle.
+      // If main dex fetch fails we MUST bail — partial data would risk closing positions
+      // based on stale trail state.
       const settled = await Promise.allSettled([
-        fetch(this.API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr }) }),
         ...this.HIP3_DEXES.map(dex =>
-          fetch(this.API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ type: 'clearinghouseState', user: queryAddr, dex }) }))
       ]);
       const mainSettled = settled[0];
       if (mainSettled.status !== 'fulfilled' || !mainSettled.value.ok) {
-        console.warn('trailStops: main position fetch failed, skipping cycle');
+        const reason = mainSettled.status !== 'fulfilled' ? mainSettled.reason?.message : `HTTP ${mainSettled.value.status}`;
+        console.warn('trailStops: main position fetch failed, skipping cycle:', reason);
         return;
       }
       const mainData = await mainSettled.value.json();
       livePositions = [...(mainData.assetPositions || [])];
       for (let i = 1; i < settled.length; i++) {
         const s = settled[i];
-        if (s.status !== 'fulfilled' || !s.value.ok) continue;
+        const dex = this.HIP3_DEXES[i - 1];
+        if (s.status !== 'fulfilled' || !s.value.ok) {
+          console.warn(`trailStops: HIP-3 dex "${dex}" position fetch failed — skipping its positions this cycle`);
+          continue;
+        }
         try { const d = await s.value.json(); livePositions.push(...(d.assetPositions || [])); }
-        catch (e) { /* keep going with main-dex positions only */ }
+        catch (e) { console.warn(`trailStops: HIP-3 "${dex}" JSON parse failed:`, e.message); }
       }
     } catch (e) { console.warn('trailStops: position fetch failed, skipping cycle:', e.message); return; }
 
     for (const [coinId, trade] of Object.entries(this.activeTrades)) {
       if (!trade || !trade.entry || !trade.sl) continue;
+
+      // v5.7: Skip manual-ignored positions — they have one-time protective SL/TP only, no trailing
+      if (trade.source === 'manual-ignored' || trade.trailState === 'manual') continue;
 
       // v5.0 FIX #2: Verify position still exists on-exchange
       const stillOpen = livePositions.find(p =>
@@ -4103,20 +1711,66 @@ const HL = {
         continue;
       }
 
-      // v5.3: Detect TP fills by comparing live position size to original (synced w/ bot.js)
+      // v5.16: Time-based exit — close stalled positions that haven't reached TP1
+      // within maxHoldHours while in drawdown. Prevents death-by-funding.
+      if (!trade.tp1Detected && trade.entryTs && trade.trailState === 'initial') {
+        const holdMs = Date.now() - trade.entryTs;
+        const maxMs = (MAX_HOLD_HOURS[coinId] || 24) * 3600000;
+        const px = coinState[coinId]?.price;
+        if (holdMs >= maxMs && px > 0) {
+          const isLong = trade.side === 'LONG';
+          const inDrawdown = isLong ? (px < trade.entry) : (px > trade.entry);
+          if (inDrawdown) {
+            const holdHrs = (holdMs / 3600000).toFixed(1);
+            const pnlPct = ((isLong ? (px - trade.entry) : (trade.entry - px)) / trade.entry * 100).toFixed(2);
+            console.log(`HL TIME-EXIT: ${trade.asset} ${trade.side} — held ${holdHrs}h (max ${MAX_HOLD_HOURS[coinId] || 24}h), no TP1, drawdown ${pnlPct}% — closing at market (v5.16)`);
+            await sendTelegram(`⏰ <b>TIME-EXIT: ${trade.asset} ${trade.side}</b>\nHeld: ${holdHrs}h (max: ${MAX_HOLD_HOURS[coinId] || 24}h)\nNo TP1 reached, currently ${pnlPct}%\nClosing at market to limit bleed.`);
+            await this.closePosition(coinId);
+            continue;
+          }
+        }
+      }
+
+      // v5.16: Funding rate exit — close positions where cumulative funding exceeds
+      // 0.05% of notional AND position is in drawdown. Catches crowded trades.
+      if (trade.trailState === 'initial' || trade.trailState === 'breakeven') {
+        const cumFunding = parseFloat(stillOpen.position?.cumFunding?.sinceOpen || '0');
+        const entryNotional = trade.entry * trade.originalSize;
+        if (entryNotional > 0 && Math.abs(cumFunding) > 0) {
+          const fundingPct = Math.abs(cumFunding) / entryNotional;
+          const px = coinState[coinId]?.price;
+          if (fundingPct >= FUNDING_EXIT_THRESHOLD && px > 0) {
+            const isLong = trade.side === 'LONG';
+            const inDrawdown = isLong ? (px < trade.entry) : (px > trade.entry);
+            // Only exit if funding is AGAINST us (paying) AND we're in drawdown
+            const fundingAgainstUs = (isLong && cumFunding < 0) || (!isLong && cumFunding > 0);
+            if (inDrawdown && fundingAgainstUs) {
+              const pnlPct = ((isLong ? (px - trade.entry) : (trade.entry - px)) / trade.entry * 100).toFixed(2);
+              console.log(`HL FUNDING-EXIT: ${trade.asset} ${trade.side} — cumFunding $${cumFunding.toFixed(4)} (${(fundingPct * 100).toFixed(3)}% of notional) + drawdown ${pnlPct}% — closing at market (v5.16)`);
+              await sendTelegram(`💸 <b>FUNDING-EXIT: ${trade.asset} ${trade.side}</b>\nCum funding: $${Math.abs(cumFunding).toFixed(4)} (${(fundingPct * 100).toFixed(3)}% of notional)\nThreshold: ${(FUNDING_EXIT_THRESHOLD * 100).toFixed(2)}%\nDrawdown: ${pnlPct}% — closing to stop bleed.`);
+              await this.closePosition(coinId);
+              continue;
+            }
+          }
+        }
+      }
+
+      // v5.3: Detect TP fills by comparing live position size to original
       const liveSize = Math.abs(parseFloat(stillOpen.position?.szi || stillOpen.szi || '0'));
 
       // v5.3: When TP1 fills (size drops below 67% of original), force SL to at least breakeven
+      // This prevents the scenario from Apr 12 HYPE: TP1 earned +$1.03 but remainder SL lost -$2.30
+      // because the trail stop was still below entry price when the remaining position got stopped out
       if (!trade.tp1Detected && trade.originalSize && liveSize > 0 && liveSize <= trade.originalSize * 0.67) {
         trade.tp1Detected = true;
-        const isLongTp = trade.side === 'LONG';
-        const slShouldBeAtLeastBreakeven = isLongTp
+        const isLong = trade.side === 'LONG';
+        const slShouldBeAtLeastBreakeven = isLong
           ? (!trade.sl || trade.sl < trade.entry)
           : (!trade.sl || trade.sl > trade.entry);
         if (slShouldBeAtLeastBreakeven && trade.trailState === 'initial') {
           trade.trailState = 'breakeven';
           console.log(`HL TRAIL ${trade.asset}: TP1 detected — forcing SL to breakeven $${fmt(trade.entry)} (v5.3 safeguard)`);
-          showToast(`TP1 → BREAKEVEN: ${trade.asset}`, `SL moved to entry $${fmt(trade.entry)}`, false);
+          // The newSl will be set below in the breakeven/trailing logic
         }
       }
 
@@ -4124,23 +1778,22 @@ const HL = {
       if (!trade.tp2Hit && trade.originalSize && liveSize > 0 && liveSize <= trade.originalSize * 0.40) {
         trade.tp2Hit = true;
         console.log(`HL TRAIL ${trade.asset}: TP2 detected — live size ${liveSize.toFixed(4)} ≤ 40% of original ${trade.originalSize.toFixed(4)} (v5.3)`);
-        showToast(`TP2 HIT: ${trade.asset}`, `Trailing with widened stop`, false);
+        await sendTelegram(`✅ <b>TP2 HIT: ${trade.asset}</b>\nRemaining ${liveSize.toFixed(4)} units trailing with widened stop`);
       }
       // Also update trade.size to live size (TP partials reduce it)
       if (liveSize > 0 && liveSize !== trade.size) {
         trade.size = liveSize;
       }
 
-      const s = coinState[coinId];
-      if (!s || s.price <= 0) continue;
-      const px = s.price;
+      const px = coinState[coinId]?.price;
+      if (!px || px <= 0) continue;
       const isLong = trade.side === 'LONG';
-      const risk = Math.abs(trade.entry - trade.initialSl);
+      const risk = Math.abs(trade.entry - (trade.initialSl || trade.sl));
       if (risk <= 0) continue;
 
       // Track best price
       if (isLong && px > trade.bestPrice) trade.bestPrice = px;
-      if (!isLong && px < trade.bestPrice) trade.bestPrice = px;
+      if (!isLong && (trade.bestPrice === 0 || px < trade.bestPrice)) trade.bestPrice = px;
 
       const pnlFromEntry = isLong ? (px - trade.entry) : (trade.entry - px);
       const rMultiple = pnlFromEntry / risk;
@@ -4148,23 +1801,20 @@ const HL = {
       let newSl = null;
 
       if (trade.trailState === 'initial' && rMultiple >= 1.0) {
-        // Move SL to breakeven (entry price)
         newSl = trade.entry;
         trade.trailState = 'breakeven';
-        console.log(`HL TRAIL ${trade.asset}: moved SL to BREAKEVEN $${fmt(newSl)} (1:1 R hit)`);
-        showToast(`SL → BREAKEVEN: ${trade.asset}`, `Entry: $${fmt(trade.entry)}`, false);
+        console.log(`HL TRAIL ${trade.asset}: SL -> BREAKEVEN $${fmt(newSl)} (1:1 R hit)`);
+        await sendTelegram(`🔄 <b>SL -> BREAKEVEN: ${trade.asset}</b>\nEntry: $${fmt(trade.entry)}\n1:1 R reached`);
       } else if (trade.trailState === 'breakeven' && rMultiple >= 1.5) {
-        // v5.3: Dynamic trail multiplier — widens after TP2 to let runners ride (synced w/ bot.js)
         trade.trailState = 'trailing';
-        const coinCfg = COINS[coinId] || {};
-        const baseMult = coinCfg.isHIP3 ? 2.5 : 2.0;
+        // v5.3: Dynamic trail multiplier — widens after TP2 to let runners ride on strong trend days
+        // Base: HIP-3 2.5×, standard 2.0×. After TP2: HIP-3 3.5×, standard 3.0×
+        const baseMult = COINS[coinId]?.isHIP3 ? 2.5 : 2.0;
         const trailMult = trade.tp2Hit ? baseMult + 1.0 : baseMult;
         newSl = isLong ? trade.bestPrice - risk * trailMult : trade.bestPrice + risk * trailMult;
-        console.log(`HL TRAIL ${trade.asset}: trailing SL to $${fmt(newSl)} (${trailMult}R trail${trade.tp2Hit ? ', widened post-TP2' : ''}) (v5.3)`);
+        console.log(`HL TRAIL ${trade.asset}: trailing SL to $${fmt(newSl)} (${trailMult}R trail started${trade.tp2Hit ? ', widened post-TP2' : ''}) (v5.3)`);
       } else if (trade.trailState === 'trailing') {
-        // Continue trailing: only move SL forward, never back
-        const coinCfg = COINS[coinId] || {};
-        const baseMult = coinCfg.isHIP3 ? 2.5 : 2.0;
+        const baseMult = COINS[coinId]?.isHIP3 ? 2.5 : 2.0;
         const trailMult = trade.tp2Hit ? baseMult + 1.0 : baseMult;
         const trailSl = isLong ? trade.bestPrice - risk * trailMult : trade.bestPrice + risk * trailMult;
         if ((isLong && trailSl > trade.sl) || (!isLong && trailSl < trade.sl)) {
@@ -4174,543 +1824,1391 @@ const HL = {
       }
 
       if (newSl !== null && newSl !== trade.sl) {
-        // v5.6 FIX: Prevent duplicate order spam (synced w/ bot.js).
-        // Skip negligible SL changes (< 0.05%) and verify cancel before placing new orders.
+        // v5.1: Skip if trailing is disabled for this trade due to prior failures
+        if (trade.trailDisabled) continue;
+
+        // v5.6 FIX: Prevent duplicate order spam.
+        // 1. Skip if SL change is negligible (< 0.05% of price) to avoid unnecessary order churn
+        // 2. Verify cancel succeeded before placing new orders
+        // 3. Verify no trigger orders remain after cancel (race condition guard)
         const slChangePct = Math.abs(newSl - (trade.sl || 0)) / (trade.sl || newSl);
-        if (slChangePct < 0.0005) continue;
+        if (slChangePct < 0.0005) {
+          // SL changed by less than 0.05% — not worth the order churn
+          continue;
+        }
 
         try {
-          // Cancel existing triggers
+          // Step 1: Cancel existing trigger orders
           const cancelled = await this.cancelTriggerOrders(trade.asset);
 
-          // Wait for exchange to process, then verify
-          if (cancelled > 0) await new Promise(r => setTimeout(r, 500));
+          // Step 2: Wait briefly for exchange to process cancels, then verify
+          if (cancelled > 0) {
+            await new Promise(r => setTimeout(r, 500));  // 500ms settle time
+          }
+
+          // Step 3: Verify triggers are actually gone before placing new ones
           const remainingOrders = await this.fetchOpenOrders();
           const remainingTriggers = remainingOrders.filter(o => {
             if (o.coin !== trade.asset) return false;
             return o.isTrigger === true || (o.orderType && /Stop|Take|Trigger/i.test(o.orderType));
           });
           if (remainingTriggers.length > 0) {
-            console.warn(`HL trailStops: ${trade.asset} still has ${remainingTriggers.length} trigger(s) after cancel — retrying`);
-            for (const o of remainingTriggers) { try { await this.cancelOrder(trade.asset, o.oid); } catch(e){} }
+            console.warn(`HL trailStops: ${trade.asset} still has ${remainingTriggers.length} trigger(s) after cancel — retrying cancel`);
+            for (const o of remainingTriggers) {
+              try { await this.cancelOrder(trade.asset, o.oid); } catch(e){}
+            }
             await new Promise(r => setTimeout(r, 300));
+            // Re-check one more time
             const finalCheck = await this.fetchOpenOrders();
             const stillRemain = finalCheck.filter(o => {
               if (o.coin !== trade.asset) return false;
               return o.isTrigger === true || (o.orderType && /Stop|Take|Trigger/i.test(o.orderType));
             });
             if (stillRemain.length > 0) {
-              console.error(`HL trailStops: ${trade.asset} STILL has ${stillRemain.length} stuck triggers — skipping to prevent stacking`);
-              continue;
+              console.error(`HL trailStops: ${trade.asset} STILL has ${stillRemain.length} trigger(s) after retry — SKIPPING new order placement to prevent stacking`);
+              // v5.1: Track consecutive trail failures per coin
+              this.trailFailCount[coinId] = (this.trailFailCount[coinId] || 0) + 1;
+              if (this.trailFailCount[coinId] >= this.MAX_TRAIL_FAILURES) {
+                trade.trailDisabled = true;
+                this.saveActiveTrades();
+                await sendTelegram(`⏸ <b>TRAILING DISABLED: ${trade.asset}</b>\nCannot cancel existing triggers — ${stillRemain.length} stuck orders. Manual cleanup needed.`);
+              }
+              continue;  // DO NOT place new orders — this prevents stacking
             }
           }
 
-          // Place new SL (only after old triggers confirmed gone)
+          // Step 4: Place new SL (only after confirming old triggers are gone)
           const slPx = isLong ? newSl * 0.98 : newSl * 1.02;
-          await this.placeOrder(trade.asset, !isLong, trade.size, slPx,
+          const trailSlRes = await this.placeOrder(trade.asset, !isLong, trade.size, slPx,
             { trigger: { isMarket: true, triggerPx: newSl, tpsl: 'sl' } }, true);
-          // Re-place TP
+          if (!trailSlRes || trailSlRes.status === 'err') {
+            const errDetail = trailSlRes ? JSON.stringify(trailSlRes.response).slice(0, 200) : 'null';
+            console.error(`HL trail SL placement failed for ${trade.asset} (cancelled ${cancelled} triggers):`, errDetail);
+
+            // v5.1: Track consecutive trail failures per coin
+            this.trailFailCount[coinId] = (this.trailFailCount[coinId] || 0) + 1;
+            const failCount = this.trailFailCount[coinId];
+
+            // v5.1: Throttle Telegram alerts to max 1 per 30 min per coin
+            const lastAlert = this.lastTrailFailAlert[coinId] || 0;
+            if (Date.now() - lastAlert >= this.TRAIL_ALERT_THROTTLE_MS) {
+              this.lastTrailFailAlert[coinId] = Date.now();
+              await sendTelegram(`⚠️ <b>TRAIL SL FAILED: ${trade.asset}</b>\nFail #${failCount}. Error: ${errDetail.slice(0, 100)}\nCancelled ${cancelled} existing triggers.`);
+            }
+
+            // v5.1: After MAX_TRAIL_FAILURES, disable trailing for this trade entirely
+            if (failCount >= this.MAX_TRAIL_FAILURES) {
+              trade.trailDisabled = true;
+              this.saveActiveTrades();
+              console.warn(`HL trail SL: disabling trailing for ${trade.asset} after ${failCount} failures`);
+              await sendTelegram(`⏸ <b>TRAILING DISABLED: ${trade.asset}</b>\n${failCount} consecutive failures. Current SL kept. Manual review needed.`);
+            }
+            continue;
+          }
+          // v5.1: Success -- reset failure counter
+          this.trailFailCount[coinId] = 0;
+          // Re-place TP (only ONE TP for the remaining size — do not re-place TP1/TP2 ladder)
           if (trade.tp) {
             const tpPx = isLong ? trade.tp * 1.02 : trade.tp * 0.98;
-            await this.placeOrder(trade.asset, !isLong, trade.size, tpPx,
+            const trailTpRes = await this.placeOrder(trade.asset, !isLong, trade.size, tpPx,
               { trigger: { isMarket: true, triggerPx: trade.tp, tpsl: 'tp' } }, true);
+            if (!trailTpRes || trailTpRes.status === 'err') {
+              console.error('HL trail TP re-place failed:', trailTpRes ? trailTpRes.response : 'null');
+            }
           }
           trade.sl = newSl;
           this.saveActiveTrades();
-        } catch (e) { console.error('HL trailStops error:', e); }
+        } catch (e) { console.error('HL trailStops error:', e.message); }
+      }
+    }
+  },
+
+  // -- Close a position (used for reverse trades) --
+  async closePosition(coinId) {
+    const trade = this.activeTrades[coinId];
+    if (!trade) return null;
+    const px = coinState[coinId]?.price;
+    if (!px) return null;
+    const isLong = trade.side === 'LONG';
+    const slip = px * 0.01;
+    const closePx = isLong ? px - slip : px + slip;
+
+    // v5.6 FIX: Cancel ALL trigger orders for this asset BEFORE closing.
+    // Previously, closing a position (e.g. short→long flip) left orphaned SL/TP triggers
+    // from the old position on-exchange, which then stacked with new orders from executeTrade
+    // and trailStops, causing 100+ duplicate orders (reported Apr 17).
+    try {
+      const cancelled = await this.cancelTriggerOrders(trade.asset);
+      if (cancelled > 0) console.log(`HL closePosition: cancelled ${cancelled} trigger orders for ${trade.asset} before closing`);
+    } catch (e) { console.warn('HL closePosition: trigger cancel error (proceeding):', e.message); }
+
+    try {
+      const result = await this.placeOrder(trade.asset, !isLong, trade.size, closePx, { limit: { tif: 'Ioc' } }, true);
+      if (result.status !== 'err' && (result.filled || result.totalSz)) {
+        const exitPrice = result.avgPx ? +result.avgPx : px;
+        const pnl = isLong ? (exitPrice - trade.entry) * trade.size : (trade.entry - exitPrice) * trade.size;
+        const closed = loadClosedTrades();
+        closed.unshift({
+          coin: trade.asset, side: trade.side, size: trade.size,
+          entry: trade.entry, exit: exitPrice, pnl,
+          ts: new Date().toISOString(), reason: 'opposite_signal',
+          source: trade.source || 'bot'  // v5.5 fix: propagate source for bot/manual P&L split
+        });
+        saveClosedTrades(closed);
+        delete this.activeTrades[coinId];
+        this.saveActiveTrades();
+
+        // v5.0: Track daily P&L on close
+        const cpDay = new Date().toDateString();
+        if (cpDay !== this.dailyPnlDate) { this.dailyPnl = 0; this.dailyPnlDate = cpDay; }
+        this.dailyPnl += pnl;
+
+        // v5.1: Track consecutive losses and last winning direction
+        if (pnl > 0) {
+          this.consecutiveLosses[coinId] = 0;
+          this.lastWinDir[coinId] = trade.side;
+          this.lastWinTime[coinId] = Date.now();
+        } else if (pnl < 0) {
+          this.consecutiveLosses[coinId] = (this.consecutiveLosses[coinId] || 0) + 1;
+        }
+
+        console.log(`HL CLOSED ${trade.side} ${trade.asset}: P&L $${pnl.toFixed(2)} | Daily: $${this.dailyPnl.toFixed(2)} | ConsecLosses: ${this.consecutiveLosses[coinId]||0}`);
+        await sendTelegram(`🔄 <b>REVERSED: ${trade.side} ${trade.asset}</b>\nExit: $${fmt(exitPrice)}\nP&L: <b>$${pnl.toFixed(2)}</b>`);
+        return { exitPrice, pnl };
+      }
+      return null;
+    } catch (e) {
+      console.error('HL close error:', e.message);
+      return null;
+    }
+  },
+
+  // v5.5: Process any pending trim orders queued by syncPositions when an oversized
+  // manual position was detected with INHERIT_MANUAL_POSITIONS='trim'. This places a
+  // reduce-only IOC market order to bring notional back under the asset's maxNotional.
+  async processPendingTrims() {
+    if (!this._pendingTrims || this._pendingTrims.length === 0) return;
+    const queue = this._pendingTrims;
+    this._pendingTrims = [];
+    for (const t of queue) {
+      try {
+        const coin = COINS[t.coinId];
+        if (!coin) continue;
+        const asset = coin.asset;
+        const szDec = this.szDecimals[asset] ?? 4;
+        const targetSize = t.targetNotional / t.currentEntry;
+        const excessSize = t.currentSize - targetSize;
+        if (excessSize <= 0) {
+          console.log(`HL TRIM SKIP: ${asset} already at or under cap`);
+          continue;
+        }
+        // Round down to szDecimals so we don't overshoot the trim
+        const sizeStep = Math.pow(10, -szDec);
+        const trimSize = Math.floor(excessSize / sizeStep) * sizeStep;
+        if (trimSize < sizeStep) {
+          console.log(`HL TRIM SKIP: ${asset} excess ${excessSize} below minimum size step ${sizeStep}`);
+          continue;
+        }
+        const px = coinState[t.coinId]?.price || t.currentEntry;
+        const isLong = t.side === 'LONG';
+        const slip = px * 0.005;
+        const trimPx = isLong ? px - slip : px + slip;
+        // reduce-only IOC opposite side of position
+        const isBuy = !isLong;
+        console.log(`HL TRIM EXEC: ${asset} ${t.side} — closing ${trimSize.toFixed(szDec)} of ${t.currentSize} at ~$${fmt(trimPx)} (reduce-only IOC)`);
+        const result = await this.placeOrder(asset, isBuy, trimSize, trimPx, { limit: { tif: 'Ioc' } }, true);
+        if (result && result.status !== 'err' && (result.filled || result.totalSz)) {
+          const avgPx = result.avgPx ? +result.avgPx : trimPx;
+          const newSize = t.currentSize - trimSize;
+          const newNotional = newSize * t.currentEntry;
+          console.log(`HL TRIM FILLED: ${asset} trimmed ${trimSize.toFixed(szDec)} at $${fmt(avgPx)} — remaining size ${newSize.toFixed(szDec)} notional $${newNotional.toFixed(0)}`);
+          await sendTelegram(`✅ <b>TRIM FILLED: ${asset} ${t.side}</b>\nTrimmed: ${trimSize.toFixed(szDec)} @ $${fmt(avgPx)}\nRemaining: ${newSize.toFixed(szDec)} (~$${newNotional.toFixed(0)})\nBot now managing at cap size.`);
+        } else {
+          console.warn(`HL TRIM FAIL: ${asset} order result:`, JSON.stringify(result));
+          await sendTelegram(`❌ <b>TRIM FAILED: ${asset} ${t.side}</b>\nReduce-only order rejected.\nPosition still oversized — manage manually or set INHERIT_MANUAL_POSITIONS=ignore.`);
+        }
+      } catch (e) {
+        console.error('HL processPendingTrims error:', e.message);
       }
     }
   }
 };
 
-// ── Save Hyperliquid wallet & test connection ──
-async function saveHLWallet() {
-  const keyEl = document.getElementById('hl-wallet-key');
-  const statusEl = document.getElementById('hl-status');
-  const key = keyEl.value.trim();
-  if (!key) { statusEl.textContent = 'Enter a private key'; statusEl.style.color = '#ff3d5a'; return; }
-  if (!key.startsWith('0x') || key.length !== 66) { statusEl.textContent = 'Invalid key format (need 0x + 64 hex chars)'; statusEl.style.color = '#ff3d5a'; return; }
-  localStorage.setItem('hl_wallet_key', key);
-  statusEl.textContent = 'Connecting...'; statusEl.style.color = '#ffc107';
-  try {
-    const masterAddr = document.getElementById('hl-master-addr').value.trim();
-    if (masterAddr) localStorage.setItem('hl_master_addr', masterAddr);
-    const ok = await HL.init();
-    if (!ok) throw new Error('Init failed');
-    const bal = await HL.getBalance();
-    const dispAddr = HL.masterAddress ? HL.masterAddress.slice(0,6) + '...' + HL.masterAddress.slice(-4) : HL.address.slice(0,6) + '...' + HL.address.slice(-4);
-    statusEl.textContent = 'Connected: ' + dispAddr + ' | Balance: $' + bal.toFixed(2);
-    statusEl.style.color = '#00e676';
-  } catch (e) {
-    statusEl.textContent = 'Failed: ' + e.message; statusEl.style.color = '#ff3d5a';
-  }
+// -- CLOSED TRADES persistence (file-based) --
+function loadClosedTrades() {
+  try { return JSON.parse(fs.readFileSync(CLOSED_TRADES_FILE, 'utf8')); } catch { return []; }
 }
-
-// ── TRADES PAGE: Positions, P&L, Manual Trading ──────────
-const TRADES_KEY = 'dms_closed_trades';
-function loadClosedTrades(){ try{ return JSON.parse(localStorage.getItem(TRADES_KEY)||'[]'); }catch{ return []; } }
-function saveClosedTrades(t){ localStorage.setItem(TRADES_KEY, JSON.stringify(t.slice(0,200))); }
+function saveClosedTrades(trades) {
+  fs.writeFileSync(CLOSED_TRADES_FILE, JSON.stringify(trades.slice(0, 200)));
+}
 
 // One-time cleanup: remove trades with invalid exit prices ($0 or near-zero)
 (function cleanupBadTrades(){
   const trades = loadClosedTrades();
-  const cleaned = trades.filter(t => t.exit > 1); // no asset we trade is <$1
+  const cleaned = trades.filter(t => t.exit > 1);
   if (cleaned.length < trades.length) {
     console.log('Cleaned up', trades.length - cleaned.length, 'trades with invalid exit prices');
     saveClosedTrades(cleaned);
   }
 })();
 
-// Fetch live positions from Hyperliquid
-async function hlFetchPositions(){
-  if(!HL.wallet) return [];
-  try{
+// -- SYNC FILL HISTORY: Backfill closed trades from HL API ---------------------
+// This catches trades that were closed (TP/SL) while the bot was down or crashed.
+// Queries HL userFillsByTime and records any closedPnl fills not already tracked.
+async function syncFillHistory() {
+  if (!HL.wallet) return;
+  try {
     const queryAddr = (HL.masterAddress || HL.address).toLowerCase();
-    // Fetch main + HIP-3 dex positions
+    const startMs = Date.now() - 48 * 60 * 60 * 1000; // last 48h
+    const HIP3_DEXES = HL.HIP3_DEXES || ['xyz'];
     const requests = [
-      fetch(HL.API + '/info', { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ type:'clearinghouseState', user: queryAddr }) }),
-      ...HL.HIP3_DEXES.map(dex =>
-        fetch(HL.API + '/info', { method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ type:'clearinghouseState', user: queryAddr, dex }) }))
+      fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'userFillsByTime', user: queryAddr, startTime: startMs }) }),
+      ...HIP3_DEXES.map(dex =>
+        fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'userFillsByTime', user: queryAddr, startTime: startMs, dex }) }))
     ];
     const responses = await Promise.all(requests);
-    const allPositions = [];
+    const allFills = [];
     for (const r of responses) {
       const data = await r.json();
-      if (data.assetPositions) allPositions.push(...data.assetPositions);
+      if (Array.isArray(data)) allFills.push(...data);
     }
-    return allPositions;
-  }catch(e){ console.warn('HL positions fetch failed:', e); return []; }
-}
 
-// Fetch account state (equity, available)
-async function hlFetchAccountState(){
-  if(!HL.wallet) return { equity:0, available:0, upnl:0, spotBal:0 };
-  try{
-    const queryAddr = (HL.masterAddress || HL.address).toLowerCase();
-    // Fetch main perps + HIP-3 dex states + spot in parallel
-    const requests = [
-      fetch(HL.API + '/info', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ type:'clearinghouseState', user: queryAddr })
-      }),
-      fetch(HL.API + '/info', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ type:'spotClearinghouseState', user: queryAddr })
-      }),
-      // HIP-3 dexes (xyz:GOLD etc.) — need separate clearinghouseState calls
-      ...HL.HIP3_DEXES.map(dex =>
-        fetch(HL.API + '/info', { method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ type:'clearinghouseState', user: queryAddr, dex }) }))
-    ];
-    const responses = await Promise.all(requests);
-    const perpsData = await responses[0].json();
-    const spotData = await responses[1].json();
-    // Parse HIP-3 dex responses
-    const hip3Positions = [];
-    for (let i = 2; i < responses.length; i++) {
-      const dexData = await responses[i].json();
-      if (dexData.assetPositions) hip3Positions.push(...dexData.assetPositions);
-    }
-    const ms = perpsData.marginSummary || {};
-    const cms = perpsData.crossMarginSummary || {};
-    let spotBal = 0;
-    if (spotData.balances) {
-      for (const b of spotData.balances) {
-        if (b.coin === 'USDC' || b.coin === 'USDT') spotBal += parseFloat(b.total || '0');
+    // Filter for closing fills (non-zero closedPnl)
+    const closeFills = allFills.filter(f => parseFloat(f.closedPnl || '0') !== 0);
+    if (closeFills.length === 0) return;
+
+    // Cluster fills within 5s of each other for the same coin (one close = multiple fills)
+    closeFills.sort((a, b) => a.time - b.time);
+    const clusters = [];
+    for (const f of closeFills) {
+      const last = clusters.length ? clusters[clusters.length - 1] : null;
+      if (last && last.coin === f.coin && Math.abs(f.time - last.endTs) < 5000) {
+        last.fills.push(f); last.endTs = f.time;
+      } else {
+        clusters.push({ coin: f.coin, fills: [f], startTs: f.time, endTs: f.time });
       }
     }
-    const perpsEquity = parseFloat(ms.accountValue || '0');
-    const crossEquity = parseFloat(cms.accountValue || '0');
-    // Unified accounts: take the max to avoid double-counting
-    const bestEquity = Math.max(perpsEquity, crossEquity, spotBal);
-    // Unrealized P&L: check both margin summaries
-    const msUpnl = parseFloat(ms.totalUnrealizedPnl || '0');
-    const cmsUpnl = parseFloat(cms.totalUnrealizedPnl || '0');
-    // Also compute from positions as most reliable source (including HIP-3)
-    let posUpnl = 0;
-    const positions = perpsData.assetPositions || [];
-    for (const p of positions) {
-      if (p.position) posUpnl += parseFloat(p.position.unrealizedPnl || '0');
-    }
-    // Add HIP-3 position P&L (xyz:GOLD etc.)
-    for (const p of hip3Positions) {
-      if (p.position) posUpnl += parseFloat(p.position.unrealizedPnl || '0');
-    }
-    // Use position-based UPNL if available, otherwise best from summaries
-    const upnl = posUpnl !== 0 ? posUpnl : (msUpnl || cmsUpnl);
-    // Available: equity minus margin used
-    const msMarginUsed = parseFloat(ms.totalMarginUsed || '0');
-    const cmsMarginUsed = parseFloat(cms.totalMarginUsed || '0');
-    const marginUsed = Math.max(msMarginUsed, cmsMarginUsed);
-    const available = bestEquity - marginUsed;
-    console.log('HL account — equity:', bestEquity, 'upnl:', upnl, '(ms:', msUpnl, 'cms:', cmsUpnl, 'pos:', posUpnl, 'hip3:', hip3Positions.length, ') margin used:', marginUsed, 'avail:', available);
-    return {
-      equity: bestEquity,
-      available: available,
-      upnl: upnl,
-      spotBal: spotBal
-    };
-  }catch(e){ return { equity:0, available:0, upnl:0, spotBal:0 }; }
-}
 
-// Render the trades page
-async function renderTrades(){
-  // Fetch account state and positions in parallel
-  const [acct, positions] = await Promise.all([hlFetchAccountState(), hlFetchPositions()]);
-
-  // Balance card
-  document.getElementById('tr-equity').textContent = '$' + acct.equity.toFixed(2);
-  const upnlEl = document.getElementById('tr-upnl');
-  upnlEl.textContent = (acct.upnl >= 0 ? '+$' : '-$') + Math.abs(acct.upnl).toFixed(2);
-  upnlEl.style.color = acct.upnl >= 0 ? '#00e676' : '#ff3d5a';
-  document.getElementById('tr-avail').textContent = '$' + acct.available.toFixed(2);
-
-  // Active positions
-  const posList = document.getElementById('positions-list');
-  const active = positions.filter(p => p.position && parseFloat(p.position.szi) !== 0);
-
-  if(active.length === 0){
-    posList.innerHTML = '<div class="empty">No open positions</div>';
-  } else {
-    posList.innerHTML = active.map(p => {
-      const pos = p.position;
-      const coin = pos.coin;
-      const szi = parseFloat(pos.szi);
-      const isLong = szi > 0;
-      const side = isLong ? 'LONG' : 'SHORT';
-      const size = Math.abs(szi);
-      const entry = parseFloat(pos.entryPx);
-      const mark = parseFloat(pos.positionValue) / size;
-      const upnl = parseFloat(pos.unrealizedPnl);
-      const upnlPct = entry > 0 ? ((mark - entry) / entry * 100 * (isLong ? 1 : -1)).toFixed(2) : '0.00';
-      const liq = pos.liquidationPx ? parseFloat(pos.liquidationPx) : null;
-      const leverage = pos.leverage ? pos.leverage.value : '—';
-
-      // Look up SL/TP from activeTrades, with fallback to live HL trigger orders.
-      // v5.26 (2026-05-14): manual positions (or anything skipped by the inherit-ignore
-      // path) won't be in activeTrades, but their SL/TP still live on the exchange in
-      // HL.lastTrigMap — surface those so the UI matches what's actually protecting the trade.
-      const symToId = SYM_TO_COIN_ID;
-      const cid = symToId[coin];
-      const at = cid ? HL.activeTrades[cid] : null;
-      const trig = (HL.lastTrigMap && HL.lastTrigMap[coin]) || {};
-      const sl = (at && at.sl) || trig.sl || null;
-      const tp = (at && at.tp) || trig.tp || null;
-      const trailInfo = at && at.trailState !== 'initial' ? ` (${at.trailState})` : '';
-
-      return `<div class="pos-card ${side.toLowerCase()}">
-        <div class="pos-head">
-          <span class="pos-coin">${coin}</span>
-          <span class="pos-side ${side}">${side} ${leverage}x</span>
-          <span class="pos-pnl ${upnl>=0?'green':'red'}">${upnl>=0?'+':''}$${upnl.toFixed(2)} (${upnlPct}%)</span>
-        </div>
-        <div class="pos-grid">
-          <div class="pos-cell"><div class="pos-cell-lbl">Size</div><div class="pos-cell-val">${size}</div></div>
-          <div class="pos-cell"><div class="pos-cell-lbl">Entry</div><div class="pos-cell-val">$${fmt(entry)}</div></div>
-          <div class="pos-cell"><div class="pos-cell-lbl">Mark</div><div class="pos-cell-val">$${fmt(mark)}</div></div>
-          ${sl ? `<div class="pos-cell"><div class="pos-cell-lbl">Stop Loss${trailInfo}</div><div class="pos-cell-val" style="color:#ff6b6b">$${fmt(sl)}</div></div>` : ''}
-          ${tp ? `<div class="pos-cell"><div class="pos-cell-lbl">Take Profit</div><div class="pos-cell-val" style="color:#00e676">$${fmt(tp)}</div></div>` : ''}
-          ${liq ? `<div class="pos-cell"><div class="pos-cell-lbl">Liq. Price</div><div class="pos-cell-val" style="color:#ff6b6b">$${fmt(liq)}</div></div>` : ''}
-        </div>
-        <div class="pos-close-row">
-          <button class="pos-pct-btn" onclick="closeTrade('${coin}',${szi},${entry},0.25)">25%</button>
-          <button class="pos-pct-btn" onclick="closeTrade('${coin}',${szi},${entry},0.50)">50%</button>
-          <button class="pos-pct-btn" onclick="closeTrade('${coin}',${szi},${entry},0.75)">75%</button>
-        </div>
-        <button class="pos-close-btn" onclick="closeTrade('${coin}',${szi},${entry},1.0)">CLOSE 100% ${coin} ${side}</button>
-      </div>`;
-    }).join('');
-  }
-
-  // Closed trades (last 10)
-  const closedList = document.getElementById('closed-list');
-  const closed = loadClosedTrades().slice(0, 10);
-  if(closed.length === 0){
-    closedList.innerHTML = '<div class="empty">No closed trades yet</div>';
-  } else {
-    closedList.innerHTML = closed.map(t => {
-      const pnlCls = t.pnl >= 0 ? 'green' : 'red';
-      const reasonTag = t.reason === 'tp_hit' ? '<span style="color:#00e676;font-size:8px;margin-left:4px">TP</span>'
-        : t.reason === 'sl_hit' ? '<span style="color:#ff3d5a;font-size:8px;margin-left:4px">SL</span>'
-        : t.reason === 'opposite_signal' ? '<span style="color:#ffc107;font-size:8px;margin-left:4px">REV</span>'
-        : '';
-      const partialTag = t.partial ? `<span style="color:#ffbd2e;font-size:8px;margin-left:4px">${t.partial}</span>` : '';
-      // Format close date/time
-      const closeDate = t.ts ? new Date(t.ts) : null;
-      const closeDateStr = closeDate ? closeDate.toLocaleDateString('en-GB', {day:'2-digit',month:'short'}).toUpperCase() : '';
-      const closeTimeStr = closeDate ? closeDate.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit',hour12:false}) : '';
-      return `<div class="closed-item" style="flex-wrap:wrap">
-        <div style="display:flex;align-items:center;width:100%;justify-content:space-between">
-          <span class="closed-coin">${t.coin}${reasonTag}${partialTag}</span>
-          <span class="closed-side ${t.side}">${t.side}</span>
-          <span class="closed-time">${t.size} @ $${fmt(t.entry)} → $${fmt(t.exit)}</span>
-          <span class="closed-pnl ${pnlCls}">${t.pnl>=0?'+':''}$${t.pnl.toFixed(2)}</span>
-        </div>
-        ${closeDateStr ? `<div style="width:100%;font-size:9px;color:#666;margin-top:2px">${closeDateStr} ${closeTimeStr}</div>` : ''}
-      </div>`;
-    }).join('');
-  }
-}
-
-// Close a position (or partial %) via HL market order
-// pct: 0.25 = 25%, 0.50 = 50%, 0.75 = 75%, 1.0 = 100%
-async function closeTrade(coin, szi, entryPx, pct){
-  if(!HL.wallet){ showToast('Connect Hyperliquid wallet first'); return; }
-  pct = pct || 1.0;
-  const pctLabel = Math.round(pct * 100) + '%';
-  if(!confirm('Close ' + pctLabel + ' of ' + coin + ' position?')) return;
-
-  const isLong = szi > 0;
-  const fullSize = Math.abs(szi);
-
-  // Calculate partial size, respecting szDecimals
-  const szDec = HL.szDecimals[coin] || 3;
-  let closeSize = pct >= 1.0 ? fullSize : parseFloat((fullSize * pct).toFixed(szDec));
-  // Ensure we don't try to close more than we have, and minimum viable size
-  if(closeSize <= 0) { showToast('Position too small to partial close'); return; }
-  if(closeSize > fullSize) closeSize = fullSize;
-  // If remaining would be dust (< 1 unit of szDecimals), close everything instead
-  const remaining = fullSize - closeSize;
-  const minSize = 1 / Math.pow(10, szDec);
-  if(remaining > 0 && remaining < minSize) closeSize = fullSize;
-  const isFullClose = (closeSize >= fullSize - minSize * 0.5);
-
-  // Look up current price from coinState
-  const coinIdMap = SYM_TO_COIN_ID;
-  const cid = coinIdMap[coin];
-  const px = cid ? coinState[cid].price : 0;
-  const slip = px * 0.01; // 1% slippage for IOC close to ensure fill
-  const closePx = isLong ? px - slip : px + slip; // Close = opposite side
-
-  try{
-    const btn = event.target;
-    const origText = btn.textContent;
-    btn.textContent = 'CLOSING ' + pctLabel + '...';
-    btn.disabled = true;
-
-    // Market close (IOC, reduce only, opposite side)
-    const result = await HL.placeOrder(coin, !isLong, closeSize, closePx, { limit: { tif: 'Ioc' } }, true);
-
-    if(!result){
-      showToast('Close failed: no response from exchange');
-      btn.textContent = origText;
-      btn.disabled = false;
-      return;
-    }
-    if(result.status === 'err'){
-      showToast('Close failed: ' + (result.response || 'Unknown error'));
-      btn.textContent = origText;
-      btn.disabled = false;
-      return;
-    }
-
-    // Check if IOC order actually filled (status:"ok" doesn't mean it filled)
-    if(result.filled === false || (!result.filled && !result.totalSz)){
-      showToast('Close order not filled — try again or use wider slippage');
-      btn.textContent = origText;
-      btn.disabled = false;
-      return;
-    }
-
-    // Record closed trade with real P&L (proportional to closed size)
-    const exitPrice = result.avgPx ? +result.avgPx : px;
-    const realEntry = entryPx || exitPrice;
-    const pnl = isLong ? (exitPrice - realEntry) * closeSize : (realEntry - exitPrice) * closeSize;
+    // Check which clusters are already recorded
     const closed = loadClosedTrades();
-    closed.unshift({
-      coin, side: isLong ? 'LONG' : 'SHORT', size: closeSize,
-      entry: realEntry, exit: exitPrice, pnl: pnl,
-      ts: new Date().toISOString(),
-      partial: !isFullClose ? pctLabel : undefined
-    });
-    saveClosedTrades(closed);
+    const existingTs = new Set(closed.map(t => {
+      // Match by timestamp rounded to 10s (fills and our records may differ by a few seconds)
+      return t.ts ? Math.round(new Date(t.ts).getTime() / 10000) : 0;
+    }));
 
-    showToast(isFullClose ? 'Position closed: ' + coin : pctLabel + ' of ' + coin + ' closed — P&L: $' + pnl.toFixed(2), '', false);
+    const symToId = { BTC:'bitcoin', HYPE:'hyperliquid', 'S&P500':'sp500', 'xyz:SP500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold', 'xyz:CL':'crude', CRUDE:'crude', CL:'crude' };
+    let added = 0;
 
-    // If full close, clear from HL.activeTrades
-    if(isFullClose){
-      const coinIdMap2 = SYM_TO_COIN_ID;
-      if(coinIdMap2[coin]) { delete HL.activeTrades[coinIdMap2[coin]]; HL.saveActiveTrades(); }
+    for (const cl of clusters) {
+      const tsKey = Math.round(cl.startTs / 10000);
+      if (existingTs.has(tsKey)) continue; // already recorded
+
+      const pnl = cl.fills.reduce((s, f) => s + parseFloat(f.closedPnl || '0'), 0);
+      const totalSz = cl.fills.reduce((s, f) => s + parseFloat(f.sz || '0'), 0);
+      if (totalSz <= 0) continue; // skip empty fills
+      const avgPx = cl.fills.reduce((s, f) => s + parseFloat(f.px || '0') * parseFloat(f.sz || '0'), 0) / totalSz;
+      const side = cl.fills[0].side; // B = bought to close short, A = sold to close long
+      const tradeSide = side === 'B' ? 'SHORT' : 'LONG'; // was short if closed by buying
+      const coinId = symToId[cl.coin];
+
+      // Try to find entry price from activeTrades or estimate from PnL
+      let entryPx = avgPx; // fallback
+      if (coinId && HL.activeTrades[coinId]) {
+        entryPx = HL.activeTrades[coinId].entry || avgPx;
+      } else if (totalSz > 0) {
+        // Estimate entry from PnL: pnl = (exit - entry) * size for LONG, (entry - exit) * size for SHORT
+        entryPx = tradeSide === 'LONG' ? avgPx - pnl / totalSz : avgPx + pnl / totalSz;
+      }
+
+      // v5.5 fix: detect manual trades on synced fills using notional vs cap * 1.05
+      let fillSource = 'unknown';
+      if (coinId && HL.activeTrades[coinId] && HL.activeTrades[coinId].source) {
+        fillSource = HL.activeTrades[coinId].source;  // inherit from active trade if still tracked
+      } else if (coinId) {
+        const coinCfg = COINS[coinId];
+        const entryNotional = totalSz * Math.abs(entryPx);
+        // v5.25: dynamic cap from equity
+        const capBase = getMaxNotional(coinCfg, HL.cachedEquity > 0 ? HL.cachedEquity : 100);
+        if (capBase > 0 && entryNotional > capBase * MANUAL_NOTIONAL_MULT) {
+          fillSource = 'manual';
+        } else {
+          fillSource = 'bot';
+        }
+      }
+
+      closed.unshift({
+        coin: cl.coin, side: tradeSide, size: totalSz,
+        entry: parseFloat(entryPx.toFixed(2)), exit: parseFloat(avgPx.toFixed(2)),
+        pnl: parseFloat(pnl.toFixed(4)),
+        ts: new Date(cl.startTs).toISOString(),
+        reason: 'synced_from_hl',
+        source: fillSource  // v5.5 fix: tag bot/manual for P&L split
+      });
+      existingTs.add(tsKey);
+      added++;
+    }
+
+    if (added > 0) {
+      // Sort by timestamp descending (newest first)
+      closed.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+      saveClosedTrades(closed);
+      console.log(`Fill history sync: added ${added} missed closed trades (total: ${closed.length})`);
+    }
+  } catch (e) {
+    console.warn('syncFillHistory error:', e.message);
+  }
+}
+
+// ==============================================================================
+// ##  ALERT & TRADE EXECUTION LOGIC                                         ##
+// ==============================================================================
+
+async function maybeAlert(sig, tf, type, level, target, rr, stopPrice, coinId, price, allLevels){
+  if(isDedupSuppressed(coinId, tf, type, level)) return;
+  // Filter by signal direction (fixed: BLIND_ENTRY can be SHORT too)
+  if(sig === 'SHORT' && !WANT_SHORT) return;
+  if(sig === 'LONG' && !WANT_LONG) return;
+  if(type==='AT_LEVEL'){
+    if(!WANT_ATLEVEL) return;
+    if(sig !== 'NEUTRAL') return;
+  }
+  const icon      = sig==='LONG' ? '🟢' : sig==='SHORT' ? '🔴' : '🟡';
+  const coinLabel = COINS[coinId].label;
+  const dir       = type==='FAIL_GAIN' ? 'FAIL TO GAIN' : type==='FAIL_LOSE' ? 'FAIL TO LOSE' : type==='BLIND_ENTRY' ? 'CONFIRMED ENTRY' : 'AT LEVEL';
+  let msg;
+  if(type==='AT_LEVEL'){
+    msg = `${icon} <b>DMS AT LEVEL</b> . ${coinLabel} [${tf}]\n👁 Approaching $${fmt(level)} -- watch 15m candle\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
+  } else {
+    const rrLine  = rr     ? `\nR:R <b>${rr}</b>` : '';
+    const tpLine  = target ? `\nTake Profit: <b>$${fmt(target)}</b>` : '';
+    const slLevel = stopPrice || findStopLevel(
+      allLevels.length ? allLevels : [{ price:level, type:sig==='SHORT'?'resistance':'support' }],
+      level, sig==='SHORT'?'short':'long'
+    );
+    const slLine  = slLevel ? `\nStop Loss: <b>$${fmt(slLevel)}</b>` : '';
+    msg = `${icon} <b>DMS ${dir}</b> . ${coinLabel} [${tf}]\n\nEntry now: <b>$${fmt(price)}</b>\nLevel: <b>$${fmt(level)}</b>${tpLine}${slLine}${rrLine}\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
+  }
+  markDedupFired(coinId, tf, type, level);
+  const ok = await sendTelegram(msg);
+  console.log(`[${new Date().toISOString()}] ${ok?'SENT':'FAILED'} alert: ${coinLabel} [${tf}] ${type} ${sig} @ $${fmt(level)}`);
+}
+
+// -- AUTO-TRADE DECISION LOGIC (mirrors app's handleCandle auto-trade block) --
+// v5.4: SP500 session-scaled maxNotional helper.
+// Returns { cap, tier } where cap=0 means "do not trade this LONG".
+// Shorts return the coin default cap regardless of session (existing behavior preserved).
+// Tiers (LONG only):
+//   STRONG UP (1W+1D LONG AND conf >= 70%) + US session (13-21 UTC)  -> $1500 (v5.6: was $750)
+//   UP (1W+1D LONG)                        + US session              -> $750  (v5.6: was $500)
+//   UP                                     + non-US session          -> $200
+//   PARTIAL UP (one LONG, other NEUTRAL)   + US session              -> $500  (v5.6: was $350)
+//   PARTIAL UP                             + non-US session          -> $150
+//   anything else + LONG                                             -> 0  (block)
+function sp500EffectiveCap(sig, conf, allResults) {
+  // v5.25: base cap is now equity-proportional (equity × equityPct)
+  const equity = HL.cachedEquity > 0 ? HL.cachedEquity : 100;
+  const defaultCap = getMaxNotional(COINS.sp500, equity);
+  if (sig !== 'LONG') return { cap: defaultCap, tier: 'SHORT/default' };
+  const utcHour = new Date().getUTCHours();
+  const inUSSession = utcHour >= 13 && utcHour < 21;
+  const wk = allResults && allResults['1W'] && allResults['1W'].sig;
+  const dy = allResults && allResults['1D'] && allResults['1D'].sig;
+  const regimeUp = wk === 'LONG' && dy === 'LONG';
+  const partialUp = (wk === 'LONG' || dy === 'LONG') && wk !== 'SHORT' && dy !== 'SHORT';
+  const strongUp = regimeUp && (typeof conf === 'number' && conf >= 70);
+  // v5.25: Session-scaling tiers expressed as multipliers of the equity-based defaultCap.
+  // Original ratios at $500 base: STRONG+US 3×, UP+US 1.5×, UP+nonUS 0.4×, PARTIAL+US 1×, PARTIAL+nonUS 0.3×
+  if (strongUp && inUSSession)       return { cap: Math.round(defaultCap * 3.0), tier: 'STRONG UP + US (3× base)' };
+  if (regimeUp && inUSSession)       return { cap: Math.round(defaultCap * 1.5), tier: 'UP + US (1.5× base)' };
+  if (regimeUp && !inUSSession)      return { cap: Math.round(defaultCap * 0.4), tier: 'UP + non-US (0.4× base)' };
+  if (partialUp && inUSSession)      return { cap: Math.round(defaultCap * 1.0), tier: 'PARTIAL UP + US (1× base)' };
+  if (partialUp && !inUSSession)     return { cap: Math.round(defaultCap * 0.3), tier: 'PARTIAL UP + non-US (0.3× base)' };
+  return { cap: 0, tier: `regime-not-UP (1W=${wk||'n/a'}, 1D=${dy||'n/a'}, US=${inUSSession})` };
+}
+
+// v5.10: BTC regime-scaled effective cap — mirrors sp500EffectiveCap() pattern.
+// Manual BTC longs at 3× cap ($600) have been consistently profitable (Apr 22: +$4.53,
+// Apr 14: +$3.12). The bot's static $200 cap is leaving money on the table.
+// For LONG entries:
+//   STRONG UP (1W+1D long, conf ≥ 70%): $400 (2× base)
+//   UP (1W+1D long):                     $200 (unchanged)
+//   PARTIAL UP (one long, other neutral): $150
+//   Otherwise:                            $200 (default — BTC has no session filter)
+// SHORT entries: always $200 (default cap, no regime scaling).
+function btcEffectiveCap(sig, conf, allResults) {
+  // v5.25: base cap is now equity-proportional (equity × equityPct)
+  const equity = HL.cachedEquity > 0 ? HL.cachedEquity : 100;
+  const defaultCap = getMaxNotional(COINS.bitcoin, equity);
+  if (sig !== 'LONG') return { cap: defaultCap, tier: 'SHORT/default' };
+  const wk = allResults && allResults['1W'] && allResults['1W'].sig;
+  const dy = allResults && allResults['1D'] && allResults['1D'].sig;
+  const regimeUp = wk === 'LONG' && dy === 'LONG';
+  const partialUp = (wk === 'LONG' || dy === 'LONG') && wk !== 'SHORT' && dy !== 'SHORT';
+  const strongUp = regimeUp && (typeof conf === 'number' && conf >= 70);
+  // v5.25: tiers as multipliers of equity-based defaultCap.
+  // Original ratios at $200 base: STRONG 2×, UP 1×, PARTIAL 0.75×
+  if (strongUp)    return { cap: Math.round(defaultCap * 2.0), tier: 'STRONG UP (2× base)' };
+  if (regimeUp)    return { cap: Math.round(defaultCap * 1.0), tier: 'UP (1× base)' };
+  if (partialUp)   return { cap: Math.round(defaultCap * 0.75), tier: 'PARTIAL UP (0.75× base)' };
+  return { cap: defaultCap, tier: `default (1W=${wk||'n/a'}, 1D=${dy||'n/a'})` };
+}
+
+async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults, entryCandles) {
+  if (!HL.enabled || !HL.wallet) return;
+  const d = dmsResult;
+  if (d.sig === 'NEUTRAL' || !d.stopPrice) return;
+  const s = coinState[coinId];
+  if (!s) return;
+
+  // v5.1: Confidence uses totalWeight denominator — prevents single-TF signals from scoring 100%
+  // A 15m-only signal now gets 1/15=7% instead of 1/1=100% (synced w/ app)
+  let wL = 0, wS = 0, aW = 0;
+  const totalW = TFS.reduce((s, t) => s + t.w, 0); // always 15
+  TFS.forEach(t => {
+    const r = allResults[t.l];
+    if (!r) return;
+    if (r.type !== 'NONE') aW += t.w;
+    if (r.sig === 'LONG') wL += t.w;
+    if (r.sig === 'SHORT') wS += t.w;
+  });
+  let conf = totalW > 0 ? Math.round(Math.max(wL, wS) / totalW * 100) : 0;
+  const majorSig = wL > wS ? 'LONG' : wS > wL ? 'SHORT' : null;
+  const sym = COINS[coinId].label;
+
+  // v4.9 Phase 3: Hard-block counter-trend auto-trades
+  // If HTF direction clearly opposes the signal, do NOT auto-trade at all
+  // This prevents the exact scenarios from the DMS review: LONG signals firing
+  // when everything points down, or SHORT signals in clear uptrends
+  const htfDir = s.htfDir || 'UNCLEAR';
+  const storyDir = s.storyDir || 'UNCLEAR';
+  const withTrend = (d.sig === 'LONG' && htfDir === 'UP') || (d.sig === 'SHORT' && htfDir === 'DOWN');
+  const counterTrend = (d.sig === 'LONG' && htfDir === 'DOWN') || (d.sig === 'SHORT' && htfDir === 'UP');
+  const storyConflicts = (d.sig === 'LONG' && storyDir === 'DOWN') || (d.sig === 'SHORT' && storyDir === 'UP');
+
+  // v5.11: Counter-trend gate relaxed for Retest strategy.
+  // The old v4.9 rule hard-blocked every counter-trend signal. Retest is specifically
+  // designed around level breaks — often the earliest evidence that htfDir is about to
+  // flip — so we now allow counter-trend setups that have multi-TF backing
+  // (conf >= 40% ≈ two TFs agreeing). Single-TF counter-trend still blocked.
+  // The v5.3 1W+1D regime block below still applies (80% threshold there).
+  if (counterTrend) {
+    const COUNTER_CONF_MIN = 40;
+    if (conf < COUNTER_CONF_MIN) {
+      console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: counter-trend (HTF ${htfDir}), conf ${conf}% < ${COUNTER_CONF_MIN}% (v5.11 retest gate)`);
+      logMissedSignal(coinId, d.sig, conf, 'counter-trend-low-conf', { htfDir, storyDir, conf, minConf: COUNTER_CONF_MIN, filter: 'v5.11 counter-trend needs multi-TF backing' });
+      return;
+    }
+    console.log(`HL: ${sym} ${d.sig} counter-trend ALLOWED — conf ${conf}% >= ${COUNTER_CONF_MIN}% (v5.11 retest gate, HTF ${htfDir})`);
+  }
+  if (storyConflicts && htfDir === 'UNCLEAR') {
+    console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: story ${storyDir} conflicts, HTF unclear -- counter-structure`);
+    logMissedSignal(coinId, d.sig, conf, 'counter-structure', { htfDir, storyDir, filter: 'story conflicts + HTF unclear' });
+    return;
+  }
+
+  // v5.4: SP500 session-scaled sizing (replaces the v5.0.1 hard out-of-session block).
+  // Implements the Apr 14 winning-tactic recommendation. Shorts unchanged: always allowed,
+  // default $500 cap. Longs use sp500EffectiveCap() to pick a tier or block; the chosen cap
+  // is stashed on coinState so executeTrade picks it up via the v5.4 override path.
+  if (coinId === 'sp500') {
+    const utcHour = new Date().getUTCHours();
+    const inUSSession = utcHour >= 13 && utcHour < 21;
+    if (d.sig === 'LONG') {
+      const { cap, tier } = sp500EffectiveCap('LONG', conf, allResults);
+      if (cap <= 0) {
+        console.log(`HL auto-trade BLOCKED ${sym} LONG: ${tier} -- v5.4 session-scaled sizing`);
+        logMissedSignal(coinId, d.sig, conf, 'sp500-session-cap', { tier, cap, filter: 'v5.4 session-scaled sizing' });
+        return;
+      }
+      if (!coinState[coinId]) coinState[coinId] = {};
+      coinState[coinId].effectiveMaxNotional = cap;
+      console.log(`HL: ${sym} LONG sizing tier '${tier}' -> maxNotional=$${cap} (conf ${conf}%) [v5.4]`);
     } else {
-      // Partial close: update activeTrade size if tracked
-      const coinIdMap2 = SYM_TO_COIN_ID;
-      const cid2 = coinIdMap2[coin];
-      if(cid2 && HL.activeTrades[cid2]){
-        HL.activeTrades[cid2].size = remaining;
-        HL.saveActiveTrades();
+      // SHORT: clear any stale override; behavior unchanged from v5.0.1 (shorts allowed any session)
+      if (coinState[coinId]) delete coinState[coinId].effectiveMaxNotional;
+      if (!inUSSession) {
+        console.log(`HL: ${sym} SHORT allowed outside US session (${utcHour}:00 UTC) -- shorts exempt from session filter`);
       }
     }
+  }
 
-    // Refresh trades page after a short delay for settlement
-    setTimeout(renderTrades, 1500);
-  }catch(e){
-    showToast('Close error: ' + e.message);
-    console.error('Close trade error:', e);
+  // v5.10: BTC regime-scaled sizing — mirrors SP500 tiered cap pattern.
+  // Manual BTC longs at 3× cap have been consistently profitable. This lets the bot
+  // scale up during STRONG UP regime (1W+1D long, conf ≥ 70%) to $400 (2× base).
+  if (coinId === 'bitcoin') {
+    if (d.sig === 'LONG') {
+      const { cap, tier } = btcEffectiveCap('LONG', conf, allResults);
+      if (!coinState[coinId]) coinState[coinId] = {};
+      coinState[coinId].effectiveMaxNotional = cap;
+      console.log(`HL: ${sym} LONG sizing tier '${tier}' -> maxNotional=$${cap} (conf ${conf}%) [v5.10]`);
+    } else {
+      // SHORT: clear any stale override
+      if (coinState[coinId]) delete coinState[coinId].effectiveMaxNotional;
+    }
+  }
+
+  // v5.1: GOLD session filter (synced w/ app)
+  // v5.14: Extended to block SHORTs outside 06:00-17:00 UTC.
+  //   LONGs remain blocked outside 13:00-20:00 UTC (unchanged).
+  //   SHORTs now blocked outside 06:00-17:00 UTC (EU open → early US afternoon).
+  //   Rationale: Apr 29 GOLD short at 18:33 UTC hit SL for -$2.65; winning shorts
+  //   consistently enter during EU/US overlap (07:00-15:00). 06-17 gives a buffer.
+  if (coinId === 'gold') {
+    const utcHour = new Date().getUTCHours();
+    const inGoldLongSession = utcHour >= 13 && utcHour < 20;
+    const inGoldShortSession = utcHour >= 6 && utcHour < 17;  // v5.14
+    if (!inGoldLongSession && d.sig === 'LONG') {
+      console.log(`HL auto-trade BLOCKED ${sym} LONG: outside gold LONG session (${utcHour}:00 UTC, allowed 13:00-20:00) -- session filter`);
+      logMissedSignal(coinId, d.sig, conf, 'gold-session-filter', { utcHour, filter: 'outside gold LONG session 13-20 UTC' });
+      return;
+    }
+    if (!inGoldShortSession && d.sig === 'SHORT') {
+      console.log(`HL auto-trade BLOCKED ${sym} SHORT: outside gold SHORT session (${utcHour}:00 UTC, allowed 06:00-17:00) -- v5.14 session filter`);
+      logMissedSignal(coinId, d.sig, conf, 'gold-session-filter-short', { utcHour, filter: 'outside gold SHORT session 06-17 UTC (v5.14)' });
+      return;
+    }
+  }
+
+  // v5.1: Ranging market detector — now applies to ALL coins (was SP500/GOLD only)
+  // If last 3 closed trades on this coin alternated direction (L-S-L or S-L-S), market is ranging
+  {
+    const closed = loadClosedTrades();
+    const recentCoinTrades = closed.filter(t => {
+      const cId = { 'xyz:SP500':'sp500', 'xyz:GOLD':'gold', 'xyz:CL':'crude', CRUDE:'crude', CL:'crude', BTC:'bitcoin', HYPE:'hyperliquid' }[t.coin] || t.coin;
+      return cId === coinId;
+    }).slice(0, 3);
+    if (recentCoinTrades.length >= 3) {
+      const dirs = recentCoinTrades.map(t => t.side);
+      const isWhipsaw = (dirs[0] !== dirs[1] && dirs[1] !== dirs[2]);
+      if (isWhipsaw) {
+        // Check if all 3 happened within last 24 hours
+        const oldestTs = new Date(recentCoinTrades[2].ts).getTime();
+        if (Date.now() - oldestTs < 86400000) {
+          console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: ranging market detected (${dirs.join('->')} in 24h) -- whipsaw protection`);
+          logMissedSignal(coinId, d.sig, conf, 'whipsaw-protection', { recentDirs: dirs.join('->'), filter: 'ranging market, 3 alternating trades in 24h' });
+          await sendTelegram(`⚠️ <b>RANGING MARKET: ${sym}</b>\nLast 3 trades alternated direction (${dirs.join(' → ')})\nSkipping ${d.sig} signal until clear trend`);
+          return;
+        }
+      }
+    }
+  }
+
+  // v5.12: ADX chop filter — skip entries when the entry-TF ADX is below threshold,
+  // indicating a range-bound / choppy market. This is the primary defense against the
+  // HYPE whipsaw pattern (Apr 20-24: 4 SL hits in 6 days in a $40.50-$42.80 range).
+  // Only applies to lower TFs (15m/1H/4H) where chop is most damaging; HTF entries
+  // (1W/1D) are exempt because a weekly retest rarely whipsaws intra-day.
+  {
+    const chopCfg = CHOP_FILTER[coinId];
+    const tfWeight = TFS[tfIdx]?.w || 0;
+    if (chopCfg && chopCfg.enabled && tfWeight <= chopCfg.minTFWeight && entryCandles) {
+      const adxVal = calcADX(entryCandles, 14);
+      if (adxVal < chopCfg.adxThreshold) {
+        console.log(`HL CHOP FILTER: ${sym} ${d.sig} blocked — ADX ${adxVal.toFixed(1)} < ${chopCfg.adxThreshold} on ${TFS[tfIdx].l} (v5.12 range filter)`);
+        logMissedSignal(coinId, d.sig, conf, 'chop-filter', { adx: adxVal.toFixed(1), threshold: chopCfg.adxThreshold, tf: TFS[tfIdx].l, filter: 'v5.12 ADX chop filter' });
+        await sendTelegram(`🔀 <b>CHOP FILTER: ${sym} ${d.sig}</b>\n${TFS[tfIdx].l} ADX: ${adxVal.toFixed(1)} (threshold: ${chopCfg.adxThreshold})\nMarket is range-bound — entry skipped.`);
+        return;
+      }
+      console.log(`HL: ${sym} chop filter OK — ADX ${adxVal.toFixed(1)} >= ${chopCfg.adxThreshold} on ${TFS[tfIdx].l} (v5.12)`);
+    }
+  }
+
+  // v5.16: Range breakout quality filter — verify the "break" in the Retest pattern
+  // exceeds the 48h range boundaries. If entry price is within the trailing 48h high-low
+  // range AND the level being tested is also within the range, the "breakout" is likely
+  // just noise oscillating within consolidation. Require that the break candle closed
+  // beyond the range boundary (for LONG: above range high; for SHORT: below range low)
+  // OR that the entry-TF ATR is large enough relative to range size (trending, not ranging).
+  // This would have filtered the May 3 BTC false breakout ($78.9k entry within $78k-$79.1k range)
+  // while preserving the May 4 genuine breakout ($78.9k entry after range high $79.1k was breached).
+  //
+  // v5.29 (2026-05-18): Exempt confirmed retests with breakCloseCount >= 2 from this penalty.
+  //   The retest detection already validates structural integrity (break → multiple closes
+  //   held beyond level → retest touch → conviction candle). Penalizing it for being "inside
+  //   the 48h range" is circular — every genuine breakout from consolidation starts there.
+  //   May 17 counterfactual: HYPE LONG at $41.35 with 24 break-closes was blocked solely by
+  //   this penalty (40% conf - 15% = 25% < 40% counter-trend threshold). The +14% move that
+  //   followed was the exact scenario the retest strategy was built to capture.
+  if (BREAKOUT_QUALITY.enabled) {
+    const range = s?.range48h;
+    if (range && range.high > range.low) {
+      const rangeSize = range.high - range.low;
+      const currentPx = s.price || 0;
+      const levelPx = d.level || 0;
+      if (currentPx > 0 && levelPx > 0 && rangeSize > 0) {
+        // Check if both the entry price AND the tested level are inside the 48h range
+        const pxInRange = currentPx >= range.low && currentPx <= range.high;
+        const levelInRange = levelPx >= range.low && levelPx <= range.high;
+        // v5.29: Skip penalty for validated retests — the pattern itself proves the break is real.
+        const isValidatedRetest = d.breakCloseCount && d.breakCloseCount >= 2;
+        if (pxInRange && levelInRange && !isValidatedRetest) {
+          // The "breakout" is entirely within the range — likely noise.
+          // Allow if ATR shows genuine expansion (trending day) or high multi-TF conf.
+          // Otherwise, apply a confidence penalty that usually blocks marginal signals.
+          const penalty = 15;
+          const oldConf = conf;
+          conf = Math.max(conf - penalty, 0);
+          console.log(`HL BREAKOUT-QUALITY: ${sym} ${d.sig} conf ${oldConf}% -> ${conf}% — entry $${currentPx.toFixed(1)} and level $${levelPx.toFixed(1)} both within 48h range ($${range.low.toFixed(1)}-$${range.high.toFixed(1)}) — likely noise breakout (v5.16)`);
+          logMissedSignal(coinId, d.sig, conf, 'breakout-quality-penalty', {
+            currentPx, levelPx, rangeLow: range.low, rangeHigh: range.high, rangeSize,
+            penalty, filter: `v5.16 breakout quality: price+level both within 48h range`
+          });
+        } else if (pxInRange && levelInRange && isValidatedRetest) {
+          console.log(`HL BREAKOUT-QUALITY EXEMPT: ${sym} ${d.sig} — price+level in 48h range but retest validated (${d.breakCloseCount} break-closes) — penalty skipped (v5.29)`);
+        }
+      }
+    }
+  }
+
+  // v5.3: Regime-aware directional blocking
+  // When 1W + 1D both agree on direction, block the opposite direction unless confidence >= 80%
+  // This prevents low-conviction counter-regime trades (e.g. shorting HYPE in a sustained uptrend)
+  // while still allowing high-conviction setups (Apr 12 HYPE short worked because it had multi-TF support)
+  {
+    const weeklyResult = allResults['1W'];
+    const dailyResult = allResults['1D'];
+    const weeklyDir = weeklyResult?.sig;  // 'LONG' = bullish regime, 'SHORT' = bearish regime
+    const dailyDir = dailyResult?.sig;
+    if (weeklyDir && dailyDir && weeklyDir === dailyDir && weeklyDir !== 'NEUTRAL') {
+      const regimeDir = weeklyDir;  // 'LONG' or 'SHORT'
+      if (d.sig !== regimeDir && conf < 80) {
+        console.log(`HL REGIME BLOCK: ${sym} ${d.sig} blocked — 1W+1D both ${regimeDir}, conf ${conf}% < 80% (v5.3)`);
+        logMissedSignal(coinId, d.sig, conf, 'regime-block', { regimeDir, requiredConf: 80, filter: 'v5.3 counter-regime conf < 80%' });
+        await sendTelegram(`🛡 <b>REGIME BLOCK: ${sym} ${d.sig}</b>\n1W + 1D both ${regimeDir === 'LONG' ? 'bullish' : 'bearish'}\nConf ${conf}% < 80% threshold\nSignal-only, no trade.`);
+        return;
+      }
+      if (d.sig !== regimeDir) {
+        console.log(`HL: ${sym} ${d.sig} ALLOWED despite regime ${regimeDir} — conf ${conf}% >= 80% (v5.3)`);
+      }
+    }
+  }
+
+  // v5.7: Trend-exhaustion filter — detect late-cycle entries after extended moves
+  // When price has already moved significantly in the signal direction over the last 48h,
+  // the expected remaining edge shrinks while reversal risk increases.
+  // Three tiers: (1) below tightenPct → normal, (2) tightenPct–skipPct → tighten SL + halve size,
+  // (3) above skipPct → skip entry entirely.
+  // The exhaustion modifier is stored on coinState so executeTrade can read it.
+  {
+    const exh = coinState[coinId]?.exhaustion48h || { movePct: 0, highPct: 0, lowPct: 0 };
+    const thresholds = EXHAUSTION_THRESHOLDS[coinId] || { tightenPct: 3.0, skipPct: 5.0 };
+    // Directional move: for LONG signals, check how much price has already gone UP (positive movePct)
+    // For SHORT signals, check how much price has already gone DOWN (negative movePct → use abs)
+    const directionalMove = d.sig === 'LONG' ? exh.movePct : -exh.movePct;
+    // Also consider max excursion: if price rallied 5% then pulled back to +2%, the trend
+    // may already be exhausting even though net move is only 2%. Use the higher of the two.
+    const excursion = d.sig === 'LONG' ? exh.highPct : exh.lowPct;
+    const effectiveMove = Math.max(directionalMove, excursion * 0.6); // weight excursion at 60%
+
+    if (effectiveMove >= thresholds.skipPct) {
+      console.log(`HL EXHAUSTION SKIP: ${sym} ${d.sig} blocked — 48h move ${directionalMove.toFixed(1)}% (excursion ${excursion.toFixed(1)}%, effective ${effectiveMove.toFixed(1)}%) >= skip threshold ${thresholds.skipPct}% (v5.7)`);
+      logMissedSignal(coinId, d.sig, conf, 'exhaustion-skip', { movePct: directionalMove, excursionPct: excursion, effectiveMove, skipPct: thresholds.skipPct, filter: 'v5.7 trend exhaustion' });
+      await sendTelegram(`🔋 <b>EXHAUSTION SKIP: ${sym} ${d.sig}</b>\n48h move: ${directionalMove.toFixed(1)}% in signal direction\nExcursion: ${excursion.toFixed(1)}%\nThreshold: ${thresholds.skipPct}% (skip)\nTrend likely exhausted — entry blocked.`);
+      return;
+    }
+    if (effectiveMove >= thresholds.tightenPct) {
+      // Store the exhaustion modifier so executeTrade can tighten stops and halve size
+      if (!coinState[coinId]) coinState[coinId] = {};
+      coinState[coinId].exhaustionModifier = {
+        tightenSL: true,    // executeTrade will cap SL at 1.5% instead of ATR-based
+        sizeMultiplier: 0.5 // executeTrade will halve position size
+      };
+      console.log(`HL EXHAUSTION TIGHTEN: ${sym} ${d.sig} — 48h move ${directionalMove.toFixed(1)}% (excursion ${excursion.toFixed(1)}%, effective ${effectiveMove.toFixed(1)}%) >= tighten threshold ${thresholds.tightenPct}% — SL capped at 1.5%, size halved (v5.7)`);
+      await sendTelegram(`⚡ <b>EXHAUSTION TIGHTEN: ${sym} ${d.sig}</b>\n48h move: ${directionalMove.toFixed(1)}% in signal direction\nExcursion: ${excursion.toFixed(1)}%\nThreshold: ${thresholds.tightenPct}% (tighten)\nSL capped at 1.5%, size halved.`);
+    } else {
+      // Clear any stale modifier
+      if (coinState[coinId]?.exhaustionModifier) delete coinState[coinId].exhaustionModifier;
+    }
+  }
+
+  // v5.13: Range-awareness filter — downgrade confidence when entering near 48h range extremes.
+  // Shorting near the bottom of a multi-day range (bottom 30%) has poor follow-through because
+  // price tends to bounce off support. Same for longing near range top (top 30%).
+  // Applies to BTC where multi-day consolidation ranges are common.
+  // Penalty: 12% confidence reduction — enough to push marginal signals below threshold
+  // without blocking strong multi-TF consensus entries.
+  if (coinId === 'bitcoin') {
+    const range = s?.range48h;
+    if (range && range.high > range.low) {
+      const rangeSize = range.high - range.low;
+      const currentPx = s.price || 0;
+      if (currentPx > 0 && rangeSize > 0) {
+        const pricePos = (currentPx - range.low) / rangeSize; // 0 = bottom, 1 = top
+        const badEntry = (d.sig === 'SHORT' && pricePos < 0.30) || (d.sig === 'LONG' && pricePos > 0.70);
+        if (badEntry) {
+          const penalty = 12;
+          const oldConf = conf;
+          conf = Math.max(conf - penalty, 0);
+          console.log(`HL RANGE-AWARE: ${sym} ${d.sig} conf ${oldConf}% -> ${conf}% — price $${currentPx.toFixed(0)} at ${(pricePos * 100).toFixed(0)}% of 48h range ($${range.low.toFixed(0)}-$${range.high.toFixed(0)}) [v5.13]`);
+          if (conf < oldConf) {
+            logMissedSignal(coinId, d.sig, conf, 'range-awareness-penalty', { pricePosInRange: +(pricePos * 100).toFixed(1), rangeLow: range.low, rangeHigh: range.high, penalty, filter: `v5.13 range-awareness: ${d.sig} at ${(pricePos*100).toFixed(0)}% of range` });
+          }
+        }
+      }
+    }
+  }
+
+  // v5.13: Funding rate signal amplifier — boost confidence when carry aligns with signal.
+  // Positive funding = longs pay shorts → structural edge for SHORT entries.
+  // Negative funding = shorts pay longs → structural edge for LONG entries.
+  // Threshold: |rate| > 0.0001 per 8h (~0.01%/hr, ~4.4% annualized) — meaningful carry.
+  // Boost: +8% confidence. Stacks with other adjustments but can't exceed 100%.
+  // Applies to all assets that have a funding rate (HIP-3 and Hyperliquid perps).
+  {
+    const fundingRate = s?.fundingRate;
+    if (fundingRate != null && Math.abs(fundingRate) > 0.0001) {
+      const fundingFavors = fundingRate > 0 ? 'SHORT' : 'LONG';
+      if (d.sig === fundingFavors) {
+        const boost = 8;
+        const oldConf = conf;
+        conf = Math.min(conf + boost, 100);
+        console.log(`HL FUNDING BOOST: ${sym} ${d.sig} conf ${oldConf}% -> ${conf}% — funding rate ${(fundingRate * 100).toFixed(4)}%/8h favors ${fundingFavors} [v5.13]`);
+      }
+    }
+  }
+
+  // v5.13: BTC time-of-day filter — reduce confidence during US session whipsaw hours.
+  // BTC frequently mean-reverts between 13:00-20:00 UTC when institutional hedging flows
+  // and US equities correlation create chop. Apr 28's losing short entered at 13:09 UTC
+  // (immediate US-session whipsaw), while the winning Apr 27 short entered at ~21:45 UTC.
+  // Penalty: 10% confidence reduction — does not hard-block, but marginal signals are filtered.
+  if (coinId === 'bitcoin') {
+    const utcHour = new Date().getUTCHours();
+    if (utcHour >= 13 && utcHour < 20) {
+      const penalty = 10;
+      const oldConf = conf;
+      conf = Math.max(conf - penalty, 0);
+      console.log(`HL TIME-OF-DAY: ${sym} ${d.sig} conf ${oldConf}% -> ${conf}% — US session (${utcHour}:00 UTC, 13-20 window) [v5.13]`);
+    }
+  }
+
+  const effectiveWithTrend = withTrend && !storyConflicts;
+  const minConf = effectiveWithTrend ? Math.max(MIN_CONFIDENCE - 15, 25) : storyConflicts ? Math.min(MIN_CONFIDENCE + 15, 80) : MIN_CONFIDENCE;
+  const trendLabel = effectiveWithTrend ? 'WITH-TREND' : storyConflicts ? 'COUNTER-STORY' : 'NEUTRAL-TREND';
+
+  if (conf < minConf) {
+    console.log(`HL auto-trade SKIP ${sym} ${d.sig}: conf ${conf}% < ${minConf}% (${trendLabel})`);
+    logMissedSignal(coinId, d.sig, conf, 'low-confidence', { minConf, trendLabel, filter: `conf ${conf}% < ${minConf}%` });
+    return;
+  }
+  if (d.sig !== majorSig) {
+    console.log(`HL auto-trade SKIP ${sym}: signal ${d.sig} != majority ${majorSig}`);
+    logMissedSignal(coinId, d.sig, conf, 'majority-mismatch', { majorSig, filter: `signal ${d.sig} != majority ${majorSig}` });
+    return;
+  }
+
+  const existing = HL.activeTrades[coinId];
+  if (existing) {
+    // v5.7: Never auto-trade (stack or reverse) on a coin with a manual position.
+    // The user is managing this position themselves — bot must not interfere.
+    if (existing.source === 'manual-ignored' || existing.trailState === 'manual') {
+      console.log(`HL auto-trade SKIP ${sym}: manual position active (${existing.side}, source=${existing.source}) — hands off`);
+      logMissedSignal(coinId, d.sig, conf, 'manual-position-active', { existingSide: existing.side, source: existing.source, filter: 'hands off manual position' });
+      return;
+    }
+    if (existing.side === d.sig) {
+      // Same direction -- SKIP (max 1 position per coin to limit exposure)
+      console.log(`HL auto-trade SKIP ${sym}: already in ${existing.side} (no stacking)`);
+      logMissedSignal(coinId, d.sig, conf, 'no-stacking', { existingSide: existing.side, filter: 'already in same direction' });
+    } else {
+      // Opposite direction -- close and reverse
+      console.log(`HL REVERSE: close ${existing.side} ${sym}, open ${d.sig} (${TFS[tfIdx].l}, conf ${conf}%)`);
+      const closeResult = await HL.closePosition(coinId);
+      if (closeResult) {
+        await HL.executeTrade(coinId, d, conf);
+        await HL.syncPositions();
+      }
+    }
+  } else {
+    // No existing position -- check max concurrent positions (default 3)
+    const MAX_POSITIONS = parseInt(process.env.MAX_POSITIONS || '4');
+    const openCount = Object.keys(HL.activeTrades).length;
+    if (openCount >= MAX_POSITIONS) {
+      console.log(`HL auto-trade SKIP ${sym}: max ${MAX_POSITIONS} positions reached (${openCount} open)`);
+      logMissedSignal(coinId, d.sig, conf, 'max-positions', { maxPositions: MAX_POSITIONS, openCount, filter: `${openCount}/${MAX_POSITIONS} positions open` });
+      return;
+    }
+    console.log(`HL AUTO-TRADE FIRE ${sym} ${d.sig} | conf: ${conf}% (min: ${minConf}%, ${trendLabel}) | SL: ${d.stopPrice} | positions: ${openCount+1}/${MAX_POSITIONS}`);
+    // v5.22 (2026-05-09): structured fire diagnostic — captures the exact state
+    // backtester replay needs to reproduce this trade. Single line, JSON-tagged
+    // with FIRE_DIAG so a tail|grep can extract the corpus from Railway logs.
+    // Used to validate backtester/replay.js against ground-truth live fires.
+    try {
+      const tfSigs = {};
+      for (const t of TFS) {
+        const r = allResults && allResults[t.l];
+        tfSigs[t.l] = r ? { sig: r.sig, type: r.type, level: r.level || null, stop: r.stopPrice || null, rr: r.rr || null } : null;
+      }
+      const diag = {
+        ts: new Date().toISOString(),
+        coin: coinId, sym, side: d.sig,
+        firingTf: TFS[tfIdx].l,
+        conf, minConf, trendLabel,
+        wL, wS, majorSig,
+        htfDir, storyDir,
+        price: s?.price || null,
+        range48h: s?.range48h || null,
+        exhaustion48h: s?.exhaustion48h || null,
+        fundingRate: s?.fundingRate || null,
+        effectiveCap: coinState[coinId]?.effectiveMaxNotional || null,
+        exhaustionMod: coinState[coinId]?.exhaustionModifier || null,
+        signal: { level: d.level, target: d.target, stopPrice: d.stopPrice, rr: d.rr, type: d.type, reason: d.reason },
+        tfSigs,
+      };
+      console.log('FIRE_DIAG ' + JSON.stringify(diag));
+    } catch (e) { console.warn('FIRE_DIAG emit failed:', e.message); }
+    await HL.executeTrade(coinId, d, conf);
+    await HL.syncPositions();
   }
 }
 
-// Pre-fill trade form from log entry and switch to Trades page
-function prefillTrade(coin, sig, sl, tp){
-  // Switch to trades page
-  const tradesBtn = document.querySelector('.nb[onclick*="trades"]');
-  if(tradesBtn) tradesBtn.click();
+// ==============================================================================
+// ##  PER-COIN SCAN                                                         ##
+// ==============================================================================
 
-  // Set form values
-  setTimeout(() => {
-    document.getElementById('mf-coin').value = coin;
-    document.getElementById('mf-side').value = sig;
-    if(sl) document.getElementById('mf-sl').value = sl.toFixed(2);
-    if(tp) document.getElementById('mf-tp').value = tp.toFixed(2);
-
-    // Auto-calculate suggested size from risk settings
-    const accountSize = parseFloat(localStorage.getItem('account_size') || '100');
-    const riskPct = parseFloat(localStorage.getItem('risk_pct') || '1');
-    const coinIdMap = SYM_TO_COIN_ID;
-    const hlAsset = { BTC:'BTC', HYPE:'HYPE', SPX:'xyz:SP500', GOLD:'xyz:GOLD' };
-    const cid = coinIdMap[coin];
-    const px = cid ? coinState[cid].price : 0;
-    if(px && sl){
-      const riskAmount = accountSize * riskPct / 100;
-      const slDist = Math.abs(px - sl);
-      if(slDist > px * 0.001){
-        const szDec = HL.szDecimals[hlAsset[coin] || coin] || 3;
-        const suggestedSize = (riskAmount / slDist).toFixed(szDec);
-        document.getElementById('mf-size').value = suggestedSize;
-      }
-    }
-
-    // Scroll the form into view
-    document.getElementById('mf-coin').scrollIntoView({ behavior:'smooth', block:'center' });
-    showToast(`${sig} ${coin} pre-filled`, sl ? `SL: $${fmt(sl)}` : '', sig === 'SHORT');
-  }, 300);
-}
-
-// Manual open trade
-async function manualOpenTrade(){
-  if(!HL.wallet){ showToast('Connect Hyperliquid wallet first'); return; }
-
-  const rawCoin = document.getElementById('mf-coin').value;
-  // Map dropdown names to HL asset names (SPX on main dex is a different token)
-  const hlCoinMap = { SPX: 'xyz:SP500', GOLD: 'xyz:GOLD' };
-  const coin = hlCoinMap[rawCoin] || rawCoin;
-  const side = document.getElementById('mf-side').value;
-  const size = parseFloat(document.getElementById('mf-size').value);
-  const sl = parseFloat(document.getElementById('mf-sl').value) || null;
-  const tp = parseFloat(document.getElementById('mf-tp').value) || null;
-
-  if(!size || size <= 0){ showToast('Enter a valid size'); return; }
-
-  const btn = document.getElementById('mf-open');
-  btn.textContent = 'PLACING ORDER...';
-  btn.disabled = true;
-
-  const isBuy = side === 'LONG';
-  const coinIdMap = SYM_TO_COIN_ID;
-  const cid = coinIdMap[coin];
-  const px = cid ? coinState[cid].price : 0;
-  if(!px){ btn.textContent = 'OPEN TRADE'; btn.disabled = false; showToast('No price data for ' + coin); return; }
-
-  const slip = px * 0.01; // 1% slippage for IOC to ensure fill
-  const entryPx = isBuy ? px + slip : px - slip;
-
+async function scanCoin(coinId){
+  const label = COINS[coinId].label;
   try{
-    // 1. Entry order (IOC market)
-    const result = await HL.placeOrder(coin, isBuy, size, entryPx, { limit: { tif: 'Ioc' } });
-    if(result.status === 'err'){
-      showToast('Order failed: ' + (result.response || 'Unknown'));
-      btn.textContent = 'OPEN TRADE'; btn.disabled = false;
-      return;
+    const [priceData, ...allCandles] = await Promise.all([
+      getPrice(coinId),
+      ...TFS.map(tf => getCandles(tf.l, coinId).catch(e=>{ console.warn(label, tf.l, e.message); return null; }))
+    ]);
+    const price = priceData.price;
+    const [wC, dC, h4C, h1C, m15C] = allCandles;
+    if(!dC) return;
+
+    // Store price in coinState for trailing stops
+    if (!coinState[coinId]) coinState[coinId] = {};
+    coinState[coinId].price = price;
+
+    // v5.0 FIX #1: Reset htfDir before computation so stale values don't persist
+    // when nextMove() returns falsy (e.g. insufficient candle data)
+    coinState[coinId].htfDir = 'UNCLEAR';
+    let htfDir = 'UNCLEAR';
+    if(h4C && h1C) { const nm = nextMove(h4C, h1C); if(nm) htfDir = nm.dir; }
+    else if(h4C)   { const nm = nextMove(h4C, h4C); if(nm) htfDir = nm.dir; }
+    coinState[coinId].htfDir = htfDir;
+
+    // v5.7: Compute trend exhaustion for late-cycle entry detection
+    if (h4C && h4C.length >= 13) {
+      coinState[coinId].exhaustion48h = trendExhaustion48h(h4C);
+    } else {
+      coinState[coinId].exhaustion48h = { movePct: 0, highPct: 0, lowPct: 0 };
     }
-    if(result.filled === false || (!result.filled && !result.totalSz)){
-      showToast('Entry order not filled — try again');
-      btn.textContent = 'OPEN TRADE'; btn.disabled = false;
-      return;
+
+    // v5.13: Compute 48h price range for range-awareness filter
+    if (h4C && h4C.length >= 13) {
+      const rangeSlice = h4C.slice(-13);
+      let rangeHigh = -Infinity, rangeLow = Infinity;
+      for (const k of rangeSlice) {
+        if (Number.isFinite(k.h) && k.h > rangeHigh) rangeHigh = k.h;
+        if (Number.isFinite(k.l) && k.l < rangeLow) rangeLow = k.l;
+      }
+      coinState[coinId].range48h = { high: rangeHigh, low: rangeLow };
+    } else {
+      coinState[coinId].range48h = null;
     }
 
-    // 2. SL if set
-    if(sl){
-      const slPx = isBuy ? sl * 0.98 : sl * 1.02;
-      await HL.placeOrder(coin, !isBuy, size, slPx,
-        { trigger: { isMarket: true, triggerPx: sl, tpsl: 'sl' } }, true);
+    // v5.13: Fetch funding rate for all HL-traded assets (funding-aware confidence boost)
+    // All coins execute on Hyperliquid even though BTC/HYPE use Binance/Bybit for candle data.
+    // hlFundingRate strips 'USDT'/'xyz:' from apiSym to match HL universe names.
+    try {
+      coinState[coinId].fundingRate = await hlFundingRate(COINS[coinId].apiSym);
+    } catch (e) {
+      coinState[coinId].fundingRate = null;
     }
 
-    // 3. TP if set
-    if(tp){
-      const tpPx = isBuy ? tp * 1.02 : tp * 0.98;
-      await HL.placeOrder(coin, !isBuy, size, tpPx,
-        { trigger: { isMarket: true, triggerPx: tp, tpsl: 'tp' } }, true);
+    // v4.9: Compute storyDir for auto-trade filtering (mirrors HTML buildStory)
+    let storyDir = 'UNCLEAR';
+    if(h4C && h1C && h4C.length >= 6 && h1C.length >= 12){
+      const h4R = h4C.slice(-6), h1R = h1C.slice(-12);
+      const sLevels = (() => {
+        const wLvls = wC ? findVPeaks(wC,'1W') : [];
+        const dLvls = findVPeaks(dC,'1D');
+        const pdhl = findPDHL(dC);
+        const all = [...wLvls,...dLvls,...pdhl].sort((a,b)=>b.score-a.score);
+        return all.filter(l => Math.abs(l.price - price)/price < 0.02 && l.score >= 20).slice(0,6);
+      })();
+      if(sLevels.length >= 2){
+        let bp = 0, brp = 0;
+        for(const lv of sLevels){
+          const tol = lv.price * 0.004;
+          const isR = lv.type === 'resistance';
+          for(let ci=0;ci<h4R.length;ci++){
+            const k=h4R[ci], rec=(ci>=h4R.length-2)?2:1;
+            const touched = isR ? (k.h>=lv.price-tol) : (k.l<=lv.price+tol);
+            if(!touched) continue;
+            const gained = isR ? (k.bh>lv.price+tol) : (k.bl<lv.price-tol);
+            const failed = isR ? (k.bh<lv.price-tol*0.5) : (k.bl>lv.price+tol*0.5);
+            if(gained){ isR ? bp+=2*rec : brp+=2*rec; }
+            else if(failed){ isR ? brp+=2*rec : bp+=2*rec; }
+          }
+          for(let ci=0;ci<h1R.length;ci++){
+            const k=h1R[ci], rec=(ci>=h1R.length-2)?2:1;
+            const touched = isR ? (k.h>=lv.price-tol) : (k.l<=lv.price+tol);
+            if(!touched) continue;
+            const gained = isR ? (k.bh>lv.price+tol) : (k.bl<lv.price-tol);
+            const failed = isR ? (k.bh<lv.price-tol*0.5) : (k.bl>lv.price+tol*0.5);
+            if(gained){ isR ? bp+=rec : brp+=rec; }
+            else if(failed){ isR ? brp+=rec : bp+=rec; }
+          }
+        }
+        // Price position context (same as HTML)
+        const last3 = h1C.slice(-3);
+        if(last3.length>=3){
+          const trend = last3[2].c - last3[0].c;
+          if(Math.abs(trend)/price > 0.002){
+            const resAbove = sLevels.filter(l=>l.type==='resistance'&&l.price>price*1.005);
+            const supBelow = sLevels.filter(l=>l.type==='support'&&l.price<price*0.995);
+            if(trend<0 && resAbove.length>0) brp+=3;
+            if(trend>0 && supBelow.length>0) bp+=3;
+          }
+        }
+        const net = bp - brp;
+        if(net>=3) storyDir='UP';
+        else if(net<=-3) storyDir='DOWN';
+      }
     }
+    coinState[coinId].storyDir = storyDir;
 
-    showToast(side + ' ' + coin + ' x' + size + ' @ $' + fmt(px), sl ? 'SL: $' + fmt(sl) : '', side === 'SHORT');
+    const asiaLevels = m15C
+      ? [...getAsiaLevels(m15C), ...getLondonLevels(m15C), ...getNYLevels(m15C)]
+      : [];
 
-    // Clear form
-    document.getElementById('mf-size').value = '';
-    document.getElementById('mf-sl').value = '';
-    document.getElementById('mf-tp').value = '';
+    const allLevels = (() => {
+      const wLvls = wC ? findVPeaks(wC,'1W') : [];
+      const dLvls = findVPeaks(dC,'1D');
+      const pdhl  = findPDHL(dC);
+      const all   = [...wLvls,...dLvls,...pdhl,...asiaLevels].sort((a,b)=>b.price-a.price);
+      const dd = [];
+      for(const l of all){ if(!dd.find(d=>Math.abs(d.price-l.price)/l.price<0.004)) dd.push(l); }
+      return dd;
+    })();
 
-    // Refresh trades page
-    setTimeout(renderTrades, 1500);
+    // v4.9: Build lower-TF candle data for LTF alignment checks on 1W/1D only
+    // 4H/1H/15m signals are left untouched -- working well for BTC/SPX/HYPE
+    const lowerTFCandles = {};
+    if (h4C) lowerTFCandles['4H'] = h4C;
+    if (h1C) lowerTFCandles['1H'] = h1C;
+    const hasLower = Object.keys(lowerTFCandles).length > 0 ? lowerTFCandles : null;
+
+    const tfsToRun = [
+      wC  && dC  ? { i:0, c:wC,   dC, lower:hasLower } : null,
+      dC         ? { i:1, c:dC,   dC, lower:hasLower } : null,
+      h4C && dC  ? { i:2, c:h4C,  dC, lower:null } : null,
+      h1C && dC  ? { i:3, c:h1C,  dC, lower:null } : null,
+      m15C && dC ? { i:4, c:m15C, dC, lower:null } : null,
+    ].filter(Boolean);
+
+    // Store all results for confidence calculation
+    const allResults = {};
+
+    // v4.9: Cross-TF conflict prevention -- track which direction fired first
+    // If 4H says LONG and 1D says SHORT, only the first (higher-weight TF) fires
+    let firedDirection = null; // 'LONG' or 'SHORT' once a tradeable signal fires
+
+    const signalSummary = [];
+    for(const { i, c, dC: dc, lower } of tfsToRun){
+      const tf = TFS[i];
+      const a  = atr(c);
+      // v4.9 fix: pass as plain object (String objects break === comparison)
+      const htfCarrier = { dir: htfDir || 'UNCLEAR', __asiaLevels: asiaLevels };
+      const coinMinRR = COINS[coinId] ? COINS[coinId].minRR : 1.0;
+      const coinMinStopPct = COINS[coinId] ? COINS[coinId].minStopPct : 0.005;
+      const coinFeeEst = COINS[coinId] ? COINS[coinId].feeEst : 0.05;
+      // v5.24: forward per-asset retest tuning (breakDistFloorPct, minBreakCloses).
+      // Defined in coins-config.js; SP500 overrides the crypto-calibrated defaults.
+      const coinOpts = COINS[coinId] ? {
+        breakDistFloorPct: COINS[coinId].breakDistFloorPct,
+        minBreakCloses:    COINS[coinId].minBreakCloses,
+      } : {};
+      const d = dms(c, a, dc, tf.l, htfCarrier, lower, coinMinRR, coinMinStopPct, coinFeeEst, coinOpts);
+      allResults[tf.l] = d;
+
+      // Log ALL non-NONE signals for diagnostics
+      if(d.type !== 'NONE'){
+        const deduped = isDedupSuppressed(coinId, tf.l, d.type, d.level);
+        // v4.9: Block opposite-direction signals within same scan cycle
+        const conflicted = firedDirection && d.sig !== 'NEUTRAL' && d.sig !== firedDirection;
+        if(conflicted){
+          signalSummary.push(`${tf.l}:${d.sig}(CONFLICT-BLOCKED, already ${firedDirection})`);
+          continue;
+        }
+        signalSummary.push(`${tf.l}:${d.sig}(${d.type}${deduped?' DEDUP':''})`);
+        if(!deduped){
+          // Track which direction we committed to (only for tradeable signals)
+          if(d.sig !== 'NEUTRAL' && d.type === 'BLIND_ENTRY') firedDirection = d.sig;
+          await maybeAlert(d.sig, tf.l, d.type, d.level, d.target, d.rr, d.stopPrice, coinId, price, allLevels);
+          // Auto-trade execution
+          await maybeAutoTrade(coinId, i, d, allResults, c);
+        }
+      }
+    }
+    const sigStr = signalSummary.length > 0 ? signalSummary.join(' | ') : 'no signals';
+    // -- v4.9: MULTI-TF CONFLUENCE DETECTION ----------------------------------
+    // After all TFs processed, check if 2+ TFs broke the same level in the same
+    // direction. This is the highest conviction DMS signal.
+    const breakoutTypes = ['BLIND_ENTRY', 'BREAKOUT', 'FAIL_GAIN', 'FAIL_LOSE'];
+    const confluenceSignals = [];
+    for(const tf of TFS){
+      const r = allResults[tf.l];
+      if(!r || !r.level || r.sig === 'NEUTRAL') continue;
+      if(!breakoutTypes.includes(r.type)) continue;
+      confluenceSignals.push({ tf: tf.l, weight: tf.w, sig: r.sig, level: r.level, target: r.target, rr: r.rr, stopPrice: r.stopPrice, type: r.type });
+    }
+    if(confluenceSignals.length >= 2){
+      for(let i = 0; i < confluenceSignals.length; i++){
+        const matches = [confluenceSignals[i]];
+        for(let j = i+1; j < confluenceSignals.length; j++){
+          if(confluenceSignals[j].sig === confluenceSignals[i].sig && Math.abs(confluenceSignals[j].level - confluenceSignals[i].level) / confluenceSignals[i].level < 0.005){
+            matches.push(confluenceSignals[j]);
+          }
+        }
+        if(matches.length < 2) continue;
+        const sig = matches[0].sig;
+        const level = matches[0].level;
+        const tfList = matches.map(m => m.tf).join('+');
+        const bestRR = matches.map(m => m.rr).filter(Boolean).sort((a,b) => +b - +a)[0] || null;
+        const bestStop = matches.map(m => m.stopPrice).filter(Boolean)[0] || null;
+        const bestTarget = matches.map(m => m.target).filter(Boolean)[0] || null;
+        if(isDedupSuppressed(coinId, 'MULTI', 'BLIND_ENTRY', level)) break;
+        markDedupFired(coinId, 'MULTI', 'BLIND_ENTRY', level);
+        const coinLabel = COINS[coinId].label;
+        const icon = sig === 'LONG' ? '\u{1F7E2}' : '\u{1F534}';
+        const tpLine = bestTarget ? `\nTake Profit: <b>$${fmt(bestTarget)}</b>` : '';
+        const slLine = bestStop ? `\nStop Loss: <b>$${fmt(bestStop)}</b>` : '';
+        const rrLine = bestRR ? `\nR:R <b>${bestRR}</b>` : '';
+        const msg = `${icon} <b>MULTI-TF ${sig}</b> \u{26A1} ${coinLabel} [${tfList}]\n${matches.length} timeframes confirm at $${fmt(level)}\n\nEntry now: <b>$${fmt(price)}</b>\nLevel: <b>$${fmt(level)}</b>${tpLine}${slLine}${rrLine}\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
+        await sendTelegram(msg);
+        console.log(`MULTI-TF ${sig} ${coinLabel} [${tfList}] at $${fmt(level)} -- ${matches.length} TFs confirm`);
+        // Auto-trade with high conviction override (skip if already in position)
+        // v5.0.1 FIX: Apply session filter + ranging detector here too (was bypassing maybeAutoTrade)
+        if(HL.enabled && HL.wallet && bestStop && !HL.activeTrades[coinId]){
+          // v5.4: SP500 session-scaled sizing (replaces outside-US hard block in MULTI-TF path too).
+          // MULTI-TF confluence passes confidence=80 to executeTrade, so STRONG UP tier applies
+          // whenever regime is UP (2+ TFs agreeing already implies high conviction).
+          if (coinId === 'sp500' && sig === 'LONG') {
+            const { cap, tier } = sp500EffectiveCap('LONG', 80, allResults);
+            if (cap <= 0) {
+              console.log(`HL MULTI-TF BLOCKED ${COINS[coinId].label} LONG: ${tier} -- v5.4 session-scaled sizing`);
+              break;
+            }
+            if (!coinState[coinId]) coinState[coinId] = {};
+            coinState[coinId].effectiveMaxNotional = cap;
+            console.log(`HL MULTI-TF: ${COINS[coinId].label} LONG sizing tier '${tier}' -> maxNotional=$${cap} [v5.4]`);
+          }
+          // v5.1: Session filter for GOLD — block longs outside London PM + NY overlap
+          // v5.14: Also block shorts outside 06:00-17:00 UTC
+          if (coinId === 'gold') {
+            const utcHr = new Date().getUTCHours();
+            if (sig === 'LONG' && (utcHr < 13 || utcHr >= 20)) {
+              console.log(`HL MULTI-TF BLOCKED ${COINS[coinId].label} LONG: outside gold LONG session (${utcHr}:00 UTC) -- session filter`);
+              break;
+            }
+            if (sig === 'SHORT' && (utcHr < 6 || utcHr >= 17)) {
+              console.log(`HL MULTI-TF BLOCKED ${COINS[coinId].label} SHORT: outside gold SHORT session (${utcHr}:00 UTC) -- v5.14 session filter`);
+              break;
+            }
+          }
+          // v5.1: Ranging market detector — all coins (was SP500/GOLD only, synced w/ maybeAutoTrade)
+          {
+            const closed = loadClosedTrades();
+            const recentCoinTrades = closed.filter(t => {
+              const cId = { 'xyz:SP500':'sp500', 'xyz:GOLD':'gold', 'xyz:CL':'crude', CRUDE:'crude', CL:'crude', BTC:'bitcoin', HYPE:'hyperliquid' }[t.coin] || t.coin;
+              return cId === coinId;
+            }).slice(0, 3);
+            if (recentCoinTrades.length >= 3) {
+              const dirs = recentCoinTrades.map(t => t.side);
+              const isWhipsaw = (dirs[0] !== dirs[1] && dirs[1] !== dirs[2]);
+              const oldestTs = new Date(recentCoinTrades[2].ts).getTime();
+              if (isWhipsaw && Date.now() - oldestTs < 86400000) {
+                console.log(`HL MULTI-TF BLOCKED ${COINS[coinId].label} ${sig}: ranging market (${dirs.join('->')} in 24h)`);
+                break;
+              }
+            }
+          }
+          const tradeSignal = { sig, level, target: bestTarget, rr: bestRR, stopPrice: bestStop, type: 'BLIND_ENTRY', tf: tfList };
+          await HL.executeTrade(coinId, tradeSignal, 80);
+          await HL.syncPositions();
+        }
+        break; // only fire once per scan
+      }
+    }
+    console.log(`  ${label}: $${fmt(price)} | HTF: ${htfDir} | Session: ${getCurrentSession()} | ${sigStr}`);
   }catch(e){
-    showToast('Trade error: ' + e.message);
-    console.error('Manual trade error:', e);
+    console.error(`[${new Date().toISOString()}] Error scanning ${label}:`, e.message);
   }
-  btn.textContent = 'OPEN TRADE';
-  btn.disabled = false;
 }
 
-// Auto-refresh trades page every 10s when visible
-let tradesRefreshTimer = null;
+// ==============================================================================
+// ##  MAIN LOOP                                                             ##
+// ==============================================================================
 
-window.addEventListener('DOMContentLoaded',()=>{
-  loadSettings();
-  renderLog();
-  document.getElementById('tf-cards').innerHTML=TFS.map(tf=>`<div class="tfc none"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type NONE">···</span><span class="tfc-sig WAIT" style="margin-left:auto">—</span></div><div class="tfc-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div></div>`).join('');
-  // BTC first (active coin, renders UI immediately), then HYPE + SPX + GOLD staggered
-  // Staggering avoids API rate limits from 15+ simultaneous requests
-  runCoin('bitcoin').then(() => {
-    scheduleAll();
-    connectWS('bitcoin');
-  });
-  setTimeout(() => runCoin('hyperliquid').then(() => connectWS('hyperliquid')), 2000);
-  setTimeout(() => runCoin('sp500').then(() => connectWS('sp500')), 4000);
-  setTimeout(() => runCoin('gold').then(() => connectWS('gold')), 6000);
+// -- DAILY SUMMARY ------------------------------------------------------------
+const SUMMARY_HOUR = parseInt(process.env.SUMMARY_HOUR || '6', 10); // UTC hour to send daily summary
+const SUMMARY_FILE = path.join(__dirname, '.last_summary_date');
+let lastSummaryDate = (() => { try { return fs.readFileSync(SUMMARY_FILE, 'utf8').trim(); } catch { return ''; } })();
 
-  // Auto-refresh all coins when page becomes visible (mobile Safari kills WS in background)
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      console.log('Page became visible — refreshing all coins');
-      runCoin('bitcoin').catch(e=>console.warn('vis refresh btc',e));
-      setTimeout(() => runCoin('hyperliquid').catch(e=>console.warn('vis refresh hype',e)), 1000);
-      setTimeout(() => runCoin('sp500').catch(e=>console.warn('vis refresh spx',e)), 2000);
-      setTimeout(() => runCoin('gold').catch(e=>console.warn('vis refresh gold',e)), 3000);
+async function sendDailySummary() {
+  const today = new Date().toISOString().slice(0, 10);
+  // Re-read from disk EVERY time (prevents duplicate across bot restarts or multi-instance)
+  try { lastSummaryDate = fs.readFileSync(SUMMARY_FILE, 'utf8').trim(); } catch {}
+  if (lastSummaryDate === today) return; // already sent today (by this or another instance)
+  // Write FIRST, then send -- so a crash mid-send doesn't cause double send on restart
+  lastSummaryDate = today;
+  try { fs.writeFileSync(SUMMARY_FILE, today); } catch {}
+
+  try {
+    // Refresh equity and backfill any missed closes before building summary
+    if (HL.wallet) await HL.syncEquity();
+    await syncFillHistory();
+
+    // Get open positions
+    const openPositions = Object.entries(HL.activeTrades);
+    let openLines = '';
+    if (openPositions.length > 0) {
+      for (const [coinId, t] of openPositions) {
+        const px = coinState[coinId]?.price || 0;
+        const isLong = t.side === 'LONG';
+        const upnl = px > 0 ? (isLong ? (px - t.entry) * t.size : (t.entry - px) * t.size) : 0;
+        const upnlStr = upnl >= 0 ? `+$${upnl.toFixed(2)}` : `-$${Math.abs(upnl).toFixed(2)}`;
+        const trail = t.trailState !== 'initial' ? ` [${t.trailState}]` : '';
+        openLines += `\n  ${t.side === 'LONG' ? '🟢' : '🔴'} ${t.asset} ${t.side} @ $${fmt(t.entry)} -> ${upnlStr}${trail}`;
+      }
+    } else {
+      openLines = '\n  No open positions';
+    }
+
+    // Get yesterday's closed trades
+    const closed = loadClosedTrades();
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const yesterdayTrades = closed.filter(t => t.ts && t.ts.startsWith(yesterday));
+    let closedLines = '';
+    let dayPnl = 0;
+    let wins = 0, losses = 0;
+    if (yesterdayTrades.length > 0) {
+      for (const t of yesterdayTrades) {
+        const pnlStr = t.pnl >= 0 ? `+$${t.pnl.toFixed(2)}` : `-$${Math.abs(t.pnl).toFixed(2)}`;
+        const emoji = t.reason === 'tp_hit' ? '✅' : t.reason === 'sl_hit' ? '🛑' : '🔄';
+        closedLines += `\n  ${emoji} ${t.coin} ${t.side} -> ${pnlStr}`;
+        dayPnl += t.pnl;
+        if (t.pnl >= 0) wins++; else losses++;
+      }
+    } else {
+      closedLines = '\n  No trades closed yesterday';
+    }
+
+    // Overall stats
+    const allWins = closed.filter(t => t.pnl >= 0).length;
+    const allLosses = closed.filter(t => t.pnl < 0).length;
+    const allTotal = allWins + allLosses;
+    const winRate = allTotal > 0 ? Math.round(allWins / allTotal * 100) : 0;
+    const totalPnl = closed.reduce((s, t) => s + (t.pnl || 0), 0);
+
+    const equity = HL.cachedEquity > 0 ? `$${HL.cachedEquity.toFixed(2)}` : 'N/A';
+    const dayPnlStr = dayPnl >= 0 ? `+$${dayPnl.toFixed(2)}` : `-$${Math.abs(dayPnl).toFixed(2)}`;
+    const totalPnlStr = totalPnl >= 0 ? `+$${totalPnl.toFixed(2)}` : `-$${Math.abs(totalPnl).toFixed(2)}`;
+
+    const msg = `📊 <b>DMS Daily Summary</b> . ${today}\n` +
+      `\n💰 <b>Equity:</b> ${equity}` +
+      `\n\n📈 <b>Open Positions:</b>${openLines}` +
+      `\n\n📋 <b>Yesterday's Trades:</b>${closedLines}` +
+      (yesterdayTrades.length > 0 ? `\n  Day P&L: <b>${dayPnlStr}</b> (${wins}W/${losses}L)` : '') +
+      `\n\n📊 <b>All-Time:</b> ${winRate}% win rate (${allWins}W/${allLosses}L)` +
+      `\nTotal P&L: <b>${totalPnlStr}</b>` +
+      `\n\n<a href="https://tbracko.github.io/dmc-signal">Open DMS</a>`;
+
+    await sendTelegram(msg);
+    console.log(`[${new Date().toISOString()}] Daily summary sent`);
+  } catch (e) {
+    console.warn('Daily summary error:', e.message);
+  }
+}
+
+async function checkDailySummary() {
+  const now = new Date();
+  if (now.getUTCHours() === SUMMARY_HOUR) {
+    await sendDailySummary();
+  }
+}
+
+// v5.22: track last successful scan for health endpoint.
+let lastScanTs = 0;
+let scanCount  = 0;
+const BOT_STARTED_AT = Date.now();
+const BOT_VERSION    = 'v5.25';
+
+async function scanAll(){
+  const coins = Object.keys(COINS);
+  console.log(`[${new Date().toISOString()}] Scanning ${coins.map(c=>COINS[c].label).join(', ')}...`);
+  for(let i=0; i<coins.length; i++){
+    if(i > 0) await new Promise(r=>setTimeout(r, 2000));
+    await scanCoin(coins[i]);
+  }
+  lastScanTs = Date.now();
+  scanCount++;
+  console.log(`[${new Date().toISOString()}] Scan complete. Next in ${INTERVAL_MS/1000}s.`);
+}
+
+// ==============================================================================
+// ##  v5.22: HEALTH SERVER                                                  ##
+// ==============================================================================
+// Tiny HTTP server so Railway exposes a public URL for the health dashboard.
+// Negative-space proof of life: if the URL won't load, the bot process is down.
+//
+// Routes:
+//   GET /                  -> bot-health.html
+//   GET /health            -> bot-health.html (alias)
+//   GET /dashboard         -> dms-v53.html (full dashboard)
+//   GET /api/status        -> { ok, version, uptime, scanCount, lastScanTs, ... }
+//   GET /api/missed?n=50   -> last N entries from .missed_signals.json
+//
+// CORS: allow * for /api/* so you can hit endpoints from anywhere.
+function startHealthServer() {
+  const PORT = parseInt(process.env.PORT || '3000', 10);
+  const STATIC_FILES = {
+    '/'            : { file: 'bot-health.html', type: 'text/html; charset=utf-8' },
+    '/health'      : { file: 'bot-health.html', type: 'text/html; charset=utf-8' },
+    '/dashboard'   : { file: 'dms-v53.html',    type: 'text/html; charset=utf-8' },
+    '/signals.js'  : { file: 'signals.js',      type: 'application/javascript; charset=utf-8' },
+    '/coins-config.js': { file: 'coins-config.js', type: 'application/javascript; charset=utf-8' },
+  };
+
+  const server = http.createServer(async (req, res) => {
+    try {
+      const url = req.url.split('?')[0];
+
+      // ---- Static file routes ----
+      if (STATIC_FILES[url]) {
+        const { file, type } = STATIC_FILES[url];
+        const fp = path.join(__dirname, file);
+        if (!fs.existsSync(fp)) {
+          res.writeHead(404, { 'Content-Type': 'text/plain' });
+          return res.end('Not found: ' + file);
+        }
+        res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' });
+        return fs.createReadStream(fp).pipe(res);
+      }
+
+      // ---- /api/status ----
+      if (url === '/api/status') {
+        const body = {
+          ok: true,
+          version: BOT_VERSION,
+          startedAt: new Date(BOT_STARTED_AT).toISOString(),
+          uptimeSec: Math.floor((Date.now() - BOT_STARTED_AT) / 1000),
+          lastScanTs: lastScanTs ? new Date(lastScanTs).toISOString() : null,
+          lastScanAgeSec: lastScanTs ? Math.floor((Date.now() - lastScanTs) / 1000) : null,
+          scanCount,
+          autoTradeEnabled: !!(HL && HL.enabled),
+          activePositions: HL && HL.activeTrades ? Object.keys(HL.activeTrades).length : 0,
+          cachedEquity: HL ? (HL.cachedEquity || 0) : 0,
+          coins: Object.keys(COINS).map(c => ({
+            id: c, label: COINS[c].label,
+            price: coinState[c]?.price || null,
+            htfDir: coinState[c]?.htfDir || null,
+            storyDir: coinState[c]?.storyDir || null,
+          })),
+        };
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-cache' });
+        return res.end(JSON.stringify(body, null, 2));
+      }
+
+      // ---- /api/missed ----
+      if (url === '/api/missed') {
+        const n = Math.min(parseInt(new URLSearchParams(req.url.split('?')[1] || '').get('n') || '50', 10), 500);
+        let entries = [];
+        try {
+          if (fs.existsSync(MISSED_SIGNALS_FILE)) {
+            entries = JSON.parse(fs.readFileSync(MISSED_SIGNALS_FILE, 'utf8'));
+          }
+        } catch (_) { /* corrupt or empty — return [] */ }
+        const recent = entries.slice(-n).reverse();
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-cache' });
+        return res.end(JSON.stringify({ count: recent.length, entries: recent }));
+      }
+
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not found');
+    } catch (e) {
+      console.warn('health-server error:', e.message);
+      try {
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Server error: ' + e.message);
+      } catch (_) {}
     }
   });
 
-  // Periodic full refresh every 2 minutes (ensures signals stay current even if WS drops)
-  setInterval(() => {
-    console.log('Periodic full refresh');
-    runCoin('bitcoin').catch(e=>console.warn('periodic btc',e));
-    setTimeout(() => runCoin('hyperliquid').catch(e=>console.warn('periodic hype',e)), 1000);
-    setTimeout(() => runCoin('sp500').catch(e=>console.warn('periodic spx',e)), 2000);
-    setTimeout(() => runCoin('gold').catch(e=>console.warn('periodic gold',e)), 3000);
-  }, 2 * 60 * 1000);
+  server.listen(PORT, () => {
+    console.log(`[${new Date().toISOString()}] Health server listening on :${PORT} — / /health /dashboard /api/status /api/missed`);
+  });
+  server.on('error', (e) => console.warn('health-server listen error:', e.message));
+  return server;
+}
 
-  // Initialize Hyperliquid auto-trading (non-blocking)
-  if(localStorage.getItem('hl_wallet_key')){
-    HL.init().then(ok => {
-      if(ok){
-        const st = document.getElementById('hl-status');
-        const dispAddr = HL.masterAddress || HL.address;
-        HL.getBalance().then(b => {
-          st.textContent = 'Connected: ' + dispAddr.slice(0,6) + '...' + dispAddr.slice(-4) + ' | $' + b.toFixed(2);
-          st.style.color = '#00e676';
-        }).catch(() => { st.textContent = 'Connected (balance fetch failed)'; st.style.color = '#ffc107'; });
-      }
-    }).catch(e => console.warn('HL auto-init failed:', e));
+async function main(){
+  console.log(`DMS Signal Bot ${BOT_VERSION} started. Interval: ${INTERVAL_MS/1000}s`);
+  console.log(`Coins: BTC, HYPE, SPX, GOLD  |  Token: ...${TG_TOKEN.slice(-6)}  |  Chat: ${TG_CHATID}`);
+
+  // v5.22: start health-page HTTP server BEFORE trading init so Railway sees
+  // a listening port immediately (avoids deploy timeout / "no http response").
+  startHealthServer();
+
+  // Initialize Hyperliquid trading module
+  if (HL_PRIVATE_KEY && AUTO_TRADE) {
+    const hlOk = await HL.init();
+    if (hlOk) {
+      // v5.25: Log equity-proportional caps at startup
+      const _eq = HL.cachedEquity > 0 ? HL.cachedEquity : 100;
+      const _caps = Object.values(COINS).map(c => `${c.label}:$${getMaxNotional(c, _eq).toFixed(0)}`).join(' ');
+      console.log(`Auto-trading ENABLED | Risk: ${RISK_PCT}% | Min conf: ${MIN_CONFIDENCE}% | Max trades/day: ${MAX_TRADES_DAY}`);
+      console.log(`Equity: $${_eq.toFixed(2)} | Caps: ${_caps} | Daily loss limit: $${HL.DAILY_LOSS_LIMIT?.toFixed(2) || 'N/A'}`);
+      // Backfill any closed trades missed during downtime
+      await syncFillHistory();
+      await sendTelegram(`🤖 <b>DMS Signal Bot v5.25 started (equity-proportional sizing)</b>\n✅ Auto-trading ENABLED\nEquity: $${_eq.toFixed(2)}\nCaps: ${_caps}\nDaily loss limit: $${HL.DAILY_LOSS_LIMIT?.toFixed(2) || 'N/A'}\nRisk: ${RISK_PCT}% | Min conf: ${MIN_CONFIDENCE}%`);
+    } else {
+      console.warn('Auto-trading init FAILED -- running in alert-only mode');
+      await sendTelegram('🤖 <b>DMS Signal Bot v5.17 started (inherit-protect KILL SWITCH)</b>\n⚠️ Auto-trading FAILED to init\nRunning in alert-only mode');
+    }
+  } else {
+    console.log('Auto-trading DISABLED (set AUTO_TRADE=true and HL_PRIVATE_KEY to enable)');
+    await sendTelegram('🤖 <b>DMS Signal Bot v5.17 started (inherit-protect KILL SWITCH)</b>\nScanning BTC . HYPE . SPX . GOLD every 2 minutes.\n🔔 Alert-only mode');
   }
-});
-</script>
-</body>
-</html>
+
+  await scanAll();
+  setInterval(scanAll, INTERVAL_MS);
+
+  // Trailing stop check loop (every 30s)
+  if (HL.enabled) {
+    setInterval(async () => {
+      try {
+        // Refresh prices for trailing stop checks
+        for (const coinId of Object.keys(HL.activeTrades)) {
+          try {
+            const { price } = await getPrice(coinId);
+            if (!coinState[coinId]) coinState[coinId] = {};
+            coinState[coinId].price = price;
+          } catch (e) { /* price fetch failed, skip */ }
+        }
+        await HL.trailStops();
+      } catch (e) { console.warn('Trail check error:', e.message); }
+    }, TRAIL_INTERVAL);
+
+    // Sync positions, equity & fill history every 5 min
+    setInterval(async () => {
+      try {
+        await HL.syncPositions();
+        await HL.processPendingTrims();   // v5.5: execute any queued manual-position trims
+        await HL.syncEquity();
+        await syncFillHistory();
+      } catch (e) { console.warn('Periodic sync error:', e.message); }
+    }, 300000);
+  }
+
+  // Daily summary check every 5 min (sends once per day at SUMMARY_HOUR UTC)
+  setInterval(checkDailySummary, 300000);
+}
+
+main().catch(e=>{ console.error('Fatal:', e); process.exit(1); });
