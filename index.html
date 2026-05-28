@@ -609,7 +609,7 @@ const COINS = {
   bitcoin:     { id:'bitcoin',     label:'BTC/USD',  sym:'BINANCE:BTCUSDT', shortLabel:'BTC',  apiSym:'BTCUSDT',  exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.007, equityPct: 0.50, maxNotional: 200, isHIP3: false },  // v5.3: re-enabled with $200 cap; v5.26: equityPct 0.50
   hyperliquid: { id:'hyperliquid', label:'HYPE/USD', sym:'BYBIT:HYPEUSDT',  shortLabel:'HYPE', apiSym:'HYPEUSDT', exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, equityPct: 0.25, maxNotional: 100, isHIP3: false },  // v5.5: halved $200→$100 after 3 consecutive SL hits (synced w/ bot.js); v5.26: equityPct 0.25
   sp500:       { id:'sp500',       label:'S&P500',   sym:'OANDA:SPX500USD', shortLabel:'SPX',  apiSym:'xyz:SP500', exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, equityPct: 1.00, maxNotional: 500, isHIP3: true },  // v5.5: minRR 1.5→1.2 (synced w/ bot.js); v5.26: equityPct 1.00
-  gold:        { id:'gold',        label:'GOLD/USD', sym:'OANDA:XAUUSD',    shortLabel:'GOLD', apiSym:'xyz:GOLD', exchange:'hyperliquid', minRR: 1.5, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.40, maxNotional: 300, isHIP3: true },  // v5.17: maxNotional $500→$300 (synced w/ bot.js — single GOLD SL wiped 3 HYPE wins); v5.26: equityPct 0.40
+  gold:        { id:'gold',        label:'GOLD/USD', sym:'OANDA:XAUUSD',    shortLabel:'GOLD', apiSym:'xyz:GOLD', exchange:'hyperliquid', minRR: 1.5, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.00, maxNotional: 300, isHIP3: true },  // v5.31: DISABLED (equityPct 0 = no auto-trade) — lost in every window; crude took commodity slot. Still scanned/displayed. Restore 0.40 to re-enable.
   crude:       { id:'crude',       label:'CRUDE/USD',sym:'OANDA:WTICOUSD',  shortLabel:'CRUDE',apiSym:'xyz:CL',   exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.20, maxNotional: 200, isHIP3: true },  // v5.30: WTI crude (xyz:CL) — new asset, conservative equityPct 0.20 (synced w/ coins-config.js)
 };
 
@@ -3776,6 +3776,9 @@ const HL = {
     const SYM = { bitcoin: 'BTC', hyperliquid: 'HYPE', sp500: 'S&P500', gold: 'GOLD', crude: 'CRUDE' };
     const asset = SYM[coinId];
     if (!asset || !this.enabled || !this.wallet) return null;
+    // v5.31: equityPct 0 = asset disabled (no auto-trade). GOLD off as of v5.31.
+    const _coin = COINS[coinId];
+    if (_coin && !(_coin.equityPct > 0)) { console.log('HL: '+coinId+' auto-trade disabled (equityPct 0) — skipping'); return null; }
 
     // v5.4: Pick up session-scaled cap set by the caller (SP500 long tiering). Falls back to
     // the static COINS[coinId].maxNotional. One-shot: cleared after read so it can't leak.
