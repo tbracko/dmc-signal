@@ -140,9 +140,10 @@ const COIN_CAPS = {
   'HYPE':      { label:'HYPE',   cap:100, isHIP3:false },
   'xyz:SP500': { label:'S&P500', cap:500, isHIP3:true  },
   'xyz:GOLD':  { label:'GOLD',   cap:200, isHIP3:true  },
+  'xyz:CL':    { label:'CRUDE',  cap:200, isHIP3:true  },
 };
 const MANUAL_MULT = 1.05;
-const COIN_ORDER = ['BTC','HYPE','xyz:SP500','xyz:GOLD'];
+const COIN_ORDER = ['BTC','HYPE','xyz:SP500','xyz:GOLD','xyz:CL'];
 
 async function postInfo(body) {
   const r = await fetch(HL_API, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
