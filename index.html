@@ -468,7 +468,6 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
     <button class="tf-btn active" data-iv="240">4H</button>
     <button class="tf-btn" data-iv="60">1H</button>
     <button class="tf-btn" data-iv="15">15m</button>
-    <button class="tf-btn" id="chart-src-btn" style="margin-left:auto" title="Toggle chart source (HL native vs TradingView)">HL</button>
   </div>
   <div class="chart-wrap" id="tv-wrap"></div>
 </div>
@@ -907,32 +906,21 @@ function nav(id, btn){
   if(id==='trades') renderTrades();
 }
 
-// ── CHART (HL-native via lightweight-charts, with TV fallback) ────────────
-// Chart source preference — persisted across reloads. Default: HL (matches what bot trades).
-let chartSource = localStorage.getItem('dms_chart_src') || 'HL';
+// ── CHART (HL-native via lightweight-charts) ───────────────────────────────
 let currentTvIv = '240';
 let hlChart = null, hlSeries = null, hlRefreshTimer = null;
-
-function setChartSrcBtn(){
-  const btn=document.getElementById('chart-src-btn');
-  if(!btn) return;
-  btn.textContent=chartSource;
-  btn.classList.toggle('active', chartSource==='HL');
-  btn.title=chartSource==='HL'
-    ? 'Source: Hyperliquid (matches bot). Tap to switch to TradingView.'
-    : 'Source: TradingView (may differ from bot price). Tap to switch to HL.';
-}
+// Default visible bars per TF — keeps recent action (and SL/TP) framed nicely on load
+const VISIBLE_BARS = { 'W':30, 'D':40, '240':30, '60':40, '15':50 };
 
 function loadChart(iv){
   if(iv) currentTvIv=iv;
-  // Tear down any prior HL chart + timer
+  // Tear down any prior chart + timer
   if(hlRefreshTimer){clearInterval(hlRefreshTimer); hlRefreshTimer=null;}
   if(hlChart){try{hlChart.remove();}catch(_){} hlChart=null; hlSeries=null;}
-  if(chartSource==='HL') loadHL(currentTvIv);
-  else loadTV(currentTvIv);
+  loadHL(currentTvIv);
 }
 
-// TradingView fallback (unchanged behavior, kept for non-HL sources)
+// TradingView loader kept as dead code in case we ever want to flip back. Currently unused.
 function loadTV(iv){
   const w=document.getElementById('tv-wrap');
   w.innerHTML='<div style="width:100%;height:100%"></div>';
@@ -949,8 +937,8 @@ async function loadHL(tvIv){
   const w=document.getElementById('tv-wrap');
   w.innerHTML='<div id="hl-chart-host" style="width:100%;height:100%;position:relative"><div id="hl-chart-msg" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#5d7a99;font-family:IBM Plex Mono,monospace;font-size:11px">Loading '+COINS[activeCoin].shortLabel+'…</div></div>';
   if(typeof LightweightCharts==='undefined'){
-    document.getElementById('hl-chart-msg').textContent='Chart library failed to load — falling back to TradingView.';
-    chartSource='TV'; setChartSrcBtn(); loadTV(tvIv); return;
+    document.getElementById('hl-chart-msg').textContent='Chart library failed to load.';
+    return;
   }
   const coin=COINS[activeCoin];
   const canon=TV_TO_CANON[tvIv]||'4H';
@@ -986,7 +974,11 @@ async function loadHL(tvIv){
                     // de-dupe identical timestamps (lightweight-charts rejects them)
                     .filter((d,i,a)=>i===0||d.time!==a[i-1].time);
   hlSeries.setData(data);
-  hlChart.timeScale().fitContent();
+  // Zoom to the last N bars (closer, like a normal trading view) instead of fitting all 200
+  const want = VISIBLE_BARS[tvIv] || 40;
+  const from = Math.max(0, data.length - want);
+  const to   = data.length + 4; // small right margin for SL/TP labels
+  hlChart.timeScale().setVisibleLogicalRange({ from, to });
   // Overlay open position SL/TP/entry if any (async — fetches fresh from HL)
   drawPositionLines().catch(e=>console.warn('drawPositionLines:',e));
   // Resize on window changes
@@ -1080,21 +1072,11 @@ async function drawPositionLines(){
 
 document.getElementById('tf-bar').addEventListener('click',e=>{
   const b=e.target.closest('.tf-btn');if(!b)return;
-  // Chart-source toggle button
-  if(b.id==='chart-src-btn'){
-    chartSource = (chartSource==='HL') ? 'TV' : 'HL';
-    localStorage.setItem('dms_chart_src', chartSource);
-    setChartSrcBtn();
-    loadChart(currentTvIv);
-    return;
-  }
   if(!b.dataset.iv) return;
-  document.querySelectorAll('.tf-btn').forEach(x=>{ if(x.id!=='chart-src-btn') x.classList.toggle('active',x===b); });
+  document.querySelectorAll('.tf-btn').forEach(x=>x.classList.toggle('active',x===b));
   loadChart(b.dataset.iv);
   tvLoaded=true;
 });
-// Initialize the toggle button label on first paint
-setChartSrcBtn();
 
 // ── API ───────────────────────────────────────────────────
 async function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
