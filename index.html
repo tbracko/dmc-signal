@@ -987,13 +987,17 @@ async function loadHL(tvIv){
                     .filter((d,i,a)=>i===0||d.time!==a[i-1].time);
   hlSeries.setData(data);
   hlChart.timeScale().fitContent();
-  // Overlay open position SL/TP/entry if any
-  try{ drawPositionLines(); }catch(_){}
+  // Overlay open position SL/TP/entry if any (async — fetches fresh from HL)
+  drawPositionLines().catch(e=>console.warn('drawPositionLines:',e));
   // Resize on window changes
   const ro=new ResizeObserver(()=>{ if(hlChart&&host.isConnected) hlChart.applyOptions({width:host.clientWidth,height:host.clientHeight}); });
   ro.observe(host);
-  // Refresh last candle every 30s
-  hlRefreshTimer=setInterval(()=>refreshHLLastCandle().catch(()=>{}), 30000);
+  // Refresh last candle every 30s, and re-fetch SL/TP every 60s (in case bot trims/trails)
+  let _tick=0;
+  hlRefreshTimer=setInterval(()=>{
+    refreshHLLastCandle().catch(()=>{});
+    if((++_tick % 2)===0) drawPositionLines().catch(()=>{});
+  }, 30000);
 }
 
 async function refreshHLLastCandle(){
@@ -1010,23 +1014,68 @@ async function refreshHLLastCandle(){
   hlSeries.update({time:Math.floor(last.t/1000),open:last.o,high:last.h,low:last.l,close:last.c});
 }
 
-// Draw entry/SL/TP horizontal lines from the active position (if open)
-function drawPositionLines(){
+// Draw entry/SL/TP horizontal lines on the chart for the currently active coin's open position.
+// Pulls positions + live trigger orders directly from HL (same sources renderTrades uses),
+// so SL/TP show up even when set manually and not tracked in HL.activeTrades.
+let _drawnPriceLines = [];
+async function drawPositionLines(){
   if(!hlSeries) return;
+  // Clear any prior lines (e.g. on coin/TF change)
+  for(const ln of _drawnPriceLines){ try{ hlSeries.removePriceLine(ln); }catch(_){} }
+  _drawnPriceLines = [];
   const coin=COINS[activeCoin];
-  const symMap={ bitcoin:'BTC', hyperliquid:'HYPE', sp500:'S&P500', gold:'GOLD', crude:'CRUDE' };
-  const sym=symMap[activeCoin];
-  const pos=(window.hlPositions||[]).find(p=>{
-    const ps=(p.coin||p.sym||'').toUpperCase();
-    return ps===sym || ps===coin.apiSym.toUpperCase() || ps===(coin.apiSym.split(':').pop()||'').toUpperCase();
+  if(!coin || !coin.apiSym) return;
+  // Match on the raw HL asset name (e.g. "xyz:CL", "BTC", "HYPE")
+  const wantedCoins = new Set([
+    coin.apiSym,
+    coin.apiSym.toUpperCase(),
+    coin.shortLabel,
+    (coin.apiSym.split(':').pop()||'').toUpperCase()
+  ]);
+  let positions=[], trigOrders=[];
+  try{
+    [positions, trigOrders] = await Promise.all([
+      typeof hlFetchPositions==='function' ? hlFetchPositions() : [],
+      (typeof HL!=='undefined' && HL.fetchTriggerOrders) ? HL.fetchTriggerOrders() : []
+    ]);
+  }catch(e){ console.warn('drawPositionLines fetch failed:', e); return; }
+  // Find the open position for this coin
+  const posEntry = positions.find(p=>{
+    const c = p?.position?.coin;
+    return c && (wantedCoins.has(c) || wantedCoins.has(c.toUpperCase()));
   });
-  if(!pos) return;
-  const entry=+pos.entryPx||+pos.entry||0;
-  const sl=+pos.sl||+pos.stopLoss||0;
-  const tp=+pos.tp||+pos.takeProfit||0;
-  if(entry) hlSeries.createPriceLine({price:entry,color:'#5d7a99',lineWidth:1,lineStyle:LightweightCharts.LineStyle.Dashed,axisLabelVisible:true,title:'ENTRY'});
-  if(sl)    hlSeries.createPriceLine({price:sl,   color:'#ff3d5a',lineWidth:1,lineStyle:LightweightCharts.LineStyle.Dashed,axisLabelVisible:true,title:'SL'});
-  if(tp)    hlSeries.createPriceLine({price:tp,   color:'#00e676',lineWidth:1,lineStyle:LightweightCharts.LineStyle.Dashed,axisLabelVisible:true,title:'TP'});
+  if(!posEntry) return;
+  const pos = posEntry.position;
+  const szi = parseFloat(pos.szi || '0');
+  if(!szi) return;
+  const entry = parseFloat(pos.entryPx || '0');
+  // Build SL/TP from trigger orders (mirror of HL.syncPositions logic)
+  let sl=0, tp=0;
+  for(const o of trigOrders){
+    if(!o.coin || !(wantedCoins.has(o.coin) || wantedCoins.has(o.coin.toUpperCase()))) continue;
+    const trigPx = parseFloat(o.triggerPx || '0');
+    if(trigPx<=0) continue;
+    const ot = (o.orderType||'').toLowerCase();
+    if(ot.includes('stop') || o.tpsl==='sl') sl = trigPx;
+    else if(ot.includes('take profit') || o.tpsl==='tp') tp = trigPx;
+  }
+  // Fallback to bot's internal activeTrades if trigger fetch missed them
+  if((!sl||!tp) && typeof HL!=='undefined' && HL.activeTrades){
+    const at = HL.activeTrades[activeCoin];
+    if(at){ if(!sl) sl = +at.sl||0; if(!tp) tp = +at.tp||0; }
+  }
+  const mkLine=(price,color,title)=>{
+    if(!price) return;
+    const ln = hlSeries.createPriceLine({
+      price, color, lineWidth:1, lineStyle:LightweightCharts.LineStyle.Dashed,
+      axisLabelVisible:true, title
+    });
+    _drawnPriceLines.push(ln);
+  };
+  mkLine(entry, '#5d7a99', 'ENTRY');
+  mkLine(sl,    '#ff3d5a', 'SL');
+  mkLine(tp,    '#00e676', 'TP');
+  console.log(`Chart overlay: ${coin.apiSym} entry=${entry} sl=${sl} tp=${tp}`);
 }
 
 document.getElementById('tf-bar').addEventListener('click',e=>{
