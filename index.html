@@ -8,6 +8,7 @@
 <title>DMS Signal · BTC</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;600&family=Sora:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js" defer></script>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{background:#07090d;color:#dce8f5;font-family:'Sora',system-ui,sans-serif;min-height:100%;-webkit-text-size-adjust:100%}
@@ -467,6 +468,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
     <button class="tf-btn active" data-iv="240">4H</button>
     <button class="tf-btn" data-iv="60">1H</button>
     <button class="tf-btn" data-iv="15">15m</button>
+    <button class="tf-btn" id="chart-src-btn" style="margin-left:auto" title="Toggle chart source (HL native vs TradingView)">HL</button>
   </div>
   <div class="chart-wrap" id="tv-wrap"></div>
 </div>
@@ -725,10 +727,10 @@ function switchCoin(coinId){
   else document.getElementById('session-banner').style.display='none';
   if(s.lastStory) renderNM(s.lastStory);
   else renderNM({dir:'UNCLEAR', reason:'Loading...', story:null});
-  // Reload TradingView chart with new symbol
+  // Reload chart with new symbol (HL-native or TV depending on toggle)
   tvLoaded = false;
   if(document.getElementById('page-chart').style.display!=='none'){
-    loadTV();
+    loadChart(currentTvIv);
   }
 }
 
@@ -900,12 +902,37 @@ function nav(id, btn){
   document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
   document.getElementById('page-'+id).classList.add('active');
   btn.classList.add('active');
-  if(id==='chart'&&!tvLoaded){loadTV('240');tvLoaded=true;}
+  if(id==='chart'&&!tvLoaded){loadChart('240');tvLoaded=true;}
   if(id==='stats') setTimeout(renderStats, 50);
   if(id==='trades') renderTrades();
 }
 
-// ── TRADINGVIEW ────────────────────────────────────────────
+// ── CHART (HL-native via lightweight-charts, with TV fallback) ────────────
+// Chart source preference — persisted across reloads. Default: HL (matches what bot trades).
+let chartSource = localStorage.getItem('dms_chart_src') || 'HL';
+let currentTvIv = '240';
+let hlChart = null, hlSeries = null, hlRefreshTimer = null;
+
+function setChartSrcBtn(){
+  const btn=document.getElementById('chart-src-btn');
+  if(!btn) return;
+  btn.textContent=chartSource;
+  btn.classList.toggle('active', chartSource==='HL');
+  btn.title=chartSource==='HL'
+    ? 'Source: Hyperliquid (matches bot). Tap to switch to TradingView.'
+    : 'Source: TradingView (may differ from bot price). Tap to switch to HL.';
+}
+
+function loadChart(iv){
+  if(iv) currentTvIv=iv;
+  // Tear down any prior HL chart + timer
+  if(hlRefreshTimer){clearInterval(hlRefreshTimer); hlRefreshTimer=null;}
+  if(hlChart){try{hlChart.remove();}catch(_){} hlChart=null; hlSeries=null;}
+  if(chartSource==='HL') loadHL(currentTvIv);
+  else loadTV(currentTvIv);
+}
+
+// TradingView fallback (unchanged behavior, kept for non-HL sources)
 function loadTV(iv){
   const w=document.getElementById('tv-wrap');
   w.innerHTML='<div style="width:100%;height:100%"></div>';
@@ -915,11 +942,110 @@ function loadTV(iv){
   s.textContent=JSON.stringify({autosize:true,symbol:COINS[activeCoin].sym,interval:iv,timezone:'Etc/UTC',theme:'dark',style:'1',locale:'en',backgroundColor:'#07090d',hide_top_toolbar:false,allow_symbol_change:false,save_image:false,hide_side_toolbar:true});
   w.firstChild.appendChild(s);
 }
+
+// HL-native chart: pulls candles from whichever exchange the asset actually trades on
+// (HL for HIP-3, Binance for BTC, Bybit for HYPE). Same data the bot uses for signals.
+async function loadHL(tvIv){
+  const w=document.getElementById('tv-wrap');
+  w.innerHTML='<div id="hl-chart-host" style="width:100%;height:100%;position:relative"><div id="hl-chart-msg" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#5d7a99;font-family:IBM Plex Mono,monospace;font-size:11px">Loading '+COINS[activeCoin].shortLabel+'…</div></div>';
+  if(typeof LightweightCharts==='undefined'){
+    document.getElementById('hl-chart-msg').textContent='Chart library failed to load — falling back to TradingView.';
+    chartSource='TV'; setChartSrcBtn(); loadTV(tvIv); return;
+  }
+  const coin=COINS[activeCoin];
+  const canon=TV_TO_CANON[tvIv]||'4H';
+  let candles;
+  try{
+    const ex=coin.exchange;
+    const iv=INTERVAL_MAP[ex][canon];
+    if(ex==='hyperliquid')      candles=await hlKlines(coin.apiSym, iv, 200);
+    else if(ex==='binance')     candles=await bnKlines(coin.apiSym, iv, 200);
+    else if(ex==='bybit')       candles=await bybitKlines(coin.apiSym, iv, 200);
+    else throw new Error('unknown exchange '+ex);
+  }catch(err){
+    document.getElementById('hl-chart-msg').textContent='Candle fetch failed: '+err.message;
+    return;
+  }
+  const host=document.getElementById('hl-chart-host');
+  host.innerHTML='';
+  hlChart=LightweightCharts.createChart(host,{
+    layout:{background:{type:'solid',color:'#07090d'},textColor:'#5d7a99',fontFamily:'IBM Plex Mono,monospace'},
+    grid:{vertLines:{color:'#10151c'},horzLines:{color:'#10151c'}},
+    timeScale:{borderColor:'#1a2230',timeVisible:true,secondsVisible:false},
+    rightPriceScale:{borderColor:'#1a2230'},
+    crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
+    width:host.clientWidth, height:host.clientHeight
+  });
+  hlSeries=hlChart.addCandlestickSeries({
+    upColor:'#00e676',downColor:'#ff3d5a',
+    borderUpColor:'#00e676',borderDownColor:'#ff3d5a',
+    wickUpColor:'#00e676',wickDownColor:'#ff3d5a'
+  });
+  const data=candles.map(k=>({time:Math.floor(k.t/1000),open:k.o,high:k.h,low:k.l,close:k.c}))
+                    .sort((a,b)=>a.time-b.time)
+                    // de-dupe identical timestamps (lightweight-charts rejects them)
+                    .filter((d,i,a)=>i===0||d.time!==a[i-1].time);
+  hlSeries.setData(data);
+  hlChart.timeScale().fitContent();
+  // Overlay open position SL/TP/entry if any
+  try{ drawPositionLines(); }catch(_){}
+  // Resize on window changes
+  const ro=new ResizeObserver(()=>{ if(hlChart&&host.isConnected) hlChart.applyOptions({width:host.clientWidth,height:host.clientHeight}); });
+  ro.observe(host);
+  // Refresh last candle every 30s
+  hlRefreshTimer=setInterval(()=>refreshHLLastCandle().catch(()=>{}), 30000);
+}
+
+async function refreshHLLastCandle(){
+  if(!hlSeries) return;
+  const coin=COINS[activeCoin];
+  const canon=TV_TO_CANON[currentTvIv]||'4H';
+  const ex=coin.exchange, iv=INTERVAL_MAP[ex][canon];
+  let c;
+  if(ex==='hyperliquid')   c=await hlKlines(coin.apiSym, iv, 3);
+  else if(ex==='binance')  c=await bnKlines(coin.apiSym, iv, 3);
+  else if(ex==='bybit')    c=await bybitKlines(coin.apiSym, iv, 3);
+  if(!c||!c.length) return;
+  const last=c[c.length-1];
+  hlSeries.update({time:Math.floor(last.t/1000),open:last.o,high:last.h,low:last.l,close:last.c});
+}
+
+// Draw entry/SL/TP horizontal lines from the active position (if open)
+function drawPositionLines(){
+  if(!hlSeries) return;
+  const coin=COINS[activeCoin];
+  const symMap={ bitcoin:'BTC', hyperliquid:'HYPE', sp500:'S&P500', gold:'GOLD', crude:'CRUDE' };
+  const sym=symMap[activeCoin];
+  const pos=(window.hlPositions||[]).find(p=>{
+    const ps=(p.coin||p.sym||'').toUpperCase();
+    return ps===sym || ps===coin.apiSym.toUpperCase() || ps===(coin.apiSym.split(':').pop()||'').toUpperCase();
+  });
+  if(!pos) return;
+  const entry=+pos.entryPx||+pos.entry||0;
+  const sl=+pos.sl||+pos.stopLoss||0;
+  const tp=+pos.tp||+pos.takeProfit||0;
+  if(entry) hlSeries.createPriceLine({price:entry,color:'#5d7a99',lineWidth:1,lineStyle:LightweightCharts.LineStyle.Dashed,axisLabelVisible:true,title:'ENTRY'});
+  if(sl)    hlSeries.createPriceLine({price:sl,   color:'#ff3d5a',lineWidth:1,lineStyle:LightweightCharts.LineStyle.Dashed,axisLabelVisible:true,title:'SL'});
+  if(tp)    hlSeries.createPriceLine({price:tp,   color:'#00e676',lineWidth:1,lineStyle:LightweightCharts.LineStyle.Dashed,axisLabelVisible:true,title:'TP'});
+}
+
 document.getElementById('tf-bar').addEventListener('click',e=>{
   const b=e.target.closest('.tf-btn');if(!b)return;
-  document.querySelectorAll('.tf-btn').forEach(x=>x.classList.toggle('active',x===b));
-  loadTV(b.dataset.iv);tvLoaded=true;
+  // Chart-source toggle button
+  if(b.id==='chart-src-btn'){
+    chartSource = (chartSource==='HL') ? 'TV' : 'HL';
+    localStorage.setItem('dms_chart_src', chartSource);
+    setChartSrcBtn();
+    loadChart(currentTvIv);
+    return;
+  }
+  if(!b.dataset.iv) return;
+  document.querySelectorAll('.tf-btn').forEach(x=>{ if(x.id!=='chart-src-btn') x.classList.toggle('active',x===b); });
+  loadChart(b.dataset.iv);
+  tvLoaded=true;
 });
+// Initialize the toggle button label on first paint
+setChartSrcBtn();
 
 // ── API ───────────────────────────────────────────────────
 async function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
@@ -974,8 +1100,11 @@ async function hlKlines(coin, interval, limit){
 // Interval mapping per exchange
 const INTERVAL_MAP = {
   binance: { '1W':'1w', '1D':'1d', '4H':'4h', '1H':'1h', '15m':'15m' },
-  bybit:   { '1W':'W',  '1D':'D',  '4H':'240', '1H':'60', '15m':'15' }
+  bybit:   { '1W':'W',  '1D':'D',  '4H':'240', '1H':'60', '15m':'15' },
+  hyperliquid: { '1W':'1w', '1D':'1d', '4H':'4h', '1H':'1h', '15m':'15m' }
 };
+// TradingView TF code → canonical (used by chart-source toggle to look up exchange interval)
+const TV_TO_CANON = { 'W':'1W', 'D':'1D', '240':'4H', '60':'1H', '15':'15m' };
 
 async function getPrice(coinId){
   coinId=coinId||activeCoin;
