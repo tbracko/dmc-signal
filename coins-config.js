@@ -9,15 +9,15 @@
 //   No floors, no ceilings — scales automatically as the account grows.
 //   Daily loss limit also scales: 3% of equity (was flat -$10).
 //
-//   equityPct ratios:
-//     BTC   0.50  (50% of equity)  — moderate vol, flagship asset
+//   equityPct ratios (v5.32):
+//     BTC   1.00  (100% of equity) — flagship asset; raised from 0.50 to hit 1% risk intent
 //     HYPE  0.25  (25%)            — highest vol alt, smallest allocation
-//     SP500 1.00  (100%)           — low vol TradFi index, largest allocation
+//     SP500 2.00  (200%)           — low vol TradFi index; raised from 1.00, cap now > equity
 //     GOLD  0.00  (DISABLED v5.31) — lost in every window; crude replaces the commodity slot
 //     CRUDE 0.20  (20%)            — high-vol energy commodity, conservative start
 //
-//   At $1K equity:  BTC $500, HYPE $250, SP500 $1,000, GOLD $400
-//   At $5K equity:  BTC $2,500, HYPE $1,250, SP500 $5,000, GOLD $2,000
+//   At $1K equity:  BTC $1,000, HYPE $250, SP500 $2,000, CRUDE $200
+//   At $5K equity:  BTC $5,000, HYPE $1,250, SP500 $10,000, CRUDE $1,000
 //
 // Edit only this file when adjusting:
 //   - equityPct per-coin allocation
@@ -26,6 +26,16 @@
 //   - isHIP3 flag
 //
 // Prior version notes:
+//   v5.32 (2026-05-31): RAISE CAPS — SP500 equityPct 1.00 → 2.00, BTC 0.50 → 1.00.
+//     Rationale (risk_caps_snapshot_2026-05-31.md): at current ~$1,016 equity every
+//     active cap clamps per-trade risk below the 1% RISK_PCT design intent ($10.16).
+//     SP500 and BTC were both at 50% of intent ($5.08/trade). These changes bring
+//     both to exactly 1% design risk per trade. SP500's cap now exceeds equity, so
+//     at minStop 0.5% risk is governed purely by RISK_PCT, not the notional cap.
+//     SP500 is the only asset with meaningful bot fills (30d: 17 rt / 70.6% wr /
+//     +$7.34). BTC has zero bot fills in 30d (all BTC activity is manual), so the
+//     BTC change is theoretical until BTC bot signals fire. Daily-loss limit left
+//     at 3% — not changed in this pass. HYPE/CRUDE caps unchanged.
 //   v5.31 (2026-05-22): GOLD DISABLED. Set gold equityPct 0.40 → 0. Rationale:
 //     live bot P&L showed gold losing in every window (30d −$23.61 / 14% win,
 //     60d −$22.54 / 25%, 90d −$38.95 / 27%) despite five prior tuning passes
@@ -115,9 +125,9 @@
 //                        candle bodies mean this filter blocks too many winners.
 
 const COINS = {
-  bitcoin:     { id:'bitcoin',     label:'BTC',    apiSym:'BTCUSDT',    asset:'BTC',        exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.010, equityPct: 0.50, isHIP3: false, minBreakBodyPct: 0.008 },
+  bitcoin:     { id:'bitcoin',     label:'BTC',    apiSym:'BTCUSDT',    asset:'BTC',        exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.010, equityPct: 1.00, isHIP3: false, minBreakBodyPct: 0.008 },
   hyperliquid: { id:'hyperliquid', label:'HYPE',   apiSym:'HYPEUSDT',   asset:'HYPE',       exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, equityPct: 0.25, isHIP3: false },
-  sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',  asset:'xyz:SP500',  exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, equityPct: 1.00, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 },
+  sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',  asset:'xyz:SP500',  exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, equityPct: 2.00, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 },
   gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',   asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.00, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 }, // v5.31: DISABLED (equityPct 0 = no auto-trade). Lost in every window; crude took the commodity slot. Still scanned/displayed (watch mode). Set equityPct back to 0.40 to re-enable.
   crude:       { id:'crude',       label:'CRUDE',  apiSym:'xyz:CL',     asset:'xyz:CL',     exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.20, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 },
 };
