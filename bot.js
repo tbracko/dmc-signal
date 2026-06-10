@@ -20,6 +20,19 @@
 //   - HIP-3 TP orders use limit trigger (isMarket:false) to avoid taker fees (~8 bps saved on GOLD)
 //   - SL remains market trigger (isMarket:true) for guaranteed fills
 //
+// v5.34 changelog (2026-06-10):
+//   - TP3 TRAIL TIGHTENED: post-TP2 trail no longer widens to baseMult+1.0 (3.5R HIP-3 /
+//     3.0R standard) — final tranche now trails at TRAIL_TP3_MULT (default 2.0R, env-tunable).
+//     Counterfactual (counterfactual-trail.js, 11 TP3 tranches): 2.0R beat actual +$6.79,
+//     1.0% fixed +$10.11; MFE capture was 58%, target ≥70%. Re-validate after ~15 tranches.
+//   - 7-DAY DRAWDOWN GOVERNOR: syncDrawdownGovernor() computes rolling 7d realized bot net
+//     (closedPnl − fees, manual fills excluded via the >1.05× notional heuristic) every
+//     30 min. If net <= −3% of equity (DD_GOVERNOR_PCT), riskPct AND maxNotional are
+//     halved (DD_GOVERNOR_REDUCE) until 7d net >= 0. Catches slow multi-day bleeds the
+//     midnight-reset daily gate never sees (Jun 1–9: −2.3% with no single bad day).
+//     Telegram alert on state change. Env: DD_GOVERNOR_PCT / DD_GOVERNOR_REDUCE /
+//     DD_GOVERNOR_DISABLE=true.
+//
 // v5.29 changelog (2026-05-18):
 //   - BREAKOUT QUALITY EXEMPTION FOR VALIDATED RETESTS: The v5.16 breakout quality
 //     penalty (-15% conf) now skips when detectRetest has confirmed the pattern with
@@ -243,6 +256,20 @@ const TRAIL_INTERVAL  = parseInt(process.env.TRAIL_INTERVAL || '30000'); // chec
 // the May 3 HYPE pattern where SL was 4.7% from entry — reward asymmetry too poor
 // after fees. Tunable per-deploy via env var.
 const MAX_LOSS_PCT    = parseFloat(process.env.MAX_LOSS_PCT || '0.03'); // 3% of notional
+// v5.34 (2026-06-10): Post-TP2 trail multiplier for the final (TP3) tranche.
+// Counterfactual (counterfactual-trail.js, 11 TP3 tranches, SP500+CL, 2026-06-02):
+// the old "widen after TP2" trail (baseMult+1.0 → 3.5R HIP-3 / 3.0R standard) rode
+// winners back down — a 2.0R trail beat actual exits by +$6.79 total, a 1.0% fixed
+// trail by +$10.11. We use 2.0R (R-based stays proportional to setup risk).
+// MFE capture was 58%; target ≥70%. Re-validate after ~15 TP3 tranches.
+const TRAIL_TP3_MULT  = parseFloat(process.env.TRAIL_TP3_MULT || '2.0');
+// v5.34 (2026-06-10): 7-day drawdown governor. The daily loss gate resets at midnight,
+// so a slow multi-day bleed (Jun 1–9: −2.3% with no single bad day) never trips anything.
+// If rolling 7d realized bot net P&L <= −(DD_GOVERNOR_PCT × equity), halve riskPct AND
+// maxNotional until the rolling 7d net recovers to >= 0. Disable: DD_GOVERNOR_DISABLE=true.
+const DD_GOVERNOR_PCT     = parseFloat(process.env.DD_GOVERNOR_PCT || '0.03');  // 3% of equity over 7d
+const DD_GOVERNOR_REDUCE  = parseFloat(process.env.DD_GOVERNOR_REDUCE || '0.5'); // halve sizing
+const DD_GOVERNOR_DISABLE = process.env.DD_GOVERNOR_DISABLE === 'true';
 
 // v5.5: Inherited-manual-position policy — 'ignore' (default) / 'trim' / 'manage'
 const INHERIT_MANUAL_POSITIONS = (process.env.INHERIT_MANUAL_POSITIONS || 'ignore').toLowerCase();
@@ -549,6 +576,12 @@ const HL = {
   DAILY_LOSS_LIMIT: null,  // set dynamically in syncEquity(); null = not yet computed
   DAILY_LOSS_REDUCE: 0.5, // reduce size to 50% after hitting limit
 
+  // v5.34: 7-day drawdown governor state (see syncDrawdownGovernor)
+  ddGovernorActive: false,   // when true, riskPct and maxNotional are multiplied by DD_GOVERNOR_REDUCE
+  ddGovernor7dNet: null,     // last computed rolling 7d realized bot net (closedPnl − fees)
+  _lastDdSync: 0,            // throttle: refresh at most every 30 min
+  DD_SYNC_INTERVAL_MS: 1800000,
+
   // v5.1: Counter-trend blocking -- remembers last profitable trade direction per coin
   lastWinDir: {},    // coinId -> 'LONG' or 'SHORT'
   lastWinTime: {},   // coinId -> ms timestamp of the profitable close
@@ -769,8 +802,69 @@ const HL = {
           this.DAILY_LOSS_LIMIT = -(bal * DAILY_LOSS_PCT);
         }
         console.log('HL equity synced: $' + bal.toFixed(2) + ' | daily loss limit: $' + this.DAILY_LOSS_LIMIT.toFixed(2));
+        // v5.34: refresh the 7-day drawdown governor (throttled internally to 30 min)
+        this.syncDrawdownGovernor().catch(e => console.warn('HL ddGovernor failed:', e.message));
       }
     } catch (e) { console.warn('HL syncEquity failed:', e.message); }
+  },
+
+  // -- v5.34: 7-day drawdown governor ------------------------------------------
+  // Computes rolling 7d realized net P&L (closedPnl − fees) from HL fills, bot-only:
+  // fills whose notional exceeds maxNotional × MANUAL_NOTIONAL_MULT are excluded as
+  // manual (same heuristic as daily-report.js; bot hard-blocks at 1.10× so >1.05×
+  // cannot be bot-generated). Activates when 7d net <= −(DD_GOVERNOR_PCT × equity);
+  // deactivates when 7d net >= 0 (hysteresis so it doesn't flap around the threshold).
+  // While active, executeTrade halves riskPct AND maxNotional (DD_GOVERNOR_REDUCE).
+  // Rationale: the daily loss gate resets at midnight — a slow multi-day bleed like
+  // Jun 1–9 2026 (−2.3% equity, no single day near the 3% gate) never trips it.
+  async syncDrawdownGovernor() {
+    if (DD_GOVERNOR_DISABLE || !this.wallet) return;
+    const now = Date.now();
+    if (now - this._lastDdSync < this.DD_SYNC_INTERVAL_MS) return;
+    this._lastDdSync = now;
+
+    const queryAddr = (this.masterAddress || this.address).toLowerCase();
+    const startMs = now - 7 * 24 * 60 * 60 * 1000;
+    const requests = [
+      fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'userFillsByTime', user: queryAddr, startTime: startMs }) }),
+      ...this.HIP3_DEXES.map(dex =>
+        fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'userFillsByTime', user: queryAddr, startTime: startMs, dex }) }))
+    ];
+    const responses = await Promise.all(requests);
+    const fills = [];
+    for (const r of responses) {
+      if (!r.ok) throw new Error(`userFillsByTime HTTP ${r.status}`);
+      const data = await r.json();
+      if (Array.isArray(data)) fills.push(...data);
+    }
+
+    const equity = this.cachedEquity > 0 ? this.cachedEquity : 0;
+    let net = 0;
+    for (const f of fills) {
+      const notional = parseFloat(f.px || '0') * parseFloat(f.sz || '0');
+      const cap = getMaxNotional(f.coin, equity);
+      // Exclude manual fills (oversize) and assets the bot doesn't trade (cap 0, e.g. GOLD)
+      if (cap <= 0) continue;
+      if (notional > cap * 1.05) continue;
+      net += parseFloat(f.closedPnl || '0') - parseFloat(f.fee || '0');
+    }
+    this.ddGovernor7dNet = net;
+
+    const threshold = -(equity * DD_GOVERNOR_PCT);
+    const wasActive = this.ddGovernorActive;
+    if (!wasActive && net <= threshold) {
+      this.ddGovernorActive = true;
+      console.warn(`HL DD-GOVERNOR ON: 7d net $${net.toFixed(2)} <= $${threshold.toFixed(2)} — sizing ×${DD_GOVERNOR_REDUCE} (v5.34)`);
+      await sendTelegram(`🛑 <b>Drawdown governor ON</b>\n7-day bot net: $${net.toFixed(2)} (limit $${threshold.toFixed(2)})\nRisk & notional caps reduced to ${DD_GOVERNOR_REDUCE * 100}% until 7d net ≥ $0.`);
+    } else if (wasActive && net >= 0) {
+      this.ddGovernorActive = false;
+      console.log(`HL DD-GOVERNOR OFF: 7d net $${net.toFixed(2)} recovered — full sizing restored (v5.34)`);
+      await sendTelegram(`✅ <b>Drawdown governor OFF</b>\n7-day bot net recovered to $${net.toFixed(2)}. Full sizing restored.`);
+    } else {
+      console.log(`HL ddGovernor: 7d net $${net.toFixed(2)} | threshold $${threshold.toFixed(2)} | active: ${this.ddGovernorActive}`);
+    }
   },
 
   // -- Persist active trades to file (replaces localStorage) --
@@ -1448,6 +1542,12 @@ const HL = {
       console.warn(`HL: daily P&L $${this.dailyPnl.toFixed(2)} <= limit $${this.DAILY_LOSS_LIMIT} -- reducing risk to ${riskPct}%`);
     }
 
+    // v5.34: 7-day drawdown governor — multiplies on top of any daily-loss reduction
+    if (this.ddGovernorActive) {
+      riskPct *= DD_GOVERNOR_REDUCE;
+      console.warn(`HL DD-GOVERNOR: 7d net $${(this.ddGovernor7dNet ?? 0).toFixed(2)} — risk reduced to ${riskPct}% (v5.34)`);
+    }
+
     const riskAmount = accountSize * riskPct / 100;
     let effectiveStopPrice = stopPrice;
 
@@ -1496,7 +1596,9 @@ const HL = {
     // v5.0: Cap max notional for HIP-3 assets (#4)
     // v5.0.1: Added verbose logging + hard enforcement to catch bypass bugs
     // v5.4: maxNotional = session-scaled effectiveMaxNotional (set above) to support SP500 long tiers.
-    const maxNotional = effectiveMaxNotional;
+    // v5.34: drawdown governor also halves the notional cap (riskPct alone doesn't bind when
+    // the cap is the active constraint, e.g. SP500 at equityPct 2.00).
+    const maxNotional = this.ddGovernorActive ? effectiveMaxNotional * DD_GOVERNOR_REDUCE : effectiveMaxNotional;
     console.log(`HL: ${asset} sizing: raw size=${size.toFixed(szDec)} notional=$${(size*currentPrice).toFixed(0)} maxNotional=${maxNotional} coinId=${coinId}`);
     if (maxNotional > 0) {
       const notional = size * currentPrice;
@@ -1809,13 +1911,15 @@ const HL = {
         trade.trailState = 'trailing';
         // v5.3: Dynamic trail multiplier — widens after TP2 to let runners ride on strong trend days
         // Base: HIP-3 2.5×, standard 2.0×. After TP2: HIP-3 3.5×, standard 3.0×
+        // v5.34: post-TP2 the final tranche trails at TRAIL_TP3_MULT (2.0R) instead of
+        // widening to baseMult+1.0 (3.5R HIP-3). Counterfactual: wide trail gave back winners.
         const baseMult = COINS[coinId]?.isHIP3 ? 2.5 : 2.0;
-        const trailMult = trade.tp2Hit ? baseMult + 1.0 : baseMult;
+        const trailMult = trade.tp2Hit ? TRAIL_TP3_MULT : baseMult;
         newSl = isLong ? trade.bestPrice - risk * trailMult : trade.bestPrice + risk * trailMult;
-        console.log(`HL TRAIL ${trade.asset}: trailing SL to $${fmt(newSl)} (${trailMult}R trail started${trade.tp2Hit ? ', widened post-TP2' : ''}) (v5.3)`);
+        console.log(`HL TRAIL ${trade.asset}: trailing SL to $${fmt(newSl)} (${trailMult}R trail started${trade.tp2Hit ? ', tightened post-TP2 (v5.34)' : ''})`);
       } else if (trade.trailState === 'trailing') {
         const baseMult = COINS[coinId]?.isHIP3 ? 2.5 : 2.0;
-        const trailMult = trade.tp2Hit ? baseMult + 1.0 : baseMult;
+        const trailMult = trade.tp2Hit ? TRAIL_TP3_MULT : baseMult; // v5.34: 2.0R post-TP2 (was baseMult+1.0)
         const trailSl = isLong ? trade.bestPrice - risk * trailMult : trade.bestPrice + risk * trailMult;
         if ((isLong && trailSl > trade.sl) || (!isLong && trailSl < trade.sl)) {
           newSl = trailSl;
