@@ -2212,7 +2212,10 @@ async function fetchEdgeFills(days){
 }
 
 // Build round-trips per coin. Handles partial closes and position flips ('Short > Long').
-// isBot = max position notional never exceeded equity×equityPct×1.05 (manual heuristic).
+// isBot: exact via cloid when entry fills are tagged (bot orders carry a 'DMS\0'-prefixed
+// cloid since bot v5.36); falls back to the notional×1.05 heuristic for older fills.
+const DMS_CLOID_PREFIX = '0x444d5300';
+const isBotCloid = c => typeof c === 'string' && c.toLowerCase().startsWith(DMS_CLOID_PREFIX);
 function buildEdgeRTs(fills, equity){
   const byCoin = {};
   for (const f of fills) (byCoin[f.coin] = byCoin[f.coin] || []).push(f);
@@ -2223,7 +2226,12 @@ function buildEdgeRTs(fills, equity){
     const cap = (cfg && cfg.equityPct > 0) ? equity * cfg.equityPct * 1.05 : 0;
     let pos = 0, rt = null;
     const newRT = (f, side) => ({ coin, coinId, side, start: f.time, pnl: 0, fees: 0,
-                                  maxNotional: 0, entryNotional: 0, entrySize: 0 });
+                                  maxNotional: 0, entryNotional: 0, entrySize: 0, cloids: [] });
+    const classify = r => {
+      const tagged = r.cloids.filter(c => c != null);
+      if (tagged.length) return tagged.some(isBotCloid);       // exact (v5.36+ fills)
+      return cap > 0 && r.maxNotional <= cap;                  // heuristic (older fills)
+    };
     for (const f of list){
       const sz = +f.sz, px = +f.px, pnl = +(f.closedPnl || 0), fee = +(f.fee || 0), dir = f.dir || '';
       if (dir.startsWith('Open')){
@@ -2231,19 +2239,20 @@ function buildEdgeRTs(fills, equity){
         pos += sz; rt.fees += fee;
         rt.entryNotional += sz * px; rt.entrySize += sz;
         rt.maxNotional = Math.max(rt.maxNotional, pos * px);
+        rt.cloids.push(f.cloid ?? null);
       } else if (dir.includes('>')){
         // flip fill closes the old position and opens the opposite side in one fill
-        if (rt){ rt.pnl += pnl; rt.fees += fee; rt.end = f.time; out.push({ ...rt, isBot: cap > 0 && rt.maxNotional <= cap }); }
+        if (rt){ rt.pnl += pnl; rt.fees += fee; rt.end = f.time; out.push({ ...rt, isBot: classify(rt) }); }
         const side = dir.trim().endsWith('Long') ? 'LONG' : 'SHORT';
         pos = Math.max(0, sz - pos);
         rt = pos > 0 ? newRT(f, side) : null;
-        if (rt){ rt.entrySize = pos; rt.entryNotional = pos * px; rt.maxNotional = pos * px; }
+        if (rt){ rt.entrySize = pos; rt.entryNotional = pos * px; rt.maxNotional = pos * px; rt.cloids.push(f.cloid ?? null); }
       } else if (dir.startsWith('Close')){
         if (!rt){ pos = sz; rt = newRT(f, dir.includes('Long') ? 'LONG' : 'SHORT');
                   rt.entrySize = sz; rt.entryNotional = sz * px; rt.maxNotional = sz * px; }
         rt.pnl += pnl; rt.fees += fee; pos -= sz;
         if (pos <= Math.max(0.0011, rt.entrySize * 0.02)){
-          rt.end = f.time; out.push({ ...rt, isBot: cap > 0 && rt.maxNotional <= cap }); rt = null; pos = 0;
+          rt.end = f.time; out.push({ ...rt, isBot: classify(rt) }); rt = null; pos = 0;
         }
       }
     }
