@@ -263,6 +263,15 @@ const MAX_LOSS_PCT    = parseFloat(process.env.MAX_LOSS_PCT || '0.03'); // 3% of
 // trail by +$10.11. We use 2.0R (R-based stays proportional to setup risk).
 // MFE capture was 58%; target ≥70%. Re-validate after ~15 TP3 tranches.
 const TRAIL_TP3_MULT  = parseFloat(process.env.TRAIL_TP3_MULT || '2.0');
+// v5.36 (2026-06-10): Breakeven trigger moved off the TP1 level. Old behavior set SL to
+// entry at 1.0R — the same level TP1 fills at — so the position-wide BE stop sat inside
+// the normal post-TP1 retrace zone and tagged runners out before they ran. Exit-structure
+// counterfactual on 68 real bot RTs (90d, 15m/1h candle paths, conservative SL-first):
+//   BE@1.0R: ALL +$0.74 | BE@1.25R: ALL +$41.21 | BE@1.5R: ALL +$14.22
+//   BE@1.25 beat BE@1.0 in BOTH halves of the window and per-asset (SP500 +$24, BTC +$19).
+// Between 1.0R and 1.25R the remaining tranche keeps the ORIGINAL SL; worst case after
+// TP1 is −0.32R net (0.34R banked − 0.66×1R) — the sample shows runners pay for it.
+const BE_TRIGGER_R    = parseFloat(process.env.BE_TRIGGER_R || '1.25');
 // v5.34 (2026-06-10): 7-day drawdown governor. The daily loss gate resets at midnight,
 // so a slow multi-day bleed (Jun 1–9: −2.3% with no single bad day) never trips anything.
 // If rolling 7d realized bot net P&L <= −(DD_GOVERNOR_PCT × equity), halve riskPct AND
@@ -855,10 +864,19 @@ const HL = {
       const data = await r.json();
       if (Array.isArray(data)) fills.push(...data);
     }
+    // v5.35: DEDUP by tid — HL's userFillsByTime now returns HIP-3 fills in the
+    // main (no-dex) response too, so main+xyz requests overlap. Without dedup the
+    // 7d net doubles and the governor trips at −1.5% instead of −3%.
+    const seenTids = new Set();
+    const uniqFills = fills.filter(f => {
+      const k = f.tid ?? `${f.hash}_${f.time}_${f.sz}`;
+      if (seenTids.has(k)) return false;
+      seenTids.add(k); return true;
+    });
 
     const equity = this.cachedEquity > 0 ? this.cachedEquity : 0;
     let net = 0;
-    for (const f of fills) {
+    for (const f of uniqFills) {
       const notional = parseFloat(f.px || '0') * parseFloat(f.sz || '0');
       const cap = getMaxNotional(f.coin, equity);
       // Exclude manual fills (oversize) and assets the bot doesn't trade (cap 0, e.g. GOLD)
@@ -1915,9 +1933,18 @@ const HL = {
         const slShouldBeAtLeastBreakeven = isLong
           ? (!trade.sl || trade.sl < trade.entry)
           : (!trade.sl || trade.sl > trade.entry);
-        if (slShouldBeAtLeastBreakeven && trade.trailState === 'initial') {
+        // v5.36: TP1 fill (1.0R) no longer forces immediate breakeven — BE now waits for
+        // BE_TRIGGER_R (1.25R). Exit counterfactual on 68 RTs: BE at exactly 1.0R sits in
+        // the normal retrace zone of the TP1 level and stops out runners — BE@1.25R beat
+        // BE@1.0R in every slice (ALL +$40, SP500 +$24, BTC +$19, both halves positive).
+        // The remaining tranche keeps the original SL between 1.0R and 1.25R; worst case
+        // post-TP1 full-SL = −0.32R net (0.34R banked − 0.66R), which the sample pays for.
+        const beReached = isLong
+          ? trade.bestPrice >= trade.entry + risk * BE_TRIGGER_R
+          : trade.bestPrice <= trade.entry - risk * BE_TRIGGER_R;
+        if (slShouldBeAtLeastBreakeven && trade.trailState === 'initial' && beReached) {
           trade.trailState = 'breakeven';
-          console.log(`HL TRAIL ${trade.asset}: TP1 detected — forcing SL to breakeven $${fmt(trade.entry)} (v5.3 safeguard)`);
+          console.log(`HL TRAIL ${trade.asset}: TP1 detected + ${BE_TRIGGER_R}R reached — forcing SL to breakeven $${fmt(trade.entry)} (v5.36)`);
           // The newSl will be set below in the breakeven/trailing logic
         }
       }
@@ -1948,11 +1975,11 @@ const HL = {
 
       let newSl = null;
 
-      if (trade.trailState === 'initial' && rMultiple >= 1.0) {
+      if (trade.trailState === 'initial' && rMultiple >= BE_TRIGGER_R) {
         newSl = trade.entry;
         trade.trailState = 'breakeven';
-        console.log(`HL TRAIL ${trade.asset}: SL -> BREAKEVEN $${fmt(newSl)} (1:1 R hit)`);
-        await sendTelegram(`🔄 <b>SL -> BREAKEVEN: ${trade.asset}</b>\nEntry: $${fmt(trade.entry)}\n1:1 R reached`);
+        console.log(`HL TRAIL ${trade.asset}: SL -> BREAKEVEN $${fmt(newSl)} (${BE_TRIGGER_R}R hit, v5.36)`);
+        await sendTelegram(`🔄 <b>SL -> BREAKEVEN: ${trade.asset}</b>\nEntry: $${fmt(trade.entry)}\n${BE_TRIGGER_R}R reached`);
       } else if (trade.trailState === 'breakeven' && rMultiple >= 1.5) {
         trade.trailState = 'trailing';
         // v5.3: Dynamic trail multiplier — widens after TP2 to let runners ride on strong trend days
