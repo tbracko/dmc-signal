@@ -2201,8 +2201,11 @@ async function fetchEdgeFills(days){
       body: JSON.stringify(dex ? { type:'userFillsByTime', user:queryAddr, startTime:startMs, dex }
                                : { type:'userFillsByTime', user:queryAddr, startTime:startMs }) }));
   const responses = await Promise.all(reqs);
-  const fills = [];
-  for (const r of responses) { const d = await r.json(); if (Array.isArray(d)) fills.push(...d); }
+  const raw = [];
+  for (const r of responses) { const d = await r.json(); if (Array.isArray(d)) raw.push(...d); }
+  // dedup by tid — HL returns HIP-3 fills in the main (no-dex) response too, so main+xyz overlap
+  const seen = new Set();
+  const fills = raw.filter(f => { const k = f.tid ?? `${f.hash}_${f.time}_${f.sz}`; if (seen.has(k)) return false; seen.add(k); return true; });
   fills.sort((a,b) => a.time - b.time);
   _edgeCache = { ts: Date.now(), fills };
   return fills;
