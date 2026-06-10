@@ -317,6 +317,22 @@ const ACTIVE_TRADES_FILE = path.join(__dirname, '.active_trades.json');
 const CLOSED_TRADES_FILE = path.join(__dirname, '.closed_trades.json');
 const MANUAL_SEEN_FILE   = path.join(__dirname, '.manual_seen.json');  // v5.7: persist manual-position detection across restarts
 const MISSED_SIGNALS_FILE = path.join(__dirname, '.missed_signals.json');  // v5.10: diagnostic log of filtered signals
+const ENTRY_SIGNALS_FILE = path.join(__dirname, '.entry_signals.jsonl');   // v5.34: per-executed-signal metadata (JSONL, append-only)
+
+// -- ENTRY SIGNAL LOG (v5.34) ---------------------------------------------------
+// Appends one JSONL line per EXECUTED entry with the full signal metadata
+// (confidence, R:R, level score/strength, retest fields, sizing context).
+// Purpose: entry-quality counterfactuals. The 2026-06-03 P&L-lever analysis could
+// not bucket expectancy by conviction-ATR / level type / R:R-at-entry because this
+// data only existed in transient console logs. Append-only and tiny (~1 line per
+// trade, a few per day) — no pruning needed. Joinable to fills by ts + asset + side.
+function logEntrySignal(rec) {
+  try {
+    fs.appendFileSync(ENTRY_SIGNALS_FILE, JSON.stringify(rec) + '\n');
+  } catch (e) {
+    console.error('logEntrySignal FAILED:', e.message); // never block a trade on logging
+  }
+}
 
 // -- MISSED SIGNALS LOG (v5.10) -----------------------------------------------
 // Records every signal that was evaluated but filtered, with the reason.
@@ -1743,6 +1759,36 @@ const HL = {
         entryTs: Date.now() // v5.16: entry timestamp for time-based exit
       };
       this.saveActiveTrades();
+
+      // v5.34: persist full entry metadata for entry-quality counterfactuals
+      logEntrySignal({
+        ts: Date.now(),
+        time: new Date().toISOString(),
+        coinId, asset, side: sig,
+        confidence,
+        entry: actualEntry,
+        sl: effectiveStopPrice,
+        slDistPct: +slDistPct.toFixed(4),
+        tp1: tp1Price ?? null,
+        tp2: tp2Price ?? null,
+        target,
+        rr: signal.rr ?? null,
+        level: signal.level ?? null,
+        levelStrength: signal.strength ?? null,
+        levelScore: signal.score ?? null,
+        convictionBodyATR: signal.convictionBodyATR ?? null,
+        breakCloseCount: signal.breakCloseCount ?? null,
+        breakBarsAgo: signal.breakBarsAgo ?? null,
+        retestBarsAgo: signal.retestBarsAgo ?? null,
+        maxBreakBodyPct: signal.maxBreakBodyPct ?? null,
+        withTrend: typeof withTrend === 'boolean' ? withTrend : null,
+        size, notional: +(size * actualEntry).toFixed(2),
+        equity: +equity.toFixed(2),
+        riskPct,
+        maxNotional: +maxNotional.toFixed(2),
+        ddGovernorActive: this.ddGovernorActive,
+        reason: signal.reason ?? null,
+      });
       this.tradesToday++;
 
       const exhaustionNote = (effectiveStopPrice !== stopPrice) ? `\n⚡ Exhaustion filter: SL tightened from $${fmt(stopPrice)} to $${fmt(effectiveStopPrice)}` : '';
