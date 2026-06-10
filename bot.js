@@ -20,6 +20,21 @@
 //   - HIP-3 TP orders use limit trigger (isMarket:false) to avoid taker fees (~8 bps saved on GOLD)
 //   - SL remains market trigger (isMarket:true) for guaranteed fills
 //
+// v5.36 changelog (2026-06-10):
+//   - BREAKEVEN TRIGGER 1.0R → 1.25R (BE_TRIGGER_R env): BE at exactly the TP1 level sat in
+//     the normal retrace zone and stopped runners. Counterfactual on 68 real RTs: BE@1.25
+//     beat BE@1.0 in every slice (ALL +$40, SP500 +$24, BTC +$19, both window halves).
+//     The v5.3 TP1-fill safeguard now also waits for 1.25R before forcing breakeven.
+//   - CLOID TAGGING: every bot order carries a 'DMS\0'-prefixed client order ID (wire field
+//     'c'); fills inherit it → exact bot/manual classification. Governor + short watch use
+//     cloid when present, notional heuristic for pre-v5.36 fills.
+//   - SP500 SHORT WATCH: syncShortWatch() (6h cadence) builds 90d SP500 bot round-trips;
+//     at n>=15 shorts with PF<0.7, short sizing ×0.5 (riskPct + cap). Restores at PF>=1.0.
+//     Basis: 90d shorts 2W/4L −$24.50 vs longs +$27.58 (strategy-review-2026-06-10.md).
+//   - /api/entry-signals endpoint serves .entry_signals.jsonl for entry-quality-study.js.
+//   - userFillsByTime DEDUP by tid (v5.35 fix carried into all consumers): the main (no-dex)
+//     response now includes HIP-3 fills, so main+xyz overlap 100%.
+//
 // v5.34 changelog (2026-06-10):
 //   - TP3 TRAIL TIGHTENED: post-TP2 trail no longer widens to baseMult+1.0 (3.5R HIP-3 /
 //     3.0R standard) — final tranche now trails at TRAIL_TP3_MULT (default 2.0R, env-tunable).
@@ -272,6 +287,32 @@ const TRAIL_TP3_MULT  = parseFloat(process.env.TRAIL_TP3_MULT || '2.0');
 // Between 1.0R and 1.25R the remaining tranche keeps the ORIGINAL SL; worst case after
 // TP1 is −0.32R net (0.34R banked − 0.66×1R) — the sample shows runners pay for it.
 const BE_TRIGGER_R    = parseFloat(process.env.BE_TRIGGER_R || '1.25');
+// v5.36 (2026-06-10): CLOID TAGGING — every bot order carries a client order ID with a
+// "DMS\0" prefix (0x444d5300 + 6-byte timestamp + 6-byte random = 16 bytes). Fills inherit
+// the cloid, so bot-vs-manual classification becomes EXACT instead of the notional×1.05
+// heuristic (which is fragile at equityPct 2.00 where bot entries sit at the cap boundary,
+// and which mis-tags small manual BTC trades as bot). Old fills (pre-v5.36) have no cloid —
+// consumers fall back to the heuristic for those.
+const DMS_CLOID_PREFIX = '0x444d5300';
+function makeCloid() {
+  const ts = Date.now().toString(16).padStart(12, '0').slice(-12);   // 6 bytes
+  let rnd = '';
+  for (let i = 0; i < 12; i++) rnd += Math.floor(Math.random() * 16).toString(16); // 6 bytes
+  return DMS_CLOID_PREFIX + ts + rnd;  // '0x' + 32 hex chars = 16 bytes
+}
+function isBotCloid(c) {
+  return typeof c === 'string' && c.toLowerCase().startsWith(DMS_CLOID_PREFIX);
+}
+// v5.36: SP500 SHORT WATCH — 90d bot-only SP500 shorts were 2W/4L (−$24.50) vs longs
+// +$27.58; index drift + weekend gaps run over counter-rally shorts. n is too small to
+// block the side, so this is a coded decision rule, not a gate: once there are
+// >= SHORT_WATCH_MIN_RTS SP500 short round-trips (90d window) and their PF is below
+// SHORT_WATCH_PF, short sizing is multiplied by SHORT_WATCH_MULT. Restores automatically
+// when PF >= 1.0 (hysteresis). Longs untouched. Data keeps flowing at half size.
+const SHORT_WATCH_DISABLE = process.env.SHORT_WATCH_DISABLE === 'true';
+const SHORT_WATCH_MIN_RTS = parseInt(process.env.SHORT_WATCH_MIN_RTS || '15');
+const SHORT_WATCH_PF      = parseFloat(process.env.SHORT_WATCH_PF || '0.7');
+const SHORT_WATCH_MULT    = parseFloat(process.env.SHORT_WATCH_MULT || '0.5');
 // v5.34 (2026-06-10): 7-day drawdown governor. The daily loss gate resets at midnight,
 // so a slow multi-day bleed (Jun 1–9: −2.3% with no single bad day) never trips anything.
 // If rolling 7d realized bot net P&L <= −(DD_GOVERNOR_PCT × equity), halve riskPct AND
@@ -607,6 +648,12 @@ const HL = {
   _lastDdSync: 0,            // throttle: refresh at most every 30 min
   DD_SYNC_INTERVAL_MS: 1800000,
 
+  // v5.36: SP500 short watch state (see syncShortWatch)
+  sp500ShortMult: 1.0,       // applied to riskPct AND maxNotional on SP500 SHORT entries only
+  sp500ShortStats: null,     // { n, pf, net } from last evaluation — surfaced in /api/status
+  _lastShortWatchSync: 0,    // throttle: refresh every 6h
+  SHORT_WATCH_INTERVAL_MS: 21600000,
+
   // v5.1: Counter-trend blocking -- remembers last profitable trade direction per coin
   lastWinDir: {},    // coinId -> 'LONG' or 'SHORT'
   lastWinTime: {},   // coinId -> ms timestamp of the profitable close
@@ -829,6 +876,8 @@ const HL = {
         console.log('HL equity synced: $' + bal.toFixed(2) + ' | daily loss limit: $' + this.DAILY_LOSS_LIMIT.toFixed(2));
         // v5.34: refresh the 7-day drawdown governor (throttled internally to 30 min)
         this.syncDrawdownGovernor().catch(e => console.warn('HL ddGovernor failed:', e.message));
+        // v5.36: refresh the SP500 short watch (throttled internally to 6h)
+        this.syncShortWatch().catch(e => console.warn('HL shortWatch failed:', e.message));
       }
     } catch (e) { console.warn('HL syncEquity failed:', e.message); }
   },
@@ -877,11 +926,16 @@ const HL = {
     const equity = this.cachedEquity > 0 ? this.cachedEquity : 0;
     let net = 0;
     for (const f of uniqFills) {
-      const notional = parseFloat(f.px || '0') * parseFloat(f.sz || '0');
-      const cap = getMaxNotional(f.coin, equity);
-      // Exclude manual fills (oversize) and assets the bot doesn't trade (cap 0, e.g. GOLD)
-      if (cap <= 0) continue;
-      if (notional > cap * 1.05) continue;
+      // v5.36: exact classification via cloid when present; heuristic fallback for old fills
+      if (f.cloid != null) {
+        if (!isBotCloid(f.cloid)) continue;  // tagged, but not ours → manual/other
+      } else {
+        const notional = parseFloat(f.px || '0') * parseFloat(f.sz || '0');
+        const cap = getMaxNotional(f.coin, equity);
+        // Exclude manual fills (oversize) and assets the bot doesn't trade (cap 0, e.g. GOLD)
+        if (cap <= 0) continue;
+        if (notional > cap * 1.05) continue;
+      }
       net += parseFloat(f.closedPnl || '0') - parseFloat(f.fee || '0');
     }
     this.ddGovernor7dNet = net;
@@ -898,6 +952,98 @@ const HL = {
       await sendTelegram(`✅ <b>Drawdown governor OFF</b>\n7-day bot net recovered to $${net.toFixed(2)}. Full sizing restored.`);
     } else {
       console.log(`HL ddGovernor: 7d net $${net.toFixed(2)} | threshold $${threshold.toFixed(2)} | active: ${this.ddGovernorActive}`);
+    }
+  },
+
+  // -- v5.36: SP500 short watch -------------------------------------------------
+  // Builds SP500 bot-only round-trips from 90d of fills (cloid-exact where available,
+  // notional heuristic for older fills) and evaluates the short side. Decision rule from
+  // strategy-review-2026-06-10.md: at n >= 15 short RTs with PF < 0.7, halve short sizing
+  // (riskPct AND maxNotional via sp500ShortMult). Auto-restores when PF >= 1.0. Longs
+  // untouched; shorts keep trading at reduced size so the sample keeps growing.
+  async syncShortWatch() {
+    if (SHORT_WATCH_DISABLE || !this.wallet) return;
+    const now = Date.now();
+    if (now - this._lastShortWatchSync < this.SHORT_WATCH_INTERVAL_MS) return;
+    this._lastShortWatchSync = now;
+
+    const queryAddr = (this.masterAddress || this.address).toLowerCase();
+    const startMs = now - 90 * 24 * 60 * 60 * 1000;
+    const requests = [
+      fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'userFillsByTime', user: queryAddr, startTime: startMs }) }),
+      ...this.HIP3_DEXES.map(dex =>
+        fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'userFillsByTime', user: queryAddr, startTime: startMs, dex }) }))
+    ];
+    const responses = await Promise.all(requests);
+    const raw = [];
+    for (const r of responses) {
+      if (!r.ok) throw new Error(`userFillsByTime HTTP ${r.status}`);
+      const data = await r.json();
+      if (Array.isArray(data)) raw.push(...data);
+    }
+    // dedup by tid (main + xyz responses overlap — see v5.35 note in syncDrawdownGovernor)
+    const seen = new Set();
+    const fills = raw.filter(f => {
+      if (f.coin !== 'xyz:SP500') return false;
+      const k = f.tid ?? `${f.hash}_${f.time}_${f.sz}`;
+      if (seen.has(k)) return false;
+      seen.add(k); return true;
+    }).sort((a, b) => a.time - b.time);
+
+    // build round-trips (handles partial closes + position flips)
+    const equity = this.cachedEquity > 0 ? this.cachedEquity : 0;
+    const cap = getMaxNotional('xyz:SP500', equity) * 1.05;
+    const rts = [];
+    let pos = 0, rt = null;
+    const newRT = (f, side) => ({ side, pnl: 0, fees: 0, maxNotional: 0, entrySize: 0, cloids: [], end: 0 });
+    for (const f of fills) {
+      const sz = +f.sz, px = +f.px, pnl = +(f.closedPnl || 0), fee = +(f.fee || 0), dir = f.dir || '';
+      if (dir.startsWith('Open')) {
+        if (!rt) rt = newRT(f, dir.includes('Long') ? 'LONG' : 'SHORT');
+        pos += sz; rt.fees += fee; rt.entrySize += sz;
+        rt.maxNotional = Math.max(rt.maxNotional, pos * px);
+        rt.cloids.push(f.cloid ?? null);
+      } else if (dir.includes('>')) {
+        if (rt) { rt.pnl += pnl; rt.fees += fee; rt.end = f.time; rts.push(rt); }
+        const side = dir.trim().endsWith('Long') ? 'LONG' : 'SHORT';
+        pos = Math.max(0, sz - pos);
+        rt = pos > 0 ? newRT(f, side) : null;
+        if (rt) { rt.entrySize = pos; rt.maxNotional = pos * px; rt.cloids.push(f.cloid ?? null); }
+      } else if (dir.startsWith('Close')) {
+        if (!rt) { pos = sz; rt = newRT(f, dir.includes('Long') ? 'LONG' : 'SHORT'); rt.entrySize = sz; rt.maxNotional = sz * px; }
+        rt.pnl += pnl; rt.fees += fee; pos -= sz;
+        if (pos <= Math.max(0.0011, rt.entrySize * 0.02)) { rt.end = f.time; rts.push(rt); rt = null; pos = 0; }
+      }
+    }
+
+    // bot-only: cloid-exact when entry fills are tagged; heuristic for pre-v5.36 fills
+    const isBotRT = r => {
+      const tagged = r.cloids.filter(c => c != null);
+      if (tagged.length) return tagged.some(isBotCloid);
+      return cap > 0 && r.maxNotional <= cap;
+    };
+    const shorts = rts.filter(r => r.side === 'SHORT' && isBotRT(r));
+    const nets = shorts.map(r => r.pnl - r.fees);
+    const gp = nets.filter(x => x > 0).reduce((s, x) => s + x, 0);
+    const gl = Math.abs(nets.filter(x => x <= 0).reduce((s, x) => s + x, 0));
+    const pf = gl > 0 ? gp / gl : Infinity;
+    const net = gp - gl;
+    this.sp500ShortStats = { n: shorts.length, pf: +pf.toFixed(2), net: +net.toFixed(2) };
+
+    const was = this.sp500ShortMult;
+    if (shorts.length >= SHORT_WATCH_MIN_RTS && pf < SHORT_WATCH_PF) {
+      this.sp500ShortMult = SHORT_WATCH_MULT;
+    } else if (pf >= 1.0) {
+      this.sp500ShortMult = 1.0;  // hysteresis: restore only when the side is back above water
+    }
+    console.log(`HL shortWatch: SP500 shorts 90d n=${shorts.length} PF=${pf === Infinity ? '∞' : pf.toFixed(2)} net=$${net.toFixed(2)} | mult ${this.sp500ShortMult}`);
+    if (this.sp500ShortMult !== was) {
+      const msg = this.sp500ShortMult < 1
+        ? `⚖️ <b>SP500 short watch TRIGGERED</b>\n90d shorts: n=${shorts.length}, PF ${pf.toFixed(2)}, net $${net.toFixed(2)}\nShort sizing reduced to ${SHORT_WATCH_MULT * 100}% (longs unaffected).`
+        : `✅ <b>SP500 short watch CLEARED</b>\n90d shorts PF ${pf === Infinity ? '∞' : pf.toFixed(2)} — full short sizing restored.`;
+      await sendTelegram(msg);
     }
   },
 
@@ -1289,7 +1435,11 @@ const HL = {
     const szDec = this.szDecimals[asset] || 3;
     const sizeStr = this.floatToWire(parseFloat(size.toFixed(szDec)));
     const priceStr = this.floatToWire(price);
-    const orderWire = { a: assetIdx, b: isBuy, p: priceStr, s: sizeStr, r: reduceOnly, t: this.orderTypeToWire(orderType) };
+    // v5.36: every bot order carries a DMS-prefixed cloid (field 'c', appended LAST so the
+    // msgpack key order matches Hyperliquid's SDK wire format: a,b,p,s,r,t,c). Fills inherit
+    // it — exact bot/manual classification downstream.
+    const cloid = makeCloid();
+    const orderWire = { a: assetIdx, b: isBuy, p: priceStr, s: sizeStr, r: reduceOnly, t: this.orderTypeToWire(orderType), c: cloid };
     const action = { type: 'order', orders: [orderWire], grouping: 'na' };
     const nonce = Date.now();
     const signature = await this.signL1Action(action, nonce, null);
@@ -1582,6 +1732,14 @@ const HL = {
       console.warn(`HL DD-GOVERNOR: 7d net $${(this.ddGovernor7dNet ?? 0).toFixed(2)} — risk reduced to ${riskPct}% (v5.34)`);
     }
 
+    // v5.36: SP500 short watch — halves SHORT sizing while the 90d short PF is below gate
+    const shortWatchActive = coinId === 'sp500' && !isBuy && this.sp500ShortMult < 1;
+    if (shortWatchActive) {
+      riskPct *= this.sp500ShortMult;
+      const sw = this.sp500ShortStats;
+      console.warn(`HL SHORT-WATCH: SP500 SHORT sized ×${this.sp500ShortMult} (90d shorts n=${sw?.n}, PF ${sw?.pf}) (v5.36)`);
+    }
+
     const riskAmount = accountSize * riskPct / 100;
     let effectiveStopPrice = stopPrice;
 
@@ -1632,7 +1790,9 @@ const HL = {
     // v5.4: maxNotional = session-scaled effectiveMaxNotional (set above) to support SP500 long tiers.
     // v5.34: drawdown governor also halves the notional cap (riskPct alone doesn't bind when
     // the cap is the active constraint, e.g. SP500 at equityPct 2.00).
-    const maxNotional = this.ddGovernorActive ? effectiveMaxNotional * DD_GOVERNOR_REDUCE : effectiveMaxNotional;
+    // v5.36: SP500 short watch multiplier applies to the cap too, for the same reason.
+    let maxNotional = this.ddGovernorActive ? effectiveMaxNotional * DD_GOVERNOR_REDUCE : effectiveMaxNotional;
+    if (shortWatchActive) maxNotional *= this.sp500ShortMult;
     console.log(`HL: ${asset} sizing: raw size=${size.toFixed(szDec)} notional=$${(size*currentPrice).toFixed(0)} maxNotional=${maxNotional} coinId=${coinId}`);
     if (maxNotional > 0) {
       const notional = size * currentPrice;
@@ -3282,6 +3442,8 @@ function startHealthServer() {
           autoTradeEnabled: !!(HL && HL.enabled),
           activePositions: HL && HL.activeTrades ? Object.keys(HL.activeTrades).length : 0,
           cachedEquity: HL ? (HL.cachedEquity || 0) : 0,
+          ddGovernor: HL ? { active: !!HL.ddGovernorActive, net7d: HL.ddGovernor7dNet } : null,        // v5.36
+          sp500ShortWatch: HL ? { mult: HL.sp500ShortMult, stats: HL.sp500ShortStats } : null,         // v5.36
           coins: Object.keys(COINS).map(c => ({
             id: c, label: COINS[c].label,
             price: coinState[c]?.price || null,
@@ -3305,6 +3467,23 @@ function startHealthServer() {
         const recent = entries.slice(-n).reverse();
         res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-cache' });
         return res.end(JSON.stringify({ count: recent.length, entries: recent }));
+      }
+
+      // ---- /api/entry-signals (v5.36) ----
+      // Serves the append-only per-executed-entry metadata log so local study tooling
+      // (entry-quality-study.js) can fetch it without filesystem access to Railway.
+      if (url === '/api/entry-signals') {
+        let entries = [];
+        try {
+          if (fs.existsSync(ENTRY_SIGNALS_FILE)) {
+            entries = fs.readFileSync(ENTRY_SIGNALS_FILE, 'utf8')
+              .split('\n').filter(Boolean)
+              .map(l => { try { return JSON.parse(l); } catch { return null; } })
+              .filter(Boolean);
+          }
+        } catch (_) { /* return [] */ }
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-cache' });
+        return res.end(JSON.stringify({ count: entries.length, entries }));
       }
 
       res.writeHead(404, { 'Content-Type': 'text/plain' });
