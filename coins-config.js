@@ -9,15 +9,15 @@
 //   No floors, no ceilings — scales automatically as the account grows.
 //   Daily loss limit also scales: 3% of equity (was flat -$10).
 //
-//   equityPct ratios (v5.33):
+//   equityPct ratios (v5.35):
 //     BTC   1.00  (100% of equity) — flagship asset; raised from 0.50 to hit 1% risk intent
-//     HYPE  0.25  (25%)            — highest vol alt, smallest allocation
+//     HYPE  0.00  (DISABLED v5.35) — 90d bot-only PF 0.68, net −$20; watch mode
 //     SP500 2.00  (200%)           — low vol TradFi index; raised from 1.00, cap now > equity
 //     GOLD  0.00  (DISABLED v5.31) — lost in every window; crude replaces the commodity slot
 //     CRUDE 0.30  (30%)            — high-vol energy commodity; raised from 0.20 after live validation (v5.33)
 //
-//   At $1K equity:  BTC $1,000, HYPE $250, SP500 $2,000, CRUDE $300
-//   At $5K equity:  BTC $5,000, HYPE $1,250, SP500 $10,000, CRUDE $1,500
+//   At $1K equity:  BTC $1,000, SP500 $2,000, CRUDE $300
+//   At $5K equity:  BTC $5,000, SP500 $10,000, CRUDE $1,500
 //
 // Edit only this file when adjusting:
 //   - equityPct per-coin allocation
@@ -26,6 +26,16 @@
 //   - isHIP3 flag
 //
 // Prior version notes:
+//   v5.35 (2026-06-10): HYPE DISABLED. equityPct 0.25 → 0 (watch mode, same mechanism
+//     as GOLD v5.31). Round-trip analysis of real fills, bot-only (manual excluded via
+//     notional heuristic — e.g. the May 17 +$10.95 long opened $526 vs $261 cap = manual):
+//       90d: 15 RTs, 53% win, PF 0.68, net ≈ −$20
+//       60d: 0W/2L, net −$6.73
+//       30d: 2 small bot RTs (+$4.8); zero bot entries since May 16.
+//     Confirms the 2026-06-03 P&L-lever analysis (PF 0.90 on its window): HYPE is a
+//     persistent drag and barely fires anymore. Capital concentrates on the proven
+//     SP500 edge. Re-enable criterion: a counterfactual or paper window showing
+//     HYPE Retest PF > 1.3 over ≥15 RTs; restore at 0.125 (half) first, not 0.25.
 //   v5.33 (2026-06-02): CRUDE SCALE-UP — equityPct 0.20 → 0.30. Crude went live 2026-05-25
 //     and hit the validation trigger: 12 closed round-trips, 58.3% win (7W/5L), PF 1.38,
 //     expectancy +$0.16/trade, net +$1.90, avg win $1.02 ≈ avg loss −$1.04, traded both
@@ -133,7 +143,7 @@
 
 const COINS = {
   bitcoin:     { id:'bitcoin',     label:'BTC',    apiSym:'BTCUSDT',    asset:'BTC',        exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.010, equityPct: 1.00, isHIP3: false, minBreakBodyPct: 0.008 },
-  hyperliquid: { id:'hyperliquid', label:'HYPE',   apiSym:'HYPEUSDT',   asset:'HYPE',       exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, equityPct: 0.25, isHIP3: false },
+  hyperliquid: { id:'hyperliquid', label:'HYPE',   apiSym:'HYPEUSDT',   asset:'HYPE',       exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, equityPct: 0.00, isHIP3: false }, // v5.35 (2026-06-10): DISABLED — 90d bot-only PF 0.68, net ≈ −$20, no bot entries since May 16. Watch mode. Re-enable at 0.125 only after PF > 1.3 over ≥15 RTs.
   sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',  asset:'xyz:SP500',  exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, equityPct: 2.00, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 },
   gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',   asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.00, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 }, // v5.31: DISABLED (equityPct 0 = no auto-trade). Lost in every window; crude took the commodity slot. Still scanned/displayed (watch mode). Set equityPct back to 0.40 to re-enable.
   crude:       { id:'crude',       label:'CRUDE',  apiSym:'xyz:CL',     asset:'xyz:CL',     exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.30, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 }, // v5.33 (2026-06-02): 0.20→0.30 after live validation — 12 closed trades, 58% win, PF 1.38, +$1.90 net. Half-step; re-validate at 20+ trades before going to 0.40.
