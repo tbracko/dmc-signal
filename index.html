@@ -487,6 +487,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
       <span id="stats-auto-lbl" style="font-size:9px;color:#3d5068;letter-spacing:.06em">AUTO-CHECKING</span>
     </div>
   </div>
+  <div id="edge-content"><div class="empty">Loading edge panel...</div></div>
   <div id="stats-content"><div class="empty">Loading stats...</div></div>
 </div>
 
@@ -902,7 +903,7 @@ function nav(id, btn){
   document.getElementById('page-'+id).classList.add('active');
   btn.classList.add('active');
   if(id==='chart'&&!tvLoaded){loadChart('240');tvLoaded=true;}
-  if(id==='stats') setTimeout(renderStats, 50);
+  if(id==='stats'){ setTimeout(renderStats, 50); setTimeout(()=>renderEdgePanel().catch(e=>console.warn('edge panel:',e)), 60); }
   if(id==='trades') renderTrades();
 }
 
@@ -2177,6 +2178,214 @@ function calcStats(){
   return { total, wins, losses, winRate, byType, byTF, byCoin, bySession,
            avgWinRR, avgLossRR, streak: {count:curStreak, type:curStreakType},
            recent20 };
+}
+
+// ── EDGE PANEL (v5.35, 2026-06-10) ──────────────────────────────────────────
+// Live edge metrics straight from HL fills (not the local signal log):
+//   • per-asset rolling 7d/30d BOT-ONLY round-trips: win%, PF, net, expectancy
+//     (manual fills excluded via the maxNotional×1.05 heuristic, same as bot.js)
+//   • equity curve reconstructed from realized fills (all sources) + 30d-high drawdown
+//   • today's realized bot net vs the 3% daily loss gate
+//   • 7-day drawdown governor preview (mirrors bot.js v5.34: 7d bot net vs −3% equity)
+//   • MFE capture on recent winning bot RTs (15m candles; target ≥70%, was 58%)
+const EDGE_DAILY_LOSS_PCT = 0.03;  // keep in sync with coins-config.js DAILY_LOSS_PCT
+let _edgeCache = { ts: 0, fills: null };
+
+async function fetchEdgeFills(days){
+  const queryAddr = ((HL.masterAddress || HL.address) || '').toLowerCase();
+  if (!queryAddr) return null;
+  if (_edgeCache.fills && Date.now() - _edgeCache.ts < 5 * 60 * 1000) return _edgeCache.fills;
+  const startMs = Date.now() - days * 864e5;
+  const reqs = [null, ...(HL.HIP3_DEXES || ['xyz'])].map(dex =>
+    fetch(HL_INFO, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dex ? { type:'userFillsByTime', user:queryAddr, startTime:startMs, dex }
+                               : { type:'userFillsByTime', user:queryAddr, startTime:startMs }) }));
+  const responses = await Promise.all(reqs);
+  const fills = [];
+  for (const r of responses) { const d = await r.json(); if (Array.isArray(d)) fills.push(...d); }
+  fills.sort((a,b) => a.time - b.time);
+  _edgeCache = { ts: Date.now(), fills };
+  return fills;
+}
+
+// Build round-trips per coin. Handles partial closes and position flips ('Short > Long').
+// isBot = max position notional never exceeded equity×equityPct×1.05 (manual heuristic).
+function buildEdgeRTs(fills, equity){
+  const byCoin = {};
+  for (const f of fills) (byCoin[f.coin] = byCoin[f.coin] || []).push(f);
+  const out = [];
+  for (const [coin, list] of Object.entries(byCoin)){
+    const coinId = SYM_TO_COIN_ID[coin];
+    const cfg = coinId ? COINS[coinId] : null;
+    const cap = (cfg && cfg.equityPct > 0) ? equity * cfg.equityPct * 1.05 : 0;
+    let pos = 0, rt = null;
+    const newRT = (f, side) => ({ coin, coinId, side, start: f.time, pnl: 0, fees: 0,
+                                  maxNotional: 0, entryNotional: 0, entrySize: 0 });
+    for (const f of list){
+      const sz = +f.sz, px = +f.px, pnl = +(f.closedPnl || 0), fee = +(f.fee || 0), dir = f.dir || '';
+      if (dir.startsWith('Open')){
+        if (!rt) rt = newRT(f, dir.includes('Long') ? 'LONG' : 'SHORT');
+        pos += sz; rt.fees += fee;
+        rt.entryNotional += sz * px; rt.entrySize += sz;
+        rt.maxNotional = Math.max(rt.maxNotional, pos * px);
+      } else if (dir.includes('>')){
+        // flip fill closes the old position and opens the opposite side in one fill
+        if (rt){ rt.pnl += pnl; rt.fees += fee; rt.end = f.time; out.push({ ...rt, isBot: cap > 0 && rt.maxNotional <= cap }); }
+        const side = dir.trim().endsWith('Long') ? 'LONG' : 'SHORT';
+        pos = Math.max(0, sz - pos);
+        rt = pos > 0 ? newRT(f, side) : null;
+        if (rt){ rt.entrySize = pos; rt.entryNotional = pos * px; rt.maxNotional = pos * px; }
+      } else if (dir.startsWith('Close')){
+        if (!rt){ pos = sz; rt = newRT(f, dir.includes('Long') ? 'LONG' : 'SHORT');
+                  rt.entrySize = sz; rt.entryNotional = sz * px; rt.maxNotional = sz * px; }
+        rt.pnl += pnl; rt.fees += fee; pos -= sz;
+        if (pos <= Math.max(0.0011, rt.entrySize * 0.02)){
+          rt.end = f.time; out.push({ ...rt, isBot: cap > 0 && rt.maxNotional <= cap }); rt = null; pos = 0;
+        }
+      }
+    }
+  }
+  return out.sort((a,b) => a.end - b.end);
+}
+
+function edgeStats(rts){
+  const n = rts.length; if (!n) return null;
+  const nets = rts.map(r => r.pnl - r.fees);
+  const wins = nets.filter(x => x > 0);
+  const gp = wins.reduce((s,x) => s + x, 0);
+  const gl = Math.abs(nets.filter(x => x <= 0).reduce((s,x) => s + x, 0));
+  return { n, winPct: wins.length / n * 100, pf: gl > 0 ? gp / gl : Infinity, net: gp - gl, exp: (gp - gl) / n };
+}
+
+const _edgeFmt = v => (v >= 0 ? '+$' : '−$') + Math.abs(v).toFixed(2);
+const _edgePF = pf => pf === Infinity ? '∞' : pf.toFixed(2);
+const _edgeCls = v => v > 0 ? 'green' : v < 0 ? 'red' : 'yellow';
+
+async function renderEdgePanel(){
+  const el = document.getElementById('edge-content');
+  if (!el) return;
+  const equity = HL.cachedEquity > 0 ? HL.cachedEquity : parseFloat(localStorage.getItem('account_size') || '0');
+  let fills;
+  try { fills = await fetchEdgeFills(30); }
+  catch(e){ el.innerHTML = `<div class="empty">Edge panel: fills fetch failed (${e.message})</div>`; return; }
+  if (!fills || !fills.length || !(equity > 0)){
+    el.innerHTML = '<div class="empty">Edge panel: connect HL wallet to see live edge metrics</div>'; return;
+  }
+
+  const rts = buildEdgeRTs(fills, equity);
+  const now = Date.now();
+  const botRTs = rts.filter(r => r.isBot);
+
+  // ── per-asset 7d / 30d table ──
+  const assets = [...new Set(botRTs.map(r => r.coin))];
+  const rows = assets.map(coin => {
+    const cfg = COINS[SYM_TO_COIN_ID[coin]];
+    const label = cfg ? cfg.shortLabel : coin;
+    const s30 = edgeStats(botRTs.filter(r => r.coin === coin));
+    const s7  = edgeStats(botRTs.filter(r => r.coin === coin && now - r.end < 7 * 864e5));
+    const cell = s => s ? `${s.n} rt · ${s.winPct.toFixed(0)}% · PF ${_edgePF(s.pf)} · <span class="${_edgeCls(s.net)}">${_edgeFmt(s.net)}</span> (${_edgeFmt(s.exp)}/t)` : '<span style="color:#3d5068">—</span>';
+    return `<tr><td>${label}</td><td>${cell(s7)}</td><td>${cell(s30)}</td></tr>`;
+  }).join('');
+
+  // ── equity curve from realized fills (all sources — wallet-level truth) ──
+  let cum = 0;
+  const pts = fills.filter(f => +(f.closedPnl || 0) !== 0 || +(f.fee || 0) !== 0)
+    .map(f => ({ t: f.time, d: +(f.closedPnl || 0) - +(f.fee || 0) }));
+  const totalNet = pts.reduce((s,p) => s + p.d, 0);
+  const eq0 = equity - totalNet; // equity at window start
+  const curve = [{ t: now - 30 * 864e5, eq: eq0 }];
+  for (const p of pts){ cum += p.d; curve.push({ t: p.t, eq: eq0 + cum }); }
+  curve.push({ t: now, eq: equity });
+  const eqHigh = Math.max(...curve.map(p => p.eq));
+  const ddPct = eqHigh > 0 ? (equity - eqHigh) / eqHigh * 100 : 0;
+  const lo = Math.min(...curve.map(p => p.eq)), hi = eqHigh;
+  const W = 600, H = 120, pad = 4, span = (hi - lo) || 1;
+  const X = t => pad + (t - curve[0].t) / (now - curve[0].t) * (W - 2 * pad);
+  const Y = v => H - pad - (v - lo) / span * (H - 2 * pad);
+  const path = curve.map((p,i) => `${i ? 'L' : 'M'}${X(p.t).toFixed(1)},${Y(p.eq).toFixed(1)}`).join('');
+  const highY = Y(eqHigh).toFixed(1);
+  const curveSvg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:110px;display:block">
+    <line x1="${pad}" y1="${highY}" x2="${W - pad}" y2="${highY}" stroke="#3d5068" stroke-dasharray="4 4" stroke-width="1"/>
+    <path d="${path}" fill="none" stroke="${ddPct < -0.5 ? '#ff3d5a' : '#00e676'}" stroke-width="1.5"/>
+  </svg>`;
+
+  // ── today's bot net vs daily loss gate ──
+  const dayStart = new Date(); dayStart.setUTCHours(0,0,0,0);
+  const todayNet = botRTs.filter(r => r.end >= dayStart.getTime()).reduce((s,r) => s + r.pnl - r.fees, 0);
+  const gate = equity * EDGE_DAILY_LOSS_PCT;
+  const gateUsed = todayNet < 0 ? Math.min(100, -todayNet / gate * 100) : 0;
+
+  // ── 7d drawdown governor preview (mirrors bot.js v5.34) ──
+  const net7 = botRTs.filter(r => now - r.end < 7 * 864e5).reduce((s,r) => s + r.pnl - r.fees, 0);
+  const govThresh = -(equity * EDGE_DAILY_LOSS_PCT);
+  const govOn = net7 <= govThresh;
+
+  el.innerHTML = `
+    <div class="stat-grid">
+      <div class="stat-card full">
+        <div class="stat-lbl" style="margin-bottom:2px">Bot Edge — rolling round-trips (manual excluded)</div>
+        <table class="stat-table"><tbody>
+          <tr style="color:#5d7a99"><td></td><td>7d</td><td>30d</td></tr>
+          ${rows || '<tr><td colspan="3" style="color:#3d5068">no bot round-trips in window</td></tr>'}
+        </tbody></table>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val ${_edgeCls(-gateUsed)}">${gateUsed.toFixed(0)}%</div>
+        <div class="stat-lbl">Daily Loss Gate Used</div>
+        <div class="stat-bar-wrap"><div class="stat-bar" style="width:${gateUsed}%;background:${gateUsed > 66 ? '#ff3d5a' : gateUsed > 33 ? '#ffc107' : '#00e676'}"></div></div>
+        <div class="stat-sub">today ${_edgeFmt(todayNet)} · gate −$${gate.toFixed(2)} (3%)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val ${govOn ? 'red' : 'green'}">${govOn ? 'ON' : 'OFF'}</div>
+        <div class="stat-lbl">7d Drawdown Governor</div>
+        <div class="stat-sub">7d bot net ${_edgeFmt(net7)} vs ${_edgeFmt(govThresh)}${govOn ? ' · sizing ×0.5' : ''}</div>
+      </div>
+      <div class="stat-card full">
+        <div class="stat-lbl" style="margin-bottom:6px">Equity (realized, 30d) — high $${eqHigh.toFixed(2)} · now $${equity.toFixed(2)} · DD <span class="${_edgeCls(ddPct)}">${ddPct.toFixed(2)}%</span></div>
+        ${curveSvg}
+      </div>
+      <div class="stat-card full">
+        <div class="stat-lbl" style="margin-bottom:2px">MFE Capture (winning bot RTs, 14d) — target ≥70%</div>
+        <div id="edge-mfe" class="stat-sub">computing…</div>
+      </div>
+    </div>`;
+
+  renderEdgeMFE(botRTs).catch(e => {
+    const m = document.getElementById('edge-mfe');
+    if (m) m.textContent = 'MFE: candle fetch failed (' + e.message + ')';
+  });
+}
+
+// MFE capture = realized net / best-possible exit on the same position.
+// Uses 15m candles (HL retention ~14d) over each RT's entry→exit window.
+async function renderEdgeMFE(botRTs){
+  const el0 = document.getElementById('edge-mfe');
+  if (!el0) return;
+  const now = Date.now();
+  const cands = botRTs.filter(r => r.pnl - r.fees > 0 && now - r.end < 14 * 864e5 && r.end - r.start >= 15 * 60 * 1000).slice(-6);
+  if (!cands.length){ el0.textContent = 'no winning bot round-trips ≥15min in the last 14d'; return; }
+  const results = [];
+  for (const rt of cands){
+    try {
+      const r = await fetch(HL_INFO, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'candleSnapshot', req: { coin: rt.coin, interval: '15m',
+          startTime: rt.start - 900000, endTime: rt.end + 900000 } }) });
+      const ks = await r.json();
+      if (!Array.isArray(ks) || !ks.length) continue;
+      const avgEntry = rt.entryNotional / rt.entrySize;
+      const fav = rt.side === 'LONG'
+        ? Math.max(...ks.map(k => +k.h)) - avgEntry
+        : avgEntry - Math.min(...ks.map(k => +k.l));
+      const grossFav = fav * rt.entrySize;
+      if (grossFav <= 0) continue;
+      results.push({ coin: rt.coin, capture: Math.min(1.5, (rt.pnl - rt.fees) / grossFav) });
+    } catch (e) { /* skip RT on fetch error */ }
+  }
+  if (!results.length){ el0.textContent = 'MFE: no measurable round-trips'; return; }
+  const avg = results.reduce((s,x) => s + x.capture, 0) / results.length * 100;
+  const cls = avg >= 70 ? 'green' : avg >= 55 ? 'yellow' : 'red';
+  el0.innerHTML = `<span class="${cls}" style="font-size:14px;font-weight:600">${avg.toFixed(0)}%</span> avg over ${results.length} RTs · ` +
+    results.map(x => `${(COINS[SYM_TO_COIN_ID[x.coin]] || {}).shortLabel || x.coin} ${(x.capture * 100).toFixed(0)}%`).join(' · ');
 }
 
 function renderStats(){
