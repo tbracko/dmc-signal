@@ -80,6 +80,14 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 .stat-sub{font-family:'IBM Plex Mono',monospace;font-size:8px;color:#5d7a99;margin-top:5px;line-height:1.5}
 .stat-bar-wrap{height:4px;background:#1a2230;border-radius:2px;margin-top:8px;overflow:hidden}
 .stat-bar{height:100%;border-radius:2px;background:#00e676;transition:width .4s}
+.edge-table{width:100%;border-collapse:collapse;margin-top:6px}
+.edge-table th{font-family:'IBM Plex Mono',monospace;font-size:8px;color:#3d5068;letter-spacing:.08em;text-transform:uppercase;text-align:right;padding:3px 0;font-weight:400;border-bottom:1px solid rgba(255,255,255,.08)}
+.edge-table th:first-child,.edge-table th:nth-child(2){text-align:left}
+.edge-table td{font-family:'IBM Plex Mono',monospace;font-size:10px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.04);color:#7b8fa8;text-align:right;white-space:nowrap}
+.edge-table td:first-child{color:#c9d6e3;text-align:left;font-weight:600}
+.edge-table td:nth-child(2){text-align:left;color:#5d7a99;font-size:9px}
+.edge-table td.green{color:#00e676}.edge-table td.red{color:#ff3d5a}.edge-table td.yellow{color:#ffc107}.edge-table td.dim{color:#3d5068}
+.edge-table tr.total td{border-top:1px solid rgba(255,255,255,.14);border-bottom:none;color:#c9d6e3}
 .stat-table{width:100%;border-collapse:collapse;margin-top:6px}
 .stat-table td{font-family:'IBM Plex Mono',monospace;font-size:9px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04);color:#7b8fa8}
 .stat-table td:first-child{color:#c9d6e3;width:40%}
@@ -2288,16 +2296,33 @@ async function renderEdgePanel(){
   const now = Date.now();
   const botRTs = rts.filter(r => r.isBot);
 
-  // ── per-asset 7d / 30d table ──
+  // ── per-asset 7d / 30d table (one row per asset+window, color-coded columns) ──
+  const winCls = w => w >= 60 ? 'green' : w >= 45 ? 'yellow' : 'red';
+  const pfCls  = pf => pf >= 1.5 ? 'green' : pf >= 1.0 ? 'yellow' : 'red';
+  const edgeRow = (label, win, s, total) => {
+    if (!s) return `<tr${total ? ' class="total"' : ''}><td>${label}</td><td>${win}</td><td class="dim" colspan="5">no closed round-trips</td></tr>`;
+    return `<tr${total ? ' class="total"' : ''}>
+      <td>${label}</td><td>${win}</td>
+      <td>${s.n}</td>
+      <td class="${winCls(s.winPct)}">${s.winPct.toFixed(0)}%</td>
+      <td class="${pfCls(s.pf)}">${_edgePF(s.pf)}</td>
+      <td class="${_edgeCls(s.net)}">${_edgeFmt(s.net)}</td>
+      <td class="${_edgeCls(s.exp)}">${_edgeFmt(s.exp)}</td>
+    </tr>`;
+  };
   const assets = [...new Set(botRTs.map(r => r.coin))];
-  const rows = assets.map(coin => {
+  let rows = '';
+  for (const coin of assets) {
     const cfg = COINS[SYM_TO_COIN_ID[coin]];
     const label = cfg ? cfg.shortLabel : coin;
-    const s30 = edgeStats(botRTs.filter(r => r.coin === coin));
     const s7  = edgeStats(botRTs.filter(r => r.coin === coin && now - r.end < 7 * 864e5));
-    const cell = s => s ? `${s.n} rt · ${s.winPct.toFixed(0)}% · PF ${_edgePF(s.pf)} · <span class="${_edgeCls(s.net)}">${_edgeFmt(s.net)}</span> (${_edgeFmt(s.exp)}/t)` : '<span style="color:#3d5068">—</span>';
-    return `<tr><td>${label}</td><td>${cell(s7)}</td><td>${cell(s30)}</td></tr>`;
-  }).join('');
+    const s30 = edgeStats(botRTs.filter(r => r.coin === coin));
+    rows += edgeRow(label, '7d', s7) + edgeRow('', '30d', s30);
+  }
+  if (assets.length > 1) {
+    rows += edgeRow('ALL', '7d', edgeStats(botRTs.filter(r => now - r.end < 7 * 864e5)), true)
+          + edgeRow('', '30d', edgeStats(botRTs), true);
+  }
 
   // ── equity curve from realized fills (all sources — wallet-level truth) ──
   let cum = 0;
@@ -2336,10 +2361,10 @@ async function renderEdgePanel(){
     <div class="stat-grid">
       <div class="stat-card full">
         <div class="stat-lbl" style="margin-bottom:2px">Bot Edge — rolling round-trips (manual excluded)</div>
-        <table class="stat-table"><tbody>
-          <tr style="color:#5d7a99"><td></td><td>7d</td><td>30d</td></tr>
-          ${rows || '<tr><td colspan="3" style="color:#3d5068">no bot round-trips in window</td></tr>'}
-        </tbody></table>
+        <table class="edge-table">
+          <thead><tr><th>Asset</th><th>Window</th><th>RTs</th><th>Win%</th><th>PF</th><th>Net</th><th>$/Trade</th></tr></thead>
+          <tbody>${rows || '<tr><td class="dim" colspan="7">no bot round-trips in window</td></tr>'}</tbody>
+        </table>
       </div>
       <div class="stat-card">
         <div class="stat-val ${_edgeCls(-gateUsed)}">${gateUsed.toFixed(0)}%</div>
