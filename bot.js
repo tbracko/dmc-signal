@@ -20,6 +20,23 @@
 //   - HIP-3 TP orders use limit trigger (isMarket:false) to avoid taker fees (~8 bps saved on GOLD)
 //   - SL remains market trigger (isMarket:true) for guaranteed fills
 //
+// v5.37 changelog (2026-06-11) — STRUCTURE EXITS (DMC source-material study):
+//   - CLOSE-EXIT: trailStops exits the entire remaining position at market when the last
+//     CLOSED 15m candle is >= closeExitR × initial-R against entry (per-coin, coins-config).
+//     SP500 0.5R (counterfactual $69 vs $48 base, better in BOTH halves); BTC 1.0R (pairs
+//     with wick immunity below). Captures DMC "lost the level on a close → exit now".
+//   - WICK IMMUNITY (BTC): hard SL trigger placed at hardSlMult (1.3) × level distance;
+//     sizing/TPs/BE/trail stay on original R; the close-exit at 1.0R guards the level on
+//     closes. Counterfactual: BTC $42 vs $16 base. Intrabar wicks through the level no
+//     longer stop BTC out — only closes (or the 1.3R disaster stop).
+//   - PATH-CLEARANCE LOGGING: dms() now returns untestedLevelsToTarget +
+//     nearestUntestedAheadATR (signals.js); logged per entry. No filtering — study first.
+//   - runCoin stores last CLOSED 15m candle in coinState[coinId].last15m for the close-exit.
+//   - Validation tooling: counterfactual-structure-exit.js (52 RTs, 90d, split-half gated).
+//     Rejected by the same study: failure-at-high exit (worse everywhere), zone-laddered
+//     entries (SP500 collapses to $3 — half-size on immediate runners too costly), uniform
+//     close-exit across assets (BTC needs 1.0R, SP500 0.5R — one size fits none).
+//
 // v5.36 changelog (2026-06-10):
 //   - BREAKEVEN TRIGGER 1.0R → 1.25R (BE_TRIGGER_R env): BE at exactly the TP1 level sat in
 //     the normal retrace zone and stopped runners. Counterfactual on 68 real RTs: BE@1.25
@@ -1861,9 +1878,19 @@ const HL = {
 
       // 2. Stop Loss (full position)
       // v5.7: use effectiveStopPrice (may be tightened by exhaustion filter)
-      const slPx = isBuy ? effectiveStopPrice * 0.98 : effectiveStopPrice * 1.02;
+      // v5.37: hardSlMult (per-coin) widens the RESTING hard stop only — sizing, R, TPs, BE and
+      // trailing all stay on the original level-based SL. With closeExitR the position exits on
+      // a 15m CLOSE through the original SL instead of an intrabar wick (wick immunity, BTC).
+      // Counterfactual: BTC $42 vs $16 base, better/tied in both halves. Worst-case loss on a
+      // gap becomes hardSlMult × R — v5.20 still caps the level slDist at 3% notional at entry.
+      const _hardMult = coin.hardSlMult > 1 ? coin.hardSlMult : 1;
+      const hardStopPrice = isBuy
+        ? currentPrice - slDistance * _hardMult
+        : currentPrice + slDistance * _hardMult;
+      const slPx = isBuy ? hardStopPrice * 0.98 : hardStopPrice * 1.02;
       const slRes = await this.placeOrder(asset, !isBuy, size, slPx,
-        { trigger: { isMarket: true, triggerPx: effectiveStopPrice, tpsl: 'sl' } }, true);
+        { trigger: { isMarket: true, triggerPx: hardStopPrice, tpsl: 'sl' } }, true);
+      if (_hardMult > 1) console.log(`HL: ${asset} hard SL at ${_hardMult}× level distance $${fmt(hardStopPrice)} (level SL $${fmt(effectiveStopPrice)}; close-exit guards the level) (v5.37)`);
       if (!slRes || slRes.status === 'err') {
         console.error('HL SL placement failed:', slRes ? slRes.response : 'null');
         await sendTelegram(`⚠️ <b>SL FAILED for ${sig} ${asset}</b>\nTrade open WITHOUT stop loss -- place manually!`);
@@ -1959,6 +1986,8 @@ const HL = {
         breakBarsAgo: signal.breakBarsAgo ?? null,
         retestBarsAgo: signal.retestBarsAgo ?? null,
         maxBreakBodyPct: signal.maxBreakBodyPct ?? null,
+        untestedLevelsToTarget: signal.untestedLevelsToTarget ?? null,   // v5.37: path clearance
+        nearestUntestedAheadATR: signal.nearestUntestedAheadATR ?? null, // v5.37
         withTrend: typeof withTrend === 'boolean' ? withTrend : null,
         size, notional: +(size * actualEntry).toFixed(2),
         equity: +equity.toFixed(2),
@@ -2077,6 +2106,31 @@ const HL = {
               await this.closePosition(coinId);
               continue;
             }
+          }
+        }
+      }
+
+      // v5.37: STRUCTURE CLOSE-EXIT (DMC: "lost the level on a close → trend shifted → exit").
+      // If the last CLOSED 15m candle is >= closeExitR × initial-R against entry, exit the
+      // entire remaining position at market. Per-coin via coins-config.js closeExitR:
+      // SP500 0.5 (early failure exit — counterfactual $69 vs $48, better in both halves),
+      // BTC 1.0 (close-through the level SL only — pairs with hardSlMult 1.3 wick immunity).
+      // Checked once per closed bar; skipped for manual/untrailed positions.
+      const _ceR = COINS[coinId]?.closeExitR;
+      if (_ceR > 0 && trade.trailState !== 'manual' && trade.entry && trade.initialSl) {
+        const k15 = coinState[coinId]?.last15m;
+        if (k15 && k15.t !== trade._lastCloseExitBar && k15.t > (trade.entryTs || 0)) {
+          trade._lastCloseExitBar = k15.t;
+          const _isLong = trade.side === 'LONG';
+          const risk0 = Math.abs(trade.entry - trade.initialSl);
+          const adverse = _isLong ? (trade.entry - k15.c) : (k15.c - trade.entry);
+          if (risk0 > 0 && adverse >= risk0 * _ceR) {
+            const closePct = (adverse / trade.entry * 100).toFixed(2);
+            console.log(`HL CLOSE-EXIT: ${trade.asset} ${trade.side} — 15m closed ${closePct}% against entry (>= ${_ceR}R of $${fmt(risk0)}) — structure failed, closing at market (v5.37)`);
+            await sendTelegram(`📕 <b>CLOSE-EXIT: ${trade.asset} ${trade.side}</b>\n15m close ${closePct}% against entry (≥ ${_ceR}R)\nStructure failed on a close — exiting before the hard stop.`);
+            this.lastSlTime[coinId] = Date.now(); // counts as a stop for cooldown purposes
+            await this.closePosition(coinId);
+            continue;
           }
         }
       }
@@ -3019,6 +3073,12 @@ async function scanCoin(coinId){
     // Store price in coinState for trailing stops
     if (!coinState[coinId]) coinState[coinId] = {};
     coinState[coinId].price = price;
+    // v5.37: store the last CLOSED 15m candle for the structure close-exit check.
+    // m15C's final element is usually the forming bar — use the one before it.
+    if (m15C && m15C.length >= 2) {
+      const k = m15C[m15C.length - 2];
+      coinState[coinId].last15m = { t: k.t, c: k.c };
+    }
 
     // v5.0 FIX #1: Reset htfDir before computation so stale values don't persist
     // when nextMove() returns falsy (e.g. insufficient candle data)
