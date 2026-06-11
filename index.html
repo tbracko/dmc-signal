@@ -3853,11 +3853,19 @@ const HL = {
             body: JSON.stringify({ type: 'userFillsByTime', user: queryAddr, startTime: startMs, dex }) }))
       ];
       const responses = await Promise.all(requests);
-      const fills = [];
+      const rawFills = [];
       for (const r of responses) {
         const data = await r.json();
-        if (Array.isArray(data)) fills.push(...data);
+        if (Array.isArray(data)) rawFills.push(...data);
       }
+      // v5.38 FIX: dedup by tid — main + xyz responses now overlap 100% (HL API change);
+      // without this, auto-recorded closes were double-counted in the stats.
+      const seenT = new Set();
+      const fills = rawFills.filter(f => {
+        const k = f.tid ?? `${f.hash}_${f.time}_${f.sz}`;
+        if (seenT.has(k)) return false;
+        seenT.add(k); return true;
+      });
       if (fills.length === 0) return;
 
       // Group fills by coin, find closing fills (reduceOnly or that bring position to 0)
