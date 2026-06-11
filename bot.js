@@ -20,6 +20,16 @@
 //   - HIP-3 TP orders use limit trigger (isMarket:false) to avoid taker fees (~8 bps saved on GOLD)
 //   - SL remains market trigger (isMarket:true) for guaranteed fills
 //
+// v5.38 changelog (2026-06-11) — PAPER-TRACKING FOR DISABLED ASSETS:
+//   - executeTrade now logs would-have-been entries on equityPct-0 assets (gold, HYPE)
+//     to .entry_signals.jsonl with paper:true (deduped per signal per 4h). Purpose:
+//     answer re-enable questions with evidence — replay paper signals with the candle
+//     engine under CURRENT exits (v5.36 BE@1.25 + v5.37 structure exits, which did not
+//     exist when gold was disabled). Re-enable gate: paper PF > 1.3 over >= 15 signals,
+//     restart at half the old equityPct (gold: 0.20). Gold replay on the 5 remaining
+//     simulatable RTs showed new exits flip $2 → $6 — directionally right, n far too
+//     small; the paper pipeline builds the real sample.
+//
 // v5.37 changelog (2026-06-11) — STRUCTURE EXITS (DMC source-material study):
 //   - CLOSE-EXIT: trailStops exits the entire remaining position at market when the last
 //     CLOSED 15m candle is >= closeExitR × initial-R against entry (per-coin, coins-config).
@@ -1589,7 +1599,37 @@ const HL = {
     // v5.31: equityPct 0 = asset DISABLED (no auto-trade). Canonical off-switch —
     // lets an asset be turned off via coins-config.js without removing it (keeps
     // scanning + dashboard, preserves tuning notes). GOLD disabled here as of v5.31.
-    if (!(coin.equityPct > 0)) { console.log(`HL: ${coinId} auto-trade disabled (equityPct 0) — skipping entry`); return null; }
+    // v5.38: PAPER-TRACK signals on disabled assets. Re-enable questions (gold, HYPE)
+    // were previously unanswerable because watch-mode signals left no trace. Now each
+    // would-have-been entry is appended to .entry_signals.jsonl with paper:true —
+    // replayable with the candle engine under CURRENT exits. Re-enable rule stays:
+    // paper PF > 1.3 over >= 15 signals, restart at half the old equityPct.
+    // (Study scripts are unaffected: paper entries never match a fill.)
+    if (!(coin.equityPct > 0)) {
+      console.log(`HL: ${coinId} auto-trade disabled (equityPct 0) — paper-logging signal (v5.38)`);
+      try {
+        const px = coinState[coinId]?.price || null;
+        this._paperLog = this._paperLog || {};
+        const dedupKey = `${signal.sig}_${Math.round((signal.level || 0) * 100)}`;
+        const lastT = this._paperLog[coinId]?.[dedupKey] || 0;
+        if (Date.now() - lastT > 4 * 3600000) {  // one paper record per signal per 4h
+          (this._paperLog[coinId] = this._paperLog[coinId] || {})[dedupKey] = Date.now();
+          logEntrySignal({
+            ts: Date.now(), time: new Date().toISOString(),
+            coinId, asset, side: signal.sig, confidence, paper: true,
+            entry: px, sl: signal.stopPrice ?? null,
+            slDistPct: (px && signal.stopPrice) ? +((Math.abs(px - signal.stopPrice) / px).toFixed(4)) : null,
+            target: signal.target ?? null, rr: signal.rr ?? null,
+            level: signal.level ?? null, levelScore: signal.score ?? null,
+            convictionBodyATR: signal.convictionBodyATR ?? null,
+            untestedLevelsToTarget: signal.untestedLevelsToTarget ?? null,
+            nearestUntestedAheadATR: signal.nearestUntestedAheadATR ?? null,
+            reason: signal.reason ?? null,
+          });
+        }
+      } catch (_) { /* paper logging must never block the scan */ }
+      return null;
+    }
 
     // v5.25: Dynamic maxNotional from equity × equityPct (coins-config.js).
     // v5.4 session-scaled override still works — it overrides the dynamic base if set.
