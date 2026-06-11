@@ -25,6 +25,21 @@
 //   - exchange or apiSym mappings
 //   - isHIP3 flag
 //
+// v5.37 (2026-06-11): STRUCTURE EXITS (DMC source-material study, counterfactual-structure-exit.js
+//   on 52 bot RTs / 90d, per-asset split-half validated):
+//   closeExitR  — exit the ENTIRE remaining position at market when a CLOSED 15m candle is
+//                 >= closeExitR × initial-R against entry. Captures DMC's "lost the level on a
+//                 close → trend shifted → exit now". SP500: 0.5 (counterfactual $69 vs $48 base,
+//                 better in BOTH halves — most of the gain is in the recent losing regime).
+//                 NOT enabled for BTC (made it worse: −$13 vs +$16 — crypto noise closes).
+//   hardSlMult  — the resting hard SL trigger is placed at hardSlMult × level-SL distance, while
+//                 sizing/TPs/trailing all stay on the original R. Wick immunity: only a CLOSE
+//                 beyond the original SL (via closeExitR 1.0) or the wider hard stop exits.
+//                 BTC: 1.3 + closeExitR 1.0 ($42 vs $16 base, better/tied both halves — BTC's
+//                 wick-outs were the v5.27 problem; this is the fuller cure).
+//                 Max worst-case loss grows to 1.3R on gaps; v5.20 entry gate still caps slDist 3%.
+//   CL: neither enabled (n=5, no signal). Re-validate both at +20 RTs via the Monday task.
+//
 // Prior version notes:
 //   v5.35 (2026-06-10): HYPE DISABLED. equityPct 0.25 → 0 (watch mode, same mechanism
 //     as GOLD v5.31). Round-trip analysis of real fills, bot-only (manual excluded via
@@ -142,9 +157,9 @@
 //                        candle bodies mean this filter blocks too many winners.
 
 const COINS = {
-  bitcoin:     { id:'bitcoin',     label:'BTC',    apiSym:'BTCUSDT',    asset:'BTC',        exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.010, equityPct: 1.00, isHIP3: false, minBreakBodyPct: 0.008 },
+  bitcoin:     { id:'bitcoin',     label:'BTC',    apiSym:'BTCUSDT',    asset:'BTC',        exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.010, equityPct: 1.00, isHIP3: false, minBreakBodyPct: 0.008, closeExitR: 1.0, hardSlMult: 1.3 }, // v5.37: wick immunity — exit on 15m CLOSE through level SL, hard stop 1.3R
   hyperliquid: { id:'hyperliquid', label:'HYPE',   apiSym:'HYPEUSDT',   asset:'HYPE',       exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, equityPct: 0.00, isHIP3: false }, // v5.35 (2026-06-10): DISABLED — 90d bot-only PF 0.68, net ≈ −$20, no bot entries since May 16. Watch mode. Re-enable at 0.125 only after PF > 1.3 over ≥15 RTs.
-  sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',  asset:'xyz:SP500',  exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, equityPct: 2.00, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 },
+  sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',  asset:'xyz:SP500',  exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, equityPct: 2.00, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1, closeExitR: 0.5 }, // v5.37: structure close-exit — 15m close >=0.5R against entry exits all
   gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',   asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.00, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 }, // v5.31: DISABLED (equityPct 0 = no auto-trade). Lost in every window; crude took the commodity slot. Still scanned/displayed (watch mode). Set equityPct back to 0.40 to re-enable.
   crude:       { id:'crude',       label:'CRUDE',  apiSym:'xyz:CL',     asset:'xyz:CL',     exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.30, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 }, // v5.33 (2026-06-02): 0.20→0.30 after live validation — 12 closed trades, 58% win, PF 1.38, +$1.90 net. Half-step; re-validate at 20+ trades before going to 0.40.
 };
