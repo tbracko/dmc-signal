@@ -1006,6 +1006,24 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR, coinMinStopPc
       const dist    = ((lv.price - cur.c) / cur.c * 100).toFixed(2);
       const htfNote = ((htfDir === 'UP' && sig === 'LONG') || (htfDir === 'DOWN' && sig === 'SHORT'))
         ? ` . HTF ${htfDir} aligns` : '';
+
+      // v5.37: PATH-CLEARANCE metrics (DMC: "don't take trades into untested levels" — they
+      // always react). Logged per entry for the entry-quality study; NO filtering yet —
+      // behavior changes only if the expectancy buckets diverge on real data.
+      //   untestedLevelsToTarget — untested levels strictly between entry and target
+      //   nearestUntestedAheadATR — ATR-distance to the nearest untested level in trade direction
+      const dirSign = sig === 'LONG' ? 1 : -1;
+      const pathLo = Math.min(cur.c, tgt.price) + a * 0.2;
+      const pathHi = Math.max(cur.c, tgt.price) - a * 0.2;
+      const isEntryLevel = l => Math.abs(l.price - lv.price) <= a * 0.2;
+      const untestedLevelsToTarget = levels.filter(l =>
+        !l.tested && !isEntryLevel(l) && l.price > pathLo && l.price < pathHi).length;
+      const aheadLevels = levels.filter(l =>
+        !l.tested && !isEntryLevel(l) && dirSign * (l.price - cur.c) > a * 0.2)
+        .sort((x, y) => dirSign * (x.price - y.price));
+      const nearestUntestedAheadATR = aheadLevels.length
+        ? +((dirSign * (aheadLevels[0].price - cur.c)) / a).toFixed(2) : null;
+
       return {
         sig,
         type: 'BLIND_ENTRY',  // reuse existing type so multi-TF confluence + dedup paths work unchanged
@@ -1015,6 +1033,8 @@ function dms(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR, coinMinStopPc
         stopPrice: stop,
         strength: lv.strength,
         score: lv.score,
+        untestedLevelsToTarget,          // v5.37: path clearance (count)
+        nearestUntestedAheadATR,         // v5.37: first reaction point ahead (ATR)
         // v5.23 (2026-05-08): propagate detectRetest fields so scoreSignal() can use them.
         // Additive — pre-existing consumers ignore these fields.
         convictionBodyATR: result.convictionBodyATR,
