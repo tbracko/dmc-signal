@@ -2500,11 +2500,20 @@ async function syncFillHistory() {
           body: JSON.stringify({ type: 'userFillsByTime', user: queryAddr, startTime: startMs, dex }) }))
     ];
     const responses = await Promise.all(requests);
-    const allFills = [];
+    const rawFills = [];
     for (const r of responses) {
       const data = await r.json();
-      if (Array.isArray(data)) allFills.push(...data);
+      if (Array.isArray(data)) rawFills.push(...data);
     }
+    // v5.38 FIX: dedup by tid — HL's main (no-dex) response now includes HIP-3 fills,
+    // so main+xyz overlap 100%. Without this, every backfilled close landed twice in
+    // the same 5s cluster and the recorded P&L/size was DOUBLED in .closed_trades.json.
+    const _seenT = new Set();
+    const allFills = rawFills.filter(f => {
+      const k = f.tid ?? `${f.hash}_${f.time}_${f.sz}`;
+      if (_seenT.has(k)) return false;
+      _seenT.add(k); return true;
+    });
 
     // Filter for closing fills (non-zero closedPnl)
     const closeFills = allFills.filter(f => parseFloat(f.closedPnl || '0') !== 0);
@@ -3475,7 +3484,7 @@ async function checkDailySummary() {
 let lastScanTs = 0;
 let scanCount  = 0;
 const BOT_STARTED_AT = Date.now();
-const BOT_VERSION    = 'v5.25';
+const BOT_VERSION    = 'v5.38'; // keep in sync with the top-of-file changelog on each deploy
 
 async function scanAll(){
   const coins = Object.keys(COINS);
@@ -3623,7 +3632,7 @@ async function main(){
       console.log(`Equity: $${_eq.toFixed(2)} | Caps: ${_caps} | Daily loss limit: $${HL.DAILY_LOSS_LIMIT?.toFixed(2) || 'N/A'}`);
       // Backfill any closed trades missed during downtime
       await syncFillHistory();
-      await sendTelegram(`🤖 <b>DMS Signal Bot v5.25 started (equity-proportional sizing)</b>\n✅ Auto-trading ENABLED\nEquity: $${_eq.toFixed(2)}\nCaps: ${_caps}\nDaily loss limit: $${HL.DAILY_LOSS_LIMIT?.toFixed(2) || 'N/A'}\nRisk: ${RISK_PCT}% | Min conf: ${MIN_CONFIDENCE}%`);
+      await sendTelegram(`🤖 <b>DMS Signal Bot ${BOT_VERSION} started</b>\n✅ Auto-trading ENABLED\nEquity: $${_eq.toFixed(2)}\nCaps: ${_caps}\nDaily loss limit: $${HL.DAILY_LOSS_LIMIT?.toFixed(2) || 'N/A'}\nRisk: ${RISK_PCT}% | Min conf: ${MIN_CONFIDENCE}%`);
     } else {
       console.warn('Auto-trading init FAILED -- running in alert-only mode');
       await sendTelegram('🤖 <b>DMS Signal Bot v5.17 started (inherit-protect KILL SWITCH)</b>\n⚠️ Auto-trading FAILED to init\nRunning in alert-only mode');
