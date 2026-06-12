@@ -20,6 +20,22 @@
 //   - HIP-3 TP orders use limit trigger (isMarket:false) to avoid taker fees (~8 bps saved on GOLD)
 //   - SL remains market trigger (isMarket:true) for guaranteed fills
 //
+// v5.39 changelog (2026-06-12) — ENTRY-SIGNAL LOG HARDENING:
+//   - BUG: /api/entry-signals returned count:0 on the live service while three bot
+//     entries (BTC, SP500, CL on 2026-06-11) executed post-restart. /api/missed had
+//     fresh data, so Railway FS writes work — the deployed file was missing the
+//     logEntrySignal call sites (paste regression). This deploy restores them AND
+//     makes the failure mode impossible to miss again:
+//   - logEntrySignal now mirrors every record into an in-memory buffer (capped 500)
+//     and tracks fs append errors. /api/entry-signals serves the union of file +
+//     memory (deduped by ts+asset+side) plus fsOk/lastFsError diagnostics.
+//   - /api/status now includes entrySignals: { memCount, fileCount, fsOk, lastFsError }
+//     — if memCount grows while fileCount stays 0, the log is broken; if both stay 0
+//     across executed trades, the deployed file is stale. Either way it's visible
+//     from the dashboard without Railway log access.
+//   - NOTE: .entry_signals.jsonl is ephemeral (wiped on every Railway redeploy).
+//     entry-quality-study.js should poll and archive locally between deploys.
+//
 // v5.38 changelog (2026-06-11) — PAPER-TRACKING FOR DISABLED ASSETS:
 //   - executeTrade now logs would-have-been entries on equityPct-0 assets (gold, HYPE)
 //     to .entry_signals.jsonl with paper:true (deduped per signal per 4h). Purpose:
@@ -403,10 +419,20 @@ const ENTRY_SIGNALS_FILE = path.join(__dirname, '.entry_signals.jsonl');   // v5
 // not bucket expectancy by conviction-ATR / level type / R:R-at-entry because this
 // data only existed in transient console logs. Append-only and tiny (~1 line per
 // trade, a few per day) — no pruning needed. Joinable to fills by ts + asset + side.
+// v5.39: in-memory mirror + fs-error tracking. The 2026-06-11 incident (live endpoint
+// served count:0 while trades executed) was invisible because the only failure signal
+// was a console.error in Railway logs. Now every record also lives in memory (survives
+// fs failures, capped at 500) and fs health is served via /api/status.
+const entrySignalsMem = [];                  // newest last, capped
+let entrySignalsFsError = null;              // last fs append error message (null = healthy)
 function logEntrySignal(rec) {
+  entrySignalsMem.push(rec);
+  if (entrySignalsMem.length > 500) entrySignalsMem.shift();
   try {
     fs.appendFileSync(ENTRY_SIGNALS_FILE, JSON.stringify(rec) + '\n');
+    entrySignalsFsError = null;
   } catch (e) {
+    entrySignalsFsError = e.message;
     console.error('logEntrySignal FAILED:', e.message); // never block a trade on logging
   }
 }
@@ -3484,7 +3510,7 @@ async function checkDailySummary() {
 let lastScanTs = 0;
 let scanCount  = 0;
 const BOT_STARTED_AT = Date.now();
-const BOT_VERSION    = 'v5.38'; // keep in sync with the top-of-file changelog on each deploy
+const BOT_VERSION    = 'v5.39'; // keep in sync with the top-of-file changelog on each deploy
 
 async function scanAll(){
   const coins = Object.keys(COINS);
@@ -3553,6 +3579,11 @@ function startHealthServer() {
           cachedEquity: HL ? (HL.cachedEquity || 0) : 0,
           ddGovernor: HL ? { active: !!HL.ddGovernorActive, net7d: HL.ddGovernor7dNet } : null,        // v5.36
           sp500ShortWatch: HL ? { mult: HL.sp500ShortMult, stats: HL.sp500ShortStats } : null,         // v5.36
+          entrySignals: (() => {                                                                       // v5.39: log health — memCount>0 with fileCount 0 ⇒ fs broken; both 0 across executed trades ⇒ stale deploy
+            let fileCount = 0;
+            try { if (fs.existsSync(ENTRY_SIGNALS_FILE)) fileCount = fs.readFileSync(ENTRY_SIGNALS_FILE, 'utf8').split('\n').filter(Boolean).length; } catch (_) {}
+            return { memCount: entrySignalsMem.length, fileCount, fsOk: entrySignalsFsError === null, lastFsError: entrySignalsFsError };
+          })(),
           coins: Object.keys(COINS).map(c => ({
             id: c, label: COINS[c].label,
             price: coinState[c]?.price || null,
@@ -3578,21 +3609,34 @@ function startHealthServer() {
         return res.end(JSON.stringify({ count: recent.length, entries: recent }));
       }
 
-      // ---- /api/entry-signals (v5.36) ----
+      // ---- /api/entry-signals (v5.36, hardened v5.39) ----
       // Serves the append-only per-executed-entry metadata log so local study tooling
       // (entry-quality-study.js) can fetch it without filesystem access to Railway.
+      // v5.39: serves the union of file + in-memory mirror (deduped by ts+asset+side)
+      // so records survive fs append failures; includes fs-health diagnostics.
       if (url === '/api/entry-signals') {
-        let entries = [];
+        let fileEntries = [];
         try {
           if (fs.existsSync(ENTRY_SIGNALS_FILE)) {
-            entries = fs.readFileSync(ENTRY_SIGNALS_FILE, 'utf8')
+            fileEntries = fs.readFileSync(ENTRY_SIGNALS_FILE, 'utf8')
               .split('\n').filter(Boolean)
               .map(l => { try { return JSON.parse(l); } catch { return null; } })
               .filter(Boolean);
           }
-        } catch (_) { /* return [] */ }
+        } catch (_) { /* fall through to memory */ }
+        const key = r => `${r.ts}_${r.asset}_${r.side}`;
+        const seen = new Set(fileEntries.map(key));
+        const entries = fileEntries.concat(entrySignalsMem.filter(r => !seen.has(key(r))));
+        entries.sort((a, b) => (a.ts || 0) - (b.ts || 0));
         res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-cache' });
-        return res.end(JSON.stringify({ count: entries.length, entries }));
+        return res.end(JSON.stringify({
+          count: entries.length,
+          fileCount: fileEntries.length,
+          memCount: entrySignalsMem.length,
+          fsOk: entrySignalsFsError === null,
+          lastFsError: entrySignalsFsError,
+          entries,
+        }));
       }
 
       res.writeHead(404, { 'Content-Type': 'text/plain' });
