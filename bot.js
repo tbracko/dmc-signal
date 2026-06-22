@@ -310,10 +310,15 @@ const MIN_CONFIDENCE  = parseInt(process.env.MIN_CONFIDENCE || '50'); // base mi
 const MAX_TRADES_DAY  = parseInt(process.env.MAX_TRADES_DAY || '10');
 const TRAIL_INTERVAL  = parseInt(process.env.TRAIL_INTERVAL || '30000'); // check trailing every 30s
 // v5.20 (2026-05-08): Hard cap on max-loss-per-trade. If level-based SL implies an
-// adverse move > MAX_LOSS_PCT (default 3%), executeTrade skips the entry. Catches
-// the May 3 HYPE pattern where SL was 4.7% from entry — reward asymmetry too poor
-// after fees. Tunable per-deploy via env var.
-const MAX_LOSS_PCT    = parseFloat(process.env.MAX_LOSS_PCT || '0.03'); // 3% of notional
+// adverse move > MAX_LOSS_PCT, executeTrade skips the entry. Catches the May 3 HYPE
+// pattern where SL was 4.7% from entry — reward asymmetry too poor after fees.
+// Tunable per-deploy via env var.
+// v5.40 (2026-06-22): loosened 0.03 → 0.04. Counterfactual over 90d AND 180d showed
+// the 3% gate was net-negative in every window (90d −$8.35, 180d −$3.13): it blocked
+// 3 TP winners for −$8.35 foregone while the one >3% tail bar it caught saved only
+// $5.22. Loosening to 4% removes the cost with zero realized downside across 180d;
+// the daily-loss gate (DAILY_LOSS_PCT) still backstops a true disaster day.
+const MAX_LOSS_PCT    = parseFloat(process.env.MAX_LOSS_PCT || '0.04'); // 4% of notional
 // v5.34 (2026-06-10): Post-TP2 trail multiplier for the final (TP3) tranche.
 // Counterfactual (counterfactual-trail.js, 11 TP3 tranches, SP500+CL, 2026-06-02):
 // the old "widen after TP2" trail (baseMult+1.0 → 3.5R HIP-3 / 3.0R standard) rode
