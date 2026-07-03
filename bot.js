@@ -85,7 +85,7 @@
 //     1.0% fixed +$10.11; MFE capture was 58%, target ≥70%. Re-validate after ~15 tranches.
 //   - 7-DAY DRAWDOWN GOVERNOR: syncDrawdownGovernor() computes rolling 7d realized bot net
 //     (closedPnl − fees, manual fills excluded via the >1.05× notional heuristic) every
-//     30 min. If net <= −3% of equity (DD_GOVERNOR_PCT), riskPct AND maxNotional are
+//     30 min. If net <= −5.75% of equity (DD_GOVERNOR_PCT, v5.42 — ~$30 trip), riskPct AND maxNotional are
 //     halved (DD_GOVERNOR_REDUCE) until 7d net >= 0. Catches slow multi-day bleeds the
 //     midnight-reset daily gate never sees (Jun 1–9: −2.3% with no single bad day).
 //     Telegram alert on state change. Env: DD_GOVERNOR_PCT / DD_GOVERNOR_REDUCE /
@@ -365,7 +365,7 @@ const SHORT_WATCH_MULT    = parseFloat(process.env.SHORT_WATCH_MULT || '0.5');
 // so a slow multi-day bleed (Jun 1–9: −2.3% with no single bad day) never trips anything.
 // If rolling 7d realized bot net P&L <= −(DD_GOVERNOR_PCT × equity), halve riskPct AND
 // maxNotional until the rolling 7d net recovers to >= 0. Disable: DD_GOVERNOR_DISABLE=true.
-const DD_GOVERNOR_PCT     = parseFloat(process.env.DD_GOVERNOR_PCT || '0.03');  // 3% of equity over 7d
+const DD_GOVERNOR_PCT     = parseFloat(process.env.DD_GOVERNOR_PCT || '0.0575'); // v5.42 (2026-07-03): 0.03→0.0575 per Tomaž — loosen governor to ~$30 trip at current equity ($521×0.0575=$29.95). 3% (~$15.63) was too tight post-$500-withdrawal — only ~2 avg losses tripped it. Stays equity-proportional (scales as equity grows). Halves sizing until 7d net >= 0.
 const DD_GOVERNOR_REDUCE  = parseFloat(process.env.DD_GOVERNOR_REDUCE || '0.5'); // halve sizing
 const DD_GOVERNOR_DISABLE = process.env.DD_GOVERNOR_DISABLE === 'true';
 
