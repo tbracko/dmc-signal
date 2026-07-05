@@ -905,6 +905,168 @@ function detectRetest(c, levelPrice, atrVal, coinMinStopPct, opts){
   };
 }
 
+// -- REGAIN / RECLAIM DETECTION (EXPERIMENTAL — NOT USED BY LIVE bot.js) ------
+// Added 2026-07-04 for an offline pattern comparison requested by Tomaž.
+// This is the OPPOSITE structure to detectRetest():
+//   detectRetest  = continuation. Break THROUGH a level in the trade direction,
+//                   pull back, hold, continue. (break is WITH the trade.)
+//   detectRegain  = failed-break reclaim. A candle CLOSES BEYOND a level AGAINST
+//                   the eventual trade, then the next 1–3 candles CLOSE BACK
+//                   WITHIN (reclaim). We trade the reclaim direction.
+//     Bullish regain (LONG):  a close BELOW the level, then 1–3 closes back ABOVE.
+//     Bearish regain (SHORT): a close ABOVE the level, then 1–3 closes back BELOW.
+// SL sits BEYOND the sweep extreme (the deepest poke), since the reclaim thesis
+// is invalidated if price returns through the sweep. This function is additive
+// and exported for the backtester only — bot.js never calls it.
+function detectRegain(c, levelPrice, atrVal, coinMinStopPct, opts){
+  const n = c.length;
+  if(n < 10) return { confirmed:false, reason:'insufficient candles' };
+  if(!atrVal || atrVal <= 0) return { confirmed:false, reason:'no ATR' };
+
+  opts = opts || {};
+  const breakDistFloorPct = (opts.breakDistFloorPct != null) ? opts.breakDistFloorPct : 0.0015;
+  const RECLAIM_WIN = opts.reclaimWin || 3;               // reclaim must complete within N bars of the sweep
+  const minBodyATR  = (opts.regainMinBodyATR != null) ? opts.regainMinBodyATR : 0.3;
+
+  const breakDist = Math.max(atrVal * 0.3, levelPrice * breakDistFloorPct); // "closed beyond" threshold
+  const closeBuf  = atrVal * 0.1;                                            // wick tolerance on closes
+  const cur = c[n - 1];
+
+  // ---- Step 1: current candle must have RECLAIMED the level (closed back on origin side) with a body
+  const bullBody = cur.c - cur.o;
+  const bearBody = cur.o - cur.c;
+  let direction = null, convictionBody = 0;
+  if(cur.c > levelPrice + closeBuf && bullBody >= atrVal * minBodyATR){
+    direction = 'LONG';  convictionBody = bullBody;
+  } else if(cur.c < levelPrice - closeBuf && bearBody >= atrVal * minBodyATR){
+    direction = 'SHORT'; convictionBody = bearBody;
+  } else {
+    return { confirmed:false, reason:'no reclaim conviction candle (body < minBodyATR or not back within level)' };
+  }
+
+  // ---- Step 2: find the SWEEP — most recent candle (within RECLAIM_WIN) that CLOSED BEYOND the level
+  //             AGAINST the trade direction (a failed break we then reclaimed).
+  let sweepBarsAgo = -1;
+  const MAXBACK = Math.min(RECLAIM_WIN, n - 1);
+  for(let i = 1; i <= MAXBACK; i++){
+    const k = c[n - 1 - i];
+    if(direction === 'LONG'  && k.c <= levelPrice - breakDist){ sweepBarsAgo = i; break; }
+    if(direction === 'SHORT' && k.c >= levelPrice + breakDist){ sweepBarsAgo = i; break; }
+  }
+  if(sweepBarsAgo === -1){
+    return { confirmed:false, reason:`no close beyond level in last ${MAXBACK} bars (nothing to reclaim)` };
+  }
+
+  // ---- Step 3: every candle AFTER the sweep (up to & incl. current) must have closed back on origin side.
+  //             This enforces a clean 1–3 candle reclaim rather than repeated closes beyond.
+  let sweepExtreme = direction === 'LONG' ? Infinity : -Infinity;
+  for(let i = sweepBarsAgo; i >= 0; i--){
+    const k = c[n - 1 - i];
+    if(i < sweepBarsAgo){
+      // reclaim candles: must be back within
+      if(direction === 'LONG'  && k.c < levelPrice - closeBuf) return { confirmed:false, reason:'reclaim incomplete (closed back below)' };
+      if(direction === 'SHORT' && k.c > levelPrice + closeBuf) return { confirmed:false, reason:'reclaim incomplete (closed back above)' };
+    }
+    // track the deepest poke across sweep + reclaim for the stop
+    if(direction === 'LONG'  && k.l < sweepExtreme) sweepExtreme = k.l;
+    if(direction === 'SHORT' && k.h > sweepExtreme) sweepExtreme = k.h;
+  }
+
+  return {
+    confirmed: true,
+    direction,
+    sweepBarsAgo,
+    reclaimBars: sweepBarsAgo,                 // # candles from the sweep to the confirmed reclaim
+    sweepExtreme,
+    convictionBodyATR: +(convictionBody / atrVal).toFixed(2),
+    reason: `regain: closed beyond ${sweepBarsAgo}b ago, reclaimed within ${sweepBarsAgo} bar(s), body ${(convictionBody/atrVal).toFixed(2)} ATR`
+  };
+}
+
+// -- dmsRegain() — EXPERIMENTAL REGAIN SIGNAL WRAPPER (shadow / paper only) ---
+// Mirrors dms()'s level selection + RR construction but swaps the detector to
+// detectRegain() and anchors the SL BEYOND the sweep extreme (reclaim
+// invalidation) instead of past the level. Returns type:'REGAIN' — deliberately
+// NOT 'BLIND_ENTRY' — so it can never enter the retest dedup / multi-TF
+// confluence / auto-trade paths in bot.js. Intended for gold+crude shadow
+// logging (paper:true) to forward-test the reclaim pattern with zero capital at
+// risk. No counter-trend / LTF gate here: we want every raw regain signal
+// logged for later validation. bot.js decides what to do with the result.
+function dmsRegain(c, a, dCandles, tf, htfBias, lowerCandles, coinMinRR, coinMinStopPct, feeEst, coinOpts){
+  coinMinRR = coinMinRR || 1.0;
+  coinMinStopPct = coinMinStopPct || 0.005;
+  feeEst = feeEst || 0.05;
+  coinOpts = coinOpts || {};
+  const n = c.length;
+  const minCandles = (tf==='1W'||tf==='1D') ? 12 : 20;
+  if(n < minCandles) return { sig:'NEUTRAL', type:'NONE', reason:'Insufficient data' };
+
+  const htfDir = (htfBias && htfBias.dir) ? htfBias.dir : (typeof htfBias === 'string' ? htfBias : 'UNCLEAR');
+  const usePDHL  = (tf !== '1W');
+  const asiaLvls = (tf === '15m') ? ((htfBias && htfBias.__asiaLevels) || []) : [];
+  const levels   = findDMCLevels(c, usePDHL ? dCandles : null, tf, asiaLvls);
+  const cur      = c[n-1];
+
+  const nearby = levels
+    .filter(l => Math.abs(l.price - cur.c) < a * 30 && l.score >= 15)
+    .sort((x, y) => Math.abs(x.price - cur.c) - Math.abs(y.price - cur.c));
+  if(nearby.length === 0){
+    return { sig:'NEUTRAL', type:'NONE', level:null, target:null, reason:'No qualifying levels within range' };
+  }
+
+  const maxToTest = Math.min(nearby.length, 5);
+  for(let li = 0; li < maxToTest; li++){
+    const lv = nearby[li];
+    const result = detectRegain(c, lv.price, a, coinMinStopPct, coinOpts);
+    if(!result.confirmed) continue;
+
+    const sig = result.direction;
+    const dirLower = sig === 'LONG' ? 'long' : 'short';
+    const tgt = findNextLevel(levels, cur.c, dirLower);
+
+    // SL BEYOND the sweep extreme; enforce per-coin minStopPct from entry.
+    const stopBuf = Math.max(a * 0.3, lv.price * 0.002);
+    let stop;
+    if(sig === 'LONG'){
+      stop = result.sweepExtreme - stopBuf;
+      stop = Math.min(stop, cur.c * (1 - coinMinStopPct));
+    } else {
+      stop = result.sweepExtreme + stopBuf;
+      stop = Math.max(stop, cur.c * (1 + coinMinStopPct));
+    }
+    const slDistPct = Math.abs(cur.c - stop) / cur.c;
+    if(slDistPct < coinMinStopPct) continue;
+
+    const rr = calcRR(cur.c, tgt.price, lv.price, stop, feeEst);
+    if(!rr || parseFloat(rr) < coinMinRR) continue;
+
+    const dist = ((lv.price - cur.c) / cur.c * 100).toFixed(2);
+    const htfAligned = (htfDir === 'UP' && sig === 'LONG') || (htfDir === 'DOWN' && sig === 'SHORT');
+    const htfNote = htfAligned ? ` . HTF ${htfDir} aligns`
+      : (((htfDir === 'UP' && sig === 'SHORT') || (htfDir === 'DOWN' && sig === 'LONG')) ? ` . HTF ${htfDir} counter` : '');
+
+    return {
+      sig,
+      type: 'REGAIN',           // NOT BLIND_ENTRY — cannot enter dedup/confluence/trade paths
+      pattern: 'regain',
+      level: lv.price,
+      target: tgt.price,
+      rr,
+      stopPrice: stop,
+      strength: lv.strength,
+      score: lv.score,
+      sweepExtreme: result.sweepExtreme,
+      reclaimBars: result.reclaimBars,
+      convictionBodyATR: result.convictionBodyATR,
+      htfDir,
+      htfAligned,
+      reason: `REGAIN ${tf} ${sig}: ${lv.source} $${fmt(lv.price)} . ${dist>0?'+':''}${dist}% . ${result.reason} . R:R ${rr} -> $${fmt(tgt.price)}${htfNote}`,
+      detail: `Regain (shadow) -- SL beyond sweep: $${fmt(stop)}`,
+    };
+  }
+  return { sig:'NEUTRAL', type:'NONE', level:null, target:null, reason:'No regain pattern' };
+}
+
 // -- DMS SIGNAL ENGINE (v5.11 -- RETEST STRATEGY, replaces v4.9 trap/bounce/breakout) --
 // Retest = only pattern we trade. Runs on every TF (15m, 1H, 4H, 1D, 1W); signals
 // aggregate into multi-TF confidence the same way as before. HTF direction still
@@ -1244,7 +1406,7 @@ const __DMS_SIGNALS_EXPORTS = {
   getAsiaRange, getAsiaLevels, getNYRange, getNYLevels, getLondonRange, getLondonLevels,
   findFibLevels, findDMCLevels, findNextLevel, findStopLevel, calcRR,
   hasRejection, hasStrongBodyBounce, hasMomentumAgainst, hasLTFAlignment,
-  detectRetest, dms, nextMove, scoreSignal,
+  detectRetest, detectRegain, dms, dmsRegain, nextMove, scoreSignal,
   CHOP_FILTER, MAX_HOLD_HOURS, FUNDING_EXIT_THRESHOLD, BREAKOUT_QUALITY, EXHAUSTION_THRESHOLDS,
 };
 if (typeof module !== 'undefined' && module.exports) {
