@@ -417,6 +417,13 @@ const MANUAL_SEEN_FILE   = path.join(__dirname, '.manual_seen.json');  // v5.7: 
 const MISSED_SIGNALS_FILE = path.join(__dirname, '.missed_signals.json');  // v5.10: diagnostic log of filtered signals
 const ENTRY_SIGNALS_FILE = path.join(__dirname, '.entry_signals.jsonl');   // v5.34: per-executed-signal metadata (JSONL, append-only)
 
+// v5.43 (2026-07-04): assets that run the REGAIN pattern in SHADOW mode — paper-log
+// only, never auto-traded. Gold + crude (the two assets where the regain backtest
+// showed a commodity tilt; see counterfactual-regain-2026-07-04.md). To promote a
+// regain variant to live, it must clear paper PF > 1.3 over >= 15 signals first.
+const REGAIN_SHADOW_ASSETS = new Set(['gold', 'crude']);
+const regainPaperDedup = {};   // { coinId: { key: lastTs } } — one paper record per regain signal per 4h
+
 // -- ENTRY SIGNAL LOG (v5.34) ---------------------------------------------------
 // Appends one JSONL line per EXECUTED entry with the full signal metadata
 // (confidence, R:R, level score/strength, retest fields, sizing context).
@@ -666,7 +673,7 @@ const {
   getAsiaRange, getAsiaLevels, getNYRange, getNYLevels, getLondonRange, getLondonLevels,
   findFibLevels, findDMCLevels, findNextLevel, findStopLevel, calcRR,
   hasRejection, hasStrongBodyBounce, hasMomentumAgainst, hasLTFAlignment,
-  detectRetest, dms, nextMove,
+  detectRetest, dms, dmsRegain, nextMove,
   CHOP_FILTER, MAX_HOLD_HOURS, FUNDING_EXIT_THRESHOLD, BREAKOUT_QUALITY, EXHAUSTION_THRESHOLDS,
 } = require('./signals');
 
@@ -3303,6 +3310,44 @@ async function scanCoin(coinId){
       } : {};
       const d = dms(c, a, dc, tf.l, htfCarrier, lower, coinMinRR, coinMinStopPct, coinFeeEst, coinOpts);
       allResults[tf.l] = d;
+
+      // v5.43 (2026-07-04): REGAIN SHADOW SCAN — gold + crude ONLY, PAPER-LOG ONLY.
+      // Forward-tests the reclaim/regain pattern (close beyond a level, then 1–3
+      // closes back within) with ZERO capital at risk. dmsRegain returns type
+      // 'REGAIN', which never enters the dedup/confluence/auto-trade paths below.
+      // We only append to .entry_signals.jsonl (paper:true, pattern:'regain').
+      // Validation gate before ANY equityPct: paper PF > 1.3 over >= 15 signals
+      // (same bar as the retest re-enable rule). Backtest that motivated this:
+      // counterfactual-regain-2026-07-04.md (regain has a commodity tilt).
+      // Wrapped so a shadow error can never disturb the live retest scan.
+      if (REGAIN_SHADOW_ASSETS.has(coinId)) {
+        try {
+          const rg = dmsRegain(c, a, dc, tf.l, htfCarrier, lower, coinMinRR, coinMinStopPct, coinFeeEst, coinOpts);
+          if (rg && rg.sig !== 'NEUTRAL' && rg.type === 'REGAIN') {
+            const rgKey = `${tf.l}_${rg.sig}_${Math.round((rg.level || 0) * 100)}`;
+            const lastRg = regainPaperDedup[coinId]?.[rgKey] || 0;
+            if (Date.now() - lastRg > 4 * 3600000) {  // one paper record per regain signal per 4h
+              (regainPaperDedup[coinId] = regainPaperDedup[coinId] || {})[rgKey] = Date.now();
+              const rgPx = coinState[coinId]?.price ?? c[c.length - 1]?.c ?? null;
+              logEntrySignal({
+                ts: Date.now(), time: new Date().toISOString(),
+                coinId, asset: COINS[coinId]?.asset, tf: tf.l,
+                side: rg.sig, paper: true, pattern: 'regain',
+                entry: rgPx, sl: rg.stopPrice ?? null,
+                slDistPct: (rgPx && rg.stopPrice) ? +((Math.abs(rgPx - rg.stopPrice) / rgPx).toFixed(4)) : null,
+                target: rg.target ?? null, rr: rg.rr ?? null,
+                level: rg.level ?? null, levelScore: rg.score ?? null,
+                sweepExtreme: rg.sweepExtreme ?? null,
+                reclaimBars: rg.reclaimBars ?? null,
+                convictionBodyATR: rg.convictionBodyATR ?? null,
+                htfDir: rg.htfDir ?? null, htfAligned: rg.htfAligned ?? null,
+                reason: rg.reason ?? null,
+              });
+              console.log(`REGAIN-SHADOW ${COINS[coinId]?.label} ${tf.l} ${rg.sig} @ $${fmt(rg.level || 0)} (paper) — ${rg.reason}`);
+            }
+          }
+        } catch (_) { /* shadow logging must never block or alter the live scan */ }
+      }
 
       // Log ALL non-NONE signals for diagnostics
       if(d.type !== 'NONE'){
