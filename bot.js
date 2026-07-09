@@ -3560,7 +3560,7 @@ async function checkDailySummary() {
 let lastScanTs = 0;
 let scanCount  = 0;
 const BOT_STARTED_AT = Date.now();
-const BOT_VERSION    = 'v5.39'; // keep in sync with the top-of-file changelog on each deploy
+const BOT_VERSION    = 'v5.44'; // keep in sync with the top-of-file changelog on each deploy (was stuck at v5.39 through v5.43 — made deploy verification via /api/status impossible)
 
 async function scanAll(){
   const coins = Object.keys(COINS);
@@ -3729,11 +3729,15 @@ async function main(){
       await sendTelegram(`🤖 <b>DMS Signal Bot ${BOT_VERSION} started</b>\n✅ Auto-trading ENABLED\nEquity: $${_eq.toFixed(2)}\nCaps: ${_caps}\nDaily loss limit: $${HL.DAILY_LOSS_LIMIT?.toFixed(2) || 'N/A'}\nRisk: ${RISK_PCT}% | Min conf: ${MIN_CONFIDENCE}%`);
     } else {
       console.warn('Auto-trading init FAILED -- running in alert-only mode');
-      await sendTelegram('🤖 <b>DMS Signal Bot v5.17 started (inherit-protect KILL SWITCH)</b>\n⚠️ Auto-trading FAILED to init\nRunning in alert-only mode');
+      // v5.44 (2026-07-09): use BOT_VERSION — the stale hardcoded "v5.17" banner caused a
+      // false zombie-instance scare when the keyless accomplished-nourishment service booted.
+      await sendTelegram(`🤖 <b>DMS Signal Bot ${BOT_VERSION} started</b>\n⚠️ Auto-trading FAILED to init\nRunning in alert-only mode`);
     }
   } else {
     console.log('Auto-trading DISABLED (set AUTO_TRADE=true and HL_PRIVATE_KEY to enable)');
-    await sendTelegram('🤖 <b>DMS Signal Bot v5.17 started (inherit-protect KILL SWITCH)</b>\nScanning BTC . HYPE . SPX . GOLD every 2 minutes.\n🔔 Alert-only mode');
+    // v5.44 (2026-07-09): use BOT_VERSION (see above) + label the sender so alert-only boots
+    // from secondary services are identifiable in Telegram.
+    await sendTelegram(`🤖 <b>DMS Signal Bot ${BOT_VERSION} started</b>\nScanning BTC . HYPE . SPX . GOLD every 2 minutes.\n🔔 Alert-only mode (no wallet key on this service)`);
   }
 
   await scanAll();
