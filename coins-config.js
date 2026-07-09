@@ -9,18 +9,20 @@
 //   No floors, no ceilings — scales automatically as the account grows.
 //   Daily loss limit also scales: 3% of equity (was flat -$10).
 //
-//   equityPct ratios (v5.40 — all active caps ×1.93 vs v5.35 to hold DOLLAR trade size
-//   constant after Tomaž withdrew $500 USDC into a separate investment, equity $1037→$537.
-//   These are NOT conviction changes; the per-trade dollar exposure equals the old v5.35 base.
-//   Risk-per-trade is now ~2% of the smaller account — daily-loss gate (3% = ~$16) is tighter.):
-//     BTC   1.93  (was 1.00) — flagship asset
+//   equityPct ratios (v5.43 — 2026-07-09 — RE-NORMALIZED to a 3% risk-per-trade target
+//   after a ~$2,852 USDC deposit on 2026-07-07 reset equity ~$537→~$2,868 (5.3×). The v5.40
+//   ×1.93 dollar-hold inflator was calibrated to the old $537 equity and is no longer
+//   meaningful, so it is dropped. equityPct is now set so equityPct × minStopPct = design
+//   risk, with RISK_PCT (bot.js) also raised 2→3 so it doesn't clip below 3%:
+//     BTC   3.00  (was 1.93) — 3.00 × minStop 1.0% = 3% risk (core)
 //     HYPE  0.00  (DISABLED v5.35) — 90d bot-only PF 0.68, net −$20; watch mode
-//     SP500 3.86  (was 2.00) — low vol TradFi index, the proven edge
+//     SP500 6.00  (was 3.86) — 6.00 × minStop 0.5% = 3% risk (proven edge, full core weight)
 //     GOLD  0.00  (DISABLED v5.31) — lost in every window; crude replaces the commodity slot
-//     CRUDE 0.58  (was 0.30) — high-vol energy commodity; dollar size held, NOT a scale-up
+//     CRUDE 1.20  (was 0.77) — 1.20 × minStop 0.5% = 0.6% risk; conservative 1/5-of-core, NO conviction change
+//   Daily-loss gate raised 0.03 → 0.06 (see DAILY_LOSS_PCT below) to allow ~2 SL hits at 3% risk.
 //
-//   At $1K equity:  BTC $1,000, SP500 $2,000, CRUDE $300
-//   At $5K equity:  BTC $5,000, SP500 $10,000, CRUDE $1,500
+//   At $2.87K equity:  BTC $8,600, SP500 $17,200, CRUDE $3,440 (notional caps)
+//   Risk per trade:    BTC/SP500 3% (~$86), CRUDE 0.6% (~$17)
 //
 // Edit only this file when adjusting:
 //   - equityPct per-coin allocation
@@ -160,15 +162,17 @@
 //                        candle bodies mean this filter blocks too many winners.
 
 const COINS = {
-  bitcoin:     { id:'bitcoin',     label:'BTC',    apiSym:'BTCUSDT',    asset:'BTC',        exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.010, equityPct: 1.93, isHIP3: false, minBreakBodyPct: 0.008, closeExitR: 1.0, hardSlMult: 1.3 }, // v5.40 (2026-06-27): 1.00→1.93 — Tomaž moved $500 USDC into a separate investment (bot equity $1037→$537); equityPct ×1.93 holds DOLLAR trade size constant. NOTE: risk-per-trade is now ~2% of the smaller account. // v5.37: wick immunity — exit on 15m CLOSE through level SL, hard stop 1.3R
+  bitcoin:     { id:'bitcoin',     label:'BTC',    apiSym:'BTCUSDT',    asset:'BTC',        exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.010, equityPct: 3.00, isHIP3: false, minBreakBodyPct: 0.008, closeExitR: 1.0, hardSlMult: 1.3 }, // v5.43 (2026-07-09): 1.93→3.00 — re-normalized to 3% risk-per-trade after Jul-7 deposit reset equity to ~$2,868. 3.00 × minStop 1.0% = 3% design risk. Drops the v5.40 ×1.93 dollar-hold inflator (no longer meaningful at 5.3× equity). // v5.37: wick immunity — exit on 15m CLOSE through level SL, hard stop 1.3R
   hyperliquid: { id:'hyperliquid', label:'HYPE',   apiSym:'HYPEUSDT',   asset:'HYPE',       exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, equityPct: 0.00, isHIP3: false }, // v5.35 (2026-06-10): DISABLED — 90d bot-only PF 0.68, net ≈ −$20, no bot entries since May 16. Watch mode. Re-enable at 0.125 only after PF > 1.3 over ≥15 RTs.
-  sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',  asset:'xyz:SP500',  exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, equityPct: 3.86, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1, closeExitR: 0.5 }, // v5.40 (2026-06-27): 2.00→3.86 — ×1.93 to hold dollar trade size after $500 USDC withdrawal ($1037→$537 equity). // v5.37: structure close-exit — 15m close >=0.5R against entry exits all
+  sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',  asset:'xyz:SP500',  exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, equityPct: 6.00, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1, closeExitR: 0.5 }, // v5.43 (2026-07-09): 3.86→6.00 — re-normalized to 3% risk-per-trade after Jul-7 deposit (equity ~$2,868). 6.00 × minStop 0.5% = 3% design risk. Proven edge stays at full core weight. // v5.37: structure close-exit — 15m close >=0.5R against entry exits all
   gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',   asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.00, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 }, // v5.31: DISABLED (equityPct 0 = no auto-trade). Lost in every window; crude took the commodity slot. Still scanned/displayed (watch mode). Set equityPct back to 0.40 to re-enable.
-  crude:       { id:'crude',       label:'CRUDE',  apiSym:'xyz:CL',     asset:'xyz:CL',     exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.77, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1, closeExitR: 0.5 }, // v5.41 (2026-06-28): 0.58→0.77 — CONVICTION INCREASE (0.30→0.40 base ×1.93 dollar-hold). 90d validation met: 32 RTs, 20W/12L (62.5%), PF 1.56, +$12.61, expectancy +$0.39/close; no crude trade hit the 3% max-loss gate. Per Tomaž 2026-06-28. SP500 remains the dominant edge — this is a modest diversifier bump, not a reallocation. // closeExitR 0.5 (matches SP500): structure close-exit for the squeeze failure mode; losers are short counter-squeezes ~1.5%.
+  crude:       { id:'crude',       label:'CRUDE',  apiSym:'xyz:CL',     asset:'xyz:CL',     exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 1.20, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1, closeExitR: 0.5 }, // v5.43 (2026-07-09): 0.77→1.20 — re-normalization ONLY, NOT a conviction change. Keeps crude at its conservative 1/5-of-core weight: 1.20 × minStop 0.5% = 0.6% risk (core is 3%). Crude's 90d edge (PF ~1.4) still holds; a real conviction bump toward core weight is a separate later decision. // closeExitR 0.5 (matches SP500): structure close-exit for the squeeze failure mode; losers are short counter-squeezes ~1.5%.
 };
 
-// Daily loss limit as fraction of equity (3%). Bot computes: equity × DAILY_LOSS_PCT.
-const DAILY_LOSS_PCT = 0.03;
+// Daily loss limit as fraction of equity. Bot computes: equity × DAILY_LOSS_PCT.
+// v5.43 (2026-07-09): 0.03 → 0.06. Raised alongside the 3% risk-per-trade bump so the
+// gate allows ~2 full SL hits before throttling (at 3% risk, a 3% gate tripped after one).
+const DAILY_LOSS_PCT = 0.06;
 
 // Tag a fill as MANUAL when its opening notional > dynamic maxNotional × this multiplier.
 // Bot hard-blocks at 1.10×, so anything > 1.05× cannot have been bot-generated.
