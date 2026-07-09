@@ -405,9 +405,10 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
     <div class="toggle-row">
       <div>
         <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#dce8f5;margin-bottom:2px">Execute trades on Hyperliquid</div>
-        <div style="font-family:'Sora',sans-serif;font-size:11px;color:#3d5068">Signals with >50% confidence will auto-execute</div>
+        <div style="font-family:'Sora',sans-serif;font-size:11px;color:#e05555">DISABLED in app (v5.44) — the Railway bot is the only auto-trader. Manual trading still works.</div>
       </div>
-      <label class="toggle"><input type="checkbox" id="hl-auto-trade" onchange="localStorage.setItem('hl_auto_trade',this.checked);if(typeof HL!=='undefined')HL.enabled=this.checked"><span class="toggle-slider"></span></label>
+      <!-- v5.44 (2026-07-09): app auto-trade KILLED. On 2026-07-09 an open dashboard tab auto-entered SP500 sized by the app's stale v5.6 $500 dollar caps + 1% risk (0.067 @ 7513 vs the bot's intended 3%/$86 risk), racing the Railway bot which manages the same signals. The app is a dashboard + manual-trade tool only. -->
+      <label class="toggle"><input type="checkbox" id="hl-auto-trade" disabled onchange="this.checked=false;localStorage.setItem('hl_auto_trade','false');showToast('App auto-trade permanently disabled (v5.44)','Railway bot is the only auto-trader',true)"><span class="toggle-slider"></span></label>
     </div>
   </div>
 
@@ -3490,7 +3491,12 @@ const HL = {
       this.address = this.wallet.address;
       this.masterAddress = localStorage.getItem('hl_master_addr') || '';
       await this.fetchMeta();
-      this.enabled = localStorage.getItem('hl_auto_trade') === 'true';
+      // v5.44 (2026-07-09): app auto-trade KILLED — hard-forced off regardless of the old
+      // localStorage flag (stale tabs on other devices included). The Railway bot (bot.js,
+      // v5.43 equity-proportional sizing) is the ONLY auto-trader. The app's sizing was 14
+      // versions stale (1% risk + v5.6 $500 dollar caps) and raced the bot on the same signals.
+      this.enabled = false;
+      localStorage.setItem('hl_auto_trade', 'false');
       this.tradesToday = 0;
       this.lastTradeDay = new Date().toDateString();
       // Load persisted activeTrades BEFORE sync so we can detect closes across restarts
@@ -4187,6 +4193,12 @@ const HL = {
 
   // ── Execute full trade: entry + SL + TP ──
   async executeTrade(coinId, signal, confidence) {
+    // v5.44 (2026-07-09): HARD BLOCK — app auto-entries permanently disabled. executeTrade is
+    // only reachable from the auto-trade paths (single-TF fire, reverse-on-opposite, MULTI-TF);
+    // manual trades go through manualOpenTrade()/placeOrder and are unaffected. Kept as a
+    // belt-and-suspenders guard in case a future edit re-enables this.enabled.
+    console.warn('HL: executeTrade blocked — app auto-trade is disabled (v5.44), Railway bot only');
+    if (true) return null;
     const SYM = { bitcoin: 'BTC', hyperliquid: 'HYPE', sp500: 'S&P500', gold: 'GOLD', crude: 'CRUDE' };
     const asset = SYM[coinId];
     if (!asset || !this.enabled || !this.wallet) return null;
