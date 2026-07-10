@@ -134,19 +134,19 @@
 const HL_API = 'https://api.hyperliquid.xyz/info';
 const ADDR = '0x1a41f3Fd141B77aF3A0Ee9dE847328805Cf40C86';
 
-// v5.44 (2026-07-10): synced to coins-config.js v5.44 (crude 1.20→2.40). Caps are EQUITY-PROPORTIONAL
-// (equity × equityPct, computed live from spot USDC) — the old static dollar caps
-// ($200/$500) were pre-v5.25 relics that misclassified every fill after the Jul-7
-// deposit (equity ~$2,868). equityPct 0 = asset disabled (bot won't auto-trade it).
+// v5.45 (2026-07-10): synced to coins-config.js v5.45 — GOLD + HYPE REMOVED (were
+// watch-mode since v5.31/v5.35), XYZ100 (Nasdaq-100 perp) ADDED at equityPct 1.50
+// (0.75% risk; new-asset study counterfactual-xyz100-2026-07-10.md). Caps are
+// EQUITY-PROPORTIONAL (equity × equityPct, computed live from spot USDC).
+// Old gold/HYPE fills inside the 7d window render via the raw-name fallback below.
 const COIN_CFG = {
-  'BTC':       { label:'BTC',    equityPct:3.00, isHIP3:false }, // v5.43: 3% risk (3.00 × minStop 1.0%)
-  'HYPE':      { label:'HYPE',   equityPct:0.00, isHIP3:false }, // v5.35: DISABLED (watch mode)
-  'xyz:SP500': { label:'S&P500', equityPct:6.00, isHIP3:true  }, // v5.43: 3% risk (6.00 × minStop 0.5%)
-  'xyz:GOLD':  { label:'GOLD',   equityPct:0.00, isHIP3:true  }, // v5.31: DISABLED
-  'xyz:CL':    { label:'CRUDE',  equityPct:2.40, isHIP3:true  }, // v5.44: 1.2% risk (conviction bump 1.20→2.40 after 90d validation, PF 1.38)
+  'BTC':        { label:'BTC',    equityPct:3.00, isHIP3:false }, // v5.43: 3% risk (3.00 × minStop 1.0%)
+  'xyz:SP500':  { label:'S&P500', equityPct:6.00, isHIP3:true  }, // v5.43: 3% risk (6.00 × minStop 0.5%)
+  'xyz:CL':     { label:'CRUDE',  equityPct:2.40, isHIP3:true  }, // v5.44: 1.2% risk (conviction bump 1.20→2.40 after 90d validation, PF 1.38)
+  'xyz:XYZ100': { label:'XYZ100', equityPct:1.50, isHIP3:true  }, // v5.45: NEW — 0.75% risk (¼ core; corr 0.89 to SP500), validate at 15–20 RTs
 };
 const MANUAL_MULT = 1.05;
-const COIN_ORDER = ['BTC','HYPE','xyz:SP500','xyz:GOLD','xyz:CL'];
+const COIN_ORDER = ['BTC','xyz:SP500','xyz:CL','xyz:XYZ100'];
 
 // v5.44: bot orders carry a client order id (cloid) prefixed '0x444d5300' ("DMS\0")
 // since bot v5.36 — classification is EXACT for tagged fills. Fills with no cloid are
