@@ -134,16 +134,30 @@
 const HL_API = 'https://api.hyperliquid.xyz/info';
 const ADDR = '0x1a41f3Fd141B77aF3A0Ee9dE847328805Cf40C86';
 
-// Mirror coins-config.js — keep in sync if caps change.
-const COIN_CAPS = {
-  'BTC':       { label:'BTC',    cap:200, isHIP3:false },
-  'HYPE':      { label:'HYPE',   cap:100, isHIP3:false },
-  'xyz:SP500': { label:'S&P500', cap:500, isHIP3:true  },
-  'xyz:GOLD':  { label:'GOLD',   cap:200, isHIP3:true  },
-  'xyz:CL':    { label:'CRUDE',  cap:200, isHIP3:true  },
+// v5.44 (2026-07-10): synced to coins-config.js v5.44 (crude 1.20→2.40). Caps are EQUITY-PROPORTIONAL
+// (equity × equityPct, computed live from spot USDC) — the old static dollar caps
+// ($200/$500) were pre-v5.25 relics that misclassified every fill after the Jul-7
+// deposit (equity ~$2,868). equityPct 0 = asset disabled (bot won't auto-trade it).
+const COIN_CFG = {
+  'BTC':       { label:'BTC',    equityPct:3.00, isHIP3:false }, // v5.43: 3% risk (3.00 × minStop 1.0%)
+  'HYPE':      { label:'HYPE',   equityPct:0.00, isHIP3:false }, // v5.35: DISABLED (watch mode)
+  'xyz:SP500': { label:'S&P500', equityPct:6.00, isHIP3:true  }, // v5.43: 3% risk (6.00 × minStop 0.5%)
+  'xyz:GOLD':  { label:'GOLD',   equityPct:0.00, isHIP3:true  }, // v5.31: DISABLED
+  'xyz:CL':    { label:'CRUDE',  equityPct:2.40, isHIP3:true  }, // v5.44: 1.2% risk (conviction bump 1.20→2.40 after 90d validation, PF 1.38)
 };
 const MANUAL_MULT = 1.05;
 const COIN_ORDER = ['BTC','HYPE','xyz:SP500','xyz:GOLD','xyz:CL'];
+
+// v5.44: bot orders carry a client order id (cloid) prefixed '0x444d5300' ("DMS\0")
+// since bot v5.36 — classification is EXACT for tagged fills. Fills with no cloid are
+// NOT the Railway bot: manual UI trades or the dashboard app (whose auto-trade was
+// killed in v5.44 after it placed an app-sized SP500 entry on 2026-07-09).
+const DMS_CLOID_PREFIX = '0x444d5300';
+function isBotCloid(c) { return typeof c === 'string' && c.toLowerCase().startsWith(DMS_CLOID_PREFIX); }
+function capUSD(coin, equity) {
+  const def = COIN_CFG[coin];
+  return (def && def.equityPct > 0 && equity > 0) ? equity * def.equityPct : 0;
+}
 
 async function postInfo(body) {
   const r = await fetch(HL_API, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
@@ -151,11 +165,13 @@ async function postInfo(body) {
   return r.json();
 }
 
-function classify(coin, notional) {
-  const def = COIN_CAPS[coin];
-  if (!def) return { source:'unknown', ratio:null };
-  const ratio = notional / def.cap;
-  return { source: ratio > MANUAL_MULT ? 'manual' : 'bot', ratio };
+// v5.44: cloid-exact classification. hasBotCloid → bot; anything untagged → manual/app.
+// The notional×cap heuristic is only a display aid now (Cap× column), not the classifier —
+// with equity-scaled caps it could never separate sources reliably anyway.
+function classify(coin, notional, equity, hasBotCloid) {
+  const cap = capUSD(coin, equity);
+  const ratio = cap > 0 ? notional / cap : null;
+  return { source: hasBotCloid ? 'bot' : 'manual/app', ratio };
 }
 
 function fmtAge(ms) {
@@ -205,7 +221,13 @@ function render({ spot, perpDefault, perpXyz, fills, status, now }) {
     const upH = status.uptimeSec / 3600;
     const uptimeStr = upH < 1 ? Math.round(upH*60)+' min' : upH < 48 ? upH.toFixed(1)+' h' : (upH/24).toFixed(1)+' d';
     botProcEl.innerHTML = '<span class="badge good">ALIVE</span>';
-    botProcSubEl.textContent = 'v' + status.version + ' · uptime ' + uptimeStr + ' · auto-trade ' + (status.autoTradeEnabled ? 'ON' : 'OFF');
+    // v5.44: status.version already includes the 'v' prefix (was rendering "vv5.39").
+    // Also surface entry-signal log health (v5.39) and the 7d drawdown governor (v5.34).
+    const esOk = status.entrySignals ? (status.entrySignals.fsOk ? 'log OK' : 'LOG FS ERR') : '';
+    const dd = status.ddGovernor && status.ddGovernor.active ? ' · DD-GOVERNOR ACTIVE' : '';
+    botProcSubEl.textContent = status.version + ' · uptime ' + uptimeStr +
+      ' · auto-trade ' + (status.autoTradeEnabled ? 'ON' : 'OFF') +
+      (esOk ? ' · ' + esOk : '') + dd;
   } else {
     botProcEl.innerHTML = '<span class="badge neu">OFFLINE / LOCAL</span>';
     botProcSubEl.textContent = 'No /api/status — page served from disk, not from bot';
@@ -270,8 +292,9 @@ function render({ spot, perpDefault, perpXyz, fills, status, now }) {
     const pnl = group.reduce((s,f)=>s+parseFloat(f.closedPnl||'0'),0);
     const fee = group.reduce((s,f)=>s+parseFloat(f.fee||'0'),0);
     const notional = sz * wpx;
-    const isOpen = (first.dir||'').startsWith('Open');
-    const c = isOpen ? classify(first.coin, notional) : { source:'inherit', ratio:notional / (COIN_CAPS[first.coin]?.cap || 1) };
+    // v5.44: cloid-exact for opens AND closes (bot SL/TP/close orders are tagged too)
+    const hasBotCloid = group.some(f => isBotCloid(f.cloid));
+    const c = classify(first.coin, notional, usdc, hasBotCloid);
     orders.push({
       oid, time:first.time, coin:first.coin, dir:first.dir, side:first.side,
       sz, px:wpx, notional, pnl, fee,
@@ -305,7 +328,7 @@ function render({ spot, perpDefault, perpXyz, fills, status, now }) {
   const ctbody = document.querySelector('#coinTable tbody');
   ctbody.innerHTML = '';
   for (const coin of COIN_ORDER) {
-    const def = COIN_CAPS[coin];
+    const def = COIN_CFG[coin];
     const coinOrders = orders.filter(o => o.coin === coin);
     const opensOfCoin = coinOrders.filter(o => o.dir.startsWith('Open'));
     const botCount = opensOfCoin.filter(o => o.source === 'bot').length;
@@ -328,7 +351,9 @@ function render({ spot, perpDefault, perpXyz, fills, status, now }) {
       '<td>' + (lastAny
         ? new Date(lastAny.time).toISOString().slice(5,16).replace('T',' ') + ' ' + lastAny.dir
         : '<span class="dim">—</span>') + '</td>' +
-      '<td class="num dim">$' + def.cap + '</td>';
+      '<td class="num dim">' + (def.equityPct > 0
+        ? '$' + Math.round(capUSD(coin, usdc)).toLocaleString() + ' <span style="font-size:10px">(' + def.equityPct.toFixed(2) + '×eq)</span>'
+        : '<span class="badge neu">OFF</span>') + '</td>';
     ctbody.appendChild(tr);
   }
 
@@ -336,9 +361,9 @@ function render({ spot, perpDefault, perpXyz, fills, status, now }) {
   const ftbody = document.querySelector('#fillTable tbody');
   ftbody.innerHTML = '';
   for (const o of orders.slice(0, 14)) {
-    const def = COIN_CAPS[o.coin] || { label:o.coin, cap:1 };
+    const def = COIN_CFG[o.coin] || { label:o.coin, equityPct:0 };
     const ratioStr = o.ratio != null ? o.ratio.toFixed(2)+'×' : '—';
-    const sourceBadge = o.source === 'bot' ? 'bot' : o.source === 'manual' ? 'man' : 'neu';
+    const sourceBadge = o.source === 'bot' ? 'bot' : 'man';
     const tr = document.createElement('tr');
     tr.innerHTML =
       '<td>' + new Date(o.time).toISOString().slice(5,16).replace('T',' ') + '</td>' +
