@@ -277,13 +277,12 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <body>
 
 <div class="topbar">
-  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v5.11</span></span>
+  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v5.45</span></span>
   <select id="coin-sel" onchange="switchCoin(this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:4px 8px;cursor:pointer;letter-spacing:.04em">
     <option value="bitcoin" data-sym="BTCUSDT" data-label="BTC/USD" selected>BTC/USD</option>
-    <option value="hyperliquid" data-sym="HYPEUSDT" data-label="HYPE/USD">HYPE/USD</option>
     <option value="sp500" data-sym="xyz:S&amp;P500" data-label="S&amp;P500">S&amp;P500</option>
-    <option value="gold" data-sym="XAUUSD" data-label="GOLD/USD">GOLD/USD</option>
     <option value="crude" data-sym="xyz:CL" data-label="CRUDE/USD">CRUDE/USD</option>
+    <option value="xyz100" data-sym="xyz:XYZ100" data-label="XYZ100">XYZ100</option>
   </select>
   <div class="topbar-r">
     <span id="tb-price">—</span>
@@ -545,10 +544,9 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
         <div class="mf-label">Coin</div>
         <select class="mf-select" id="mf-coin">
           <option value="BTC">BTC</option>
-          <option value="HYPE">HYPE</option>
           <option value="SPX">SPX</option>
-          <option value="GOLD">GOLD</option>
           <option value="CRUDE">CRUDE</option>
+          <option value="XYZ100">XYZ100</option>
         </select>
       </div>
       <div class="mf-field">
@@ -618,10 +616,9 @@ const TFS=[{l:'1W',iv:'W',w:5},{l:'1D',iv:'D',w:4},{l:'4H',iv:'240',w:3},{l:'1H'
 //   were misclassified as manual-inherited and their SL/TP weren't surfaced in the UI.
 const COINS = {
   bitcoin:     { id:'bitcoin',     label:'BTC/USD',  sym:'BINANCE:BTCUSDT', shortLabel:'BTC',  apiSym:'BTCUSDT',  exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.007, equityPct: 3.00, maxNotional: 200, isHIP3: false },  // v5.43 (2026-07-09): 1.93→3.00 — re-normalized to 3% risk-per-trade after Jul-7 deposit (equity ~$2,868); drops v5.40 ×1.93 inflator — synced w/ coins-config.js
-  hyperliquid: { id:'hyperliquid', label:'HYPE/USD', sym:'BYBIT:HYPEUSDT',  shortLabel:'HYPE', apiSym:'HYPEUSDT', exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, equityPct: 0.00, maxNotional: 100, isHIP3: false },  // v5.35 (2026-06-10): DISABLED — 90d bot-only PF 0.68, net ≈ −$20. Watch mode (synced w/ coins-config.js)
   sp500:       { id:'sp500',       label:'S&P500',   sym:'OANDA:SPX500USD', shortLabel:'SPX',  apiSym:'xyz:SP500', exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, equityPct: 6.00, maxNotional: 500, isHIP3: true },  // v5.43 (2026-07-09): 3.86→6.00 — re-normalized to 3% risk-per-trade after Jul-7 deposit (equity ~$2,868); 6.00 × 0.5% = 3% — synced w/ coins-config.js
-  gold:        { id:'gold',        label:'GOLD/USD', sym:'OANDA:XAUUSD',    shortLabel:'GOLD', apiSym:'xyz:GOLD', exchange:'hyperliquid', minRR: 1.5, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.00, maxNotional: 300, isHIP3: true },  // v5.31: DISABLED (equityPct 0 = no auto-trade) — lost in every window; crude took commodity slot. Still scanned/displayed. Restore 0.40 to re-enable.
   crude:       { id:'crude',       label:'CRUDE/USD',sym:'OANDA:WTICOUSD',  shortLabel:'CRUDE',apiSym:'xyz:CL',   exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 2.40, maxNotional: 200, isHIP3: true },  // v5.44 (2026-07-10): 1.20→2.40 — CONVICTION BUMP (half-step toward core) after validation: 90d 37 RTs, PF 1.38, +$11.52. 2.40 × minStop 0.5% = 1.2% risk — synced w/ coins-config.js
+  xyz100:      { id:'xyz100',      label:'XYZ100',   sym:'OANDA:NAS100USD', shortLabel:'NDX',  apiSym:'xyz:XYZ100', exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, equityPct: 1.50, maxNotional: 200, isHIP3: true },  // v5.45 (2026-07-10): NEW ASSET — Nasdaq-100 perp. Raw retest beat SP500 at every TF (counterfactual-xyz100-2026-07-10.md). 1.50 × 0.5% = 0.75% risk (¼ core — corr 0.89 to SP500). Validate at 15–20 RTs — synced w/ coins-config.js
 };
 
 // v5.22 (2026-05-08): Pure signal-engine functions imported from /signals.js (UMD).
@@ -693,15 +690,14 @@ const HL_INTERVALS = { '1W':'1w', '1D':'1d', '4H':'4h', '1H':'1h', '15m':'15m' }
 let activeCoin = 'bitcoin'; // currently viewed coin
 
 // v5.0 FIX #6: Single source of truth for symbol-to-coinId mapping (was duplicated 8+ times)
-const SYM_TO_COIN_ID = { BTC:'bitcoin', HYPE:'hyperliquid', SPX:'sp500', 'S&P500':'sp500', 'xyz:SP500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold', CRUDE:'crude', CL:'crude', 'xyz:CL':'crude' };
+const SYM_TO_COIN_ID = { BTC:'bitcoin', SPX:'sp500', 'S&P500':'sp500', 'xyz:SP500':'sp500', CRUDE:'crude', CL:'crude', 'xyz:CL':'crude', NDX:'xyz100', XYZ100:'xyz100', 'xyz:XYZ100':'xyz100' }; // v5.45: GOLD/HYPE removed with the assets — unmapped syms fall back to raw name in renderers
 
 // Per-coin state — keyed by coin id
 const coinState = {
   bitcoin:  { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
-  hyperliquid: { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
   sp500:    { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
-  gold:     { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
   crude:    { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
+  xyz100:   { results:{}, allLevels:[], price:0, change:0, htfDir:'UNCLEAR', running:false, timer:null, sentAlerts:{}, lastSignalLevel:{}, asiaLevels:[], candles15m:null, lastStory:null },
 };
 
 // Convenience accessors for active coin (used by render functions)
@@ -2928,7 +2924,7 @@ function processTF(i, candles, dCandles, coinId, lowerCandles){
         let conf = totalW>0 ? Math.round(Math.max(wL,wS)/totalW*100) : 0;
         const baseMinConf = parseInt(localStorage.getItem('hl_min_conf') || '50');
         const majorSig = wL > wS ? 'LONG' : wS > wL ? 'SHORT' : null;
-        const SYM = { bitcoin:'BTC', hyperliquid:'HYPE', sp500:'SPX', gold:'GOLD', crude:'CRUDE' };
+        const SYM = { bitcoin:'BTC', sp500:'SPX', crude:'CRUDE', xyz100:'NDX' };
         const sym = SYM[coinId] || coinId;
 
         // v5.11: Counter-trend gate loosened from v4.9 hard block.
@@ -2963,9 +2959,7 @@ function processTF(i, candles, dCandles, coinId, lowerCandles){
           return false; // allow
         })()){
           // blocked by v5.4 session-scaled sizing (cap = 0)
-        // v5.1: GOLD session filter (synced w/ bot.js)
-        } else if(coinId === 'gold' && d.sig === 'LONG' && !(new Date().getUTCHours() >= 13 && new Date().getUTCHours() < 20)){
-          console.log(`HL auto-trade BLOCKED ${sym} LONG: outside gold session (${new Date().getUTCHours()}:00 UTC)`);
+        // v5.45: GOLD session filter branch removed (gold deleted from COINS)
         // v5.3: Regime-aware directional blocking (synced w/ bot.js)
         // When 1W + 1D both agree on direction, block counter-regime trades with <80% confidence
         } else if((() => {
@@ -4018,7 +4012,7 @@ const HL = {
     if (!this._pendingTrims || this._pendingTrims.length === 0) return;
     const queue = this._pendingTrims;
     this._pendingTrims = [];
-    const SYM = { bitcoin: 'BTC', hyperliquid: 'HYPE', sp500: 'S&P500', gold: 'GOLD', crude: 'CRUDE' };
+    const SYM = { bitcoin: 'BTC', sp500: 'S&P500', crude: 'CRUDE', xyz100: 'XYZ100' };
     for (const t of queue) {
       try {
         const coin = COINS[t.coinId];
@@ -4141,7 +4135,7 @@ const HL = {
   // ── Translate short coin symbols to HL asset names (for HIP-3 assets) ──
   resolveAsset(asset) {
     // Check explicit mappings FIRST — SPX exists on main dex but we want xyz:SP500
-    const hlMap = { GOLD: 'xyz:GOLD', 'S&P500': 'xyz:SP500', SPX: 'xyz:SP500', CRUDE: 'xyz:CL' };
+    const hlMap = { 'S&P500': 'xyz:SP500', SPX: 'xyz:SP500', CRUDE: 'xyz:CL', NDX: 'xyz:XYZ100', XYZ100: 'xyz:XYZ100' }; // v5.45: GOLD removed with the asset
     if (hlMap[asset]) return hlMap[asset];
     return asset;
   },
@@ -4199,7 +4193,7 @@ const HL = {
     // belt-and-suspenders guard in case a future edit re-enables this.enabled.
     console.warn('HL: executeTrade blocked — app auto-trade is disabled (v5.44), Railway bot only');
     if (true) return null;
-    const SYM = { bitcoin: 'BTC', hyperliquid: 'HYPE', sp500: 'S&P500', gold: 'GOLD', crude: 'CRUDE' };
+    const SYM = { bitcoin: 'BTC', sp500: 'S&P500', crude: 'CRUDE', xyz100: 'XYZ100' };
     const asset = SYM[coinId];
     if (!asset || !this.enabled || !this.wallet) return null;
     // v5.31: equityPct 0 = asset disabled (no auto-trade). GOLD off as of v5.31.
@@ -4994,7 +4988,7 @@ function prefillTrade(coin, sig, sl, tp){
     const accountSize = parseFloat(localStorage.getItem('account_size') || '100');
     const riskPct = parseFloat(localStorage.getItem('risk_pct') || '1');
     const coinIdMap = SYM_TO_COIN_ID;
-    const hlAsset = { BTC:'BTC', HYPE:'HYPE', SPX:'xyz:SP500', GOLD:'xyz:GOLD' };
+    const hlAsset = { BTC:'BTC', SPX:'xyz:SP500', CRUDE:'xyz:CL', XYZ100:'xyz:XYZ100' }; // v5.45: GOLD/HYPE removed; CRUDE/XYZ100 added (szDec lookup)
     const cid = coinIdMap[coin];
     const px = cid ? coinState[cid].price : 0;
     if(px && sl){
@@ -5019,7 +5013,7 @@ async function manualOpenTrade(){
 
   const rawCoin = document.getElementById('mf-coin').value;
   // Map dropdown names to HL asset names (SPX on main dex is a different token)
-  const hlCoinMap = { SPX: 'xyz:SP500', GOLD: 'xyz:GOLD' };
+  const hlCoinMap = { SPX: 'xyz:SP500', CRUDE: 'xyz:CL', XYZ100: 'xyz:XYZ100' }; // v5.45: GOLD removed; CRUDE/XYZ100 explicit (resolveAsset also covers them)
   const coin = hlCoinMap[rawCoin] || rawCoin;
   const side = document.getElementById('mf-side').value;
   const size = parseFloat(document.getElementById('mf-size').value);
@@ -5093,34 +5087,34 @@ window.addEventListener('DOMContentLoaded',()=>{
   loadSettings();
   renderLog();
   document.getElementById('tf-cards').innerHTML=TFS.map(tf=>`<div class="tfc none"><div class="tfc-head"><span class="tfc-tf">${tf.l}</span><span class="tfc-type NONE">···</span><span class="tfc-sig WAIT" style="margin-left:auto">—</span></div><div class="tfc-reason"><span class="skel" style="width:200px;height:9px">&nbsp;</span></div></div>`).join('');
-  // BTC first (active coin, renders UI immediately), then HYPE + SPX + GOLD staggered
-  // Staggering avoids API rate limits from 15+ simultaneous requests
+  // BTC first (active coin, renders UI immediately), then the rest staggered 2s.
+  // Staggering avoids API rate limits from 15+ simultaneous requests.
+  // v5.45: generic over COINS (was a hardcoded list that had gone stale — included
+  // removed gold/HYPE and missed crude entirely).
   runCoin('bitcoin').then(() => {
     scheduleAll();
     connectWS('bitcoin');
   });
-  setTimeout(() => runCoin('hyperliquid').then(() => connectWS('hyperliquid')), 2000);
-  setTimeout(() => runCoin('sp500').then(() => connectWS('sp500')), 4000);
-  setTimeout(() => runCoin('gold').then(() => connectWS('gold')), 6000);
+  Object.keys(COINS).filter(c => c !== 'bitcoin').forEach((c, i) => {
+    setTimeout(() => runCoin(c).then(() => connectWS(c)), 2000 * (i + 1));
+  });
 
   // Auto-refresh all coins when page becomes visible (mobile Safari kills WS in background)
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       console.log('Page became visible — refreshing all coins');
-      runCoin('bitcoin').catch(e=>console.warn('vis refresh btc',e));
-      setTimeout(() => runCoin('hyperliquid').catch(e=>console.warn('vis refresh hype',e)), 1000);
-      setTimeout(() => runCoin('sp500').catch(e=>console.warn('vis refresh spx',e)), 2000);
-      setTimeout(() => runCoin('gold').catch(e=>console.warn('vis refresh gold',e)), 3000);
+      Object.keys(COINS).forEach((c, i) => {
+        setTimeout(() => runCoin(c).catch(e=>console.warn('vis refresh '+c,e)), 1000 * i);
+      });
     }
   });
 
   // Periodic full refresh every 2 minutes (ensures signals stay current even if WS drops)
   setInterval(() => {
     console.log('Periodic full refresh');
-    runCoin('bitcoin').catch(e=>console.warn('periodic btc',e));
-    setTimeout(() => runCoin('hyperliquid').catch(e=>console.warn('periodic hype',e)), 1000);
-    setTimeout(() => runCoin('sp500').catch(e=>console.warn('periodic spx',e)), 2000);
-    setTimeout(() => runCoin('gold').catch(e=>console.warn('periodic gold',e)), 3000);
+    Object.keys(COINS).forEach((c, i) => {
+      setTimeout(() => runCoin(c).catch(e=>console.warn('periodic '+c,e)), 1000 * i);
+    });
   }, 2 * 60 * 1000);
 
   // Initialize Hyperliquid auto-trading (non-blocking)
