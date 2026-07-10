@@ -418,10 +418,10 @@ const MISSED_SIGNALS_FILE = path.join(__dirname, '.missed_signals.json');  // v5
 const ENTRY_SIGNALS_FILE = path.join(__dirname, '.entry_signals.jsonl');   // v5.34: per-executed-signal metadata (JSONL, append-only)
 
 // v5.43 (2026-07-04): assets that run the REGAIN pattern in SHADOW mode — paper-log
-// only, never auto-traded. Gold + crude (the two assets where the regain backtest
-// showed a commodity tilt; see counterfactual-regain-2026-07-04.md). To promote a
-// regain variant to live, it must clear paper PF > 1.3 over >= 15 signals first.
-const REGAIN_SHADOW_ASSETS = new Set(['gold', 'crude']);
+// only, never auto-traded. To promote a regain variant to live, it must clear paper
+// PF > 1.3 over >= 15 signals first (see counterfactual-regain-2026-07-04.md).
+// v5.45 (2026-07-10): gold removed (deleted from COINS) — crude is the only shadow asset.
+const REGAIN_SHADOW_ASSETS = new Set(['crude']);
 const regainPaperDedup = {};   // { coinId: { key: lastTs } } — one paper record per regain signal per 4h
 
 // -- ENTRY SIGNAL LOG (v5.34) ---------------------------------------------------
@@ -883,7 +883,7 @@ const HL = {
       });
     });
     console.log('HL meta: ' + Object.keys(this.assetMap).length + ' assets loaded (' + allMetas.length + ' dexes)');
-    if (this.assetMap['xyz:GOLD'] !== undefined) console.log('  xyz:GOLD -> assetId', this.assetMap['xyz:GOLD'], 'szDec', this.szDecimals['xyz:GOLD']);
+    if (this.assetMap['xyz:SP500'] !== undefined) console.log('  xyz:SP500 -> assetId', this.assetMap['xyz:SP500'], 'szDec', this.szDecimals['xyz:SP500']); // v5.45: was xyz:GOLD (asset removed)
   },
 
   // -- Get balance (perps + spot) --
@@ -1241,7 +1241,7 @@ const HL = {
           if (d.assetPositions) positions.push(...d.assetPositions);
         } catch (e) { console.warn('HL syncPositions: HIP-3 JSON parse failed:', e.message); }
       }
-      const symToId = { BTC: 'bitcoin', HYPE: 'hyperliquid', 'S&P500': 'sp500', 'xyz:SP500': 'sp500', GOLD: 'gold', 'xyz:GOLD': 'gold', 'xyz:CL': 'crude', CRUDE: 'crude', CL: 'crude' };
+      const symToId = { BTC: 'bitcoin', 'S&P500': 'sp500', 'xyz:SP500': 'sp500', 'xyz:CL': 'crude', CRUDE: 'crude', CL: 'crude', 'xyz:XYZ100': 'xyz100', XYZ100: 'xyz100', NDX: 'xyz100' }; // v5.45: GOLD/HYPE keys removed with the assets — unmapped coins are skipped by the !coinId guard
 
       // Build SL/TP map from trigger orders
       const trigMap = {};
@@ -2576,7 +2576,7 @@ async function syncFillHistory() {
       return t.ts ? Math.round(new Date(t.ts).getTime() / 10000) : 0;
     }));
 
-    const symToId = { BTC:'bitcoin', HYPE:'hyperliquid', 'S&P500':'sp500', 'xyz:SP500':'sp500', GOLD:'gold', 'xyz:GOLD':'gold', 'xyz:CL':'crude', CRUDE:'crude', CL:'crude' };
+    const symToId = { BTC:'bitcoin', 'S&P500':'sp500', 'xyz:SP500':'sp500', 'xyz:CL':'crude', CRUDE:'crude', CL:'crude', 'xyz:XYZ100':'xyz100', XYZ100:'xyz100', NDX:'xyz100' }; // v5.45: GOLD/HYPE keys removed with the assets
     let added = 0;
 
     for (const cl of clusters) {
@@ -2833,28 +2833,15 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults, entryCandles
   //   SHORTs now blocked outside 06:00-17:00 UTC (EU open → early US afternoon).
   //   Rationale: Apr 29 GOLD short at 18:33 UTC hit SL for -$2.65; winning shorts
   //   consistently enter during EU/US overlap (07:00-15:00). 06-17 gives a buffer.
-  if (coinId === 'gold') {
-    const utcHour = new Date().getUTCHours();
-    const inGoldLongSession = utcHour >= 13 && utcHour < 20;
-    const inGoldShortSession = utcHour >= 6 && utcHour < 17;  // v5.14
-    if (!inGoldLongSession && d.sig === 'LONG') {
-      console.log(`HL auto-trade BLOCKED ${sym} LONG: outside gold LONG session (${utcHour}:00 UTC, allowed 13:00-20:00) -- session filter`);
-      logMissedSignal(coinId, d.sig, conf, 'gold-session-filter', { utcHour, filter: 'outside gold LONG session 13-20 UTC' });
-      return;
-    }
-    if (!inGoldShortSession && d.sig === 'SHORT') {
-      console.log(`HL auto-trade BLOCKED ${sym} SHORT: outside gold SHORT session (${utcHour}:00 UTC, allowed 06:00-17:00) -- v5.14 session filter`);
-      logMissedSignal(coinId, d.sig, conf, 'gold-session-filter-short', { utcHour, filter: 'outside gold SHORT session 06-17 UTC (v5.14)' });
-      return;
-    }
-  }
+  // v5.45 (2026-07-10): gold session filter removed — GOLD deleted from COINS (was
+  // watch-mode since v5.31; never earned re-enable). See coins-config.js v5.45 note.
 
   // v5.1: Ranging market detector — now applies to ALL coins (was SP500/GOLD only)
   // If last 3 closed trades on this coin alternated direction (L-S-L or S-L-S), market is ranging
   {
     const closed = loadClosedTrades();
     const recentCoinTrades = closed.filter(t => {
-      const cId = { 'xyz:SP500':'sp500', 'xyz:GOLD':'gold', 'xyz:CL':'crude', CRUDE:'crude', CL:'crude', BTC:'bitcoin', HYPE:'hyperliquid' }[t.coin] || t.coin;
+      const cId = { 'xyz:SP500':'sp500', 'xyz:CL':'crude', CRUDE:'crude', CL:'crude', BTC:'bitcoin', 'xyz:XYZ100':'xyz100', XYZ100:'xyz100' }[t.coin] || t.coin;
       return cId === coinId;
     }).slice(0, 3);
     if (recentCoinTrades.length >= 3) {
@@ -3421,24 +3408,12 @@ async function scanCoin(coinId){
             coinState[coinId].effectiveMaxNotional = cap;
             console.log(`HL MULTI-TF: ${COINS[coinId].label} LONG sizing tier '${tier}' -> maxNotional=$${cap} [v5.4]`);
           }
-          // v5.1: Session filter for GOLD — block longs outside London PM + NY overlap
-          // v5.14: Also block shorts outside 06:00-17:00 UTC
-          if (coinId === 'gold') {
-            const utcHr = new Date().getUTCHours();
-            if (sig === 'LONG' && (utcHr < 13 || utcHr >= 20)) {
-              console.log(`HL MULTI-TF BLOCKED ${COINS[coinId].label} LONG: outside gold LONG session (${utcHr}:00 UTC) -- session filter`);
-              break;
-            }
-            if (sig === 'SHORT' && (utcHr < 6 || utcHr >= 17)) {
-              console.log(`HL MULTI-TF BLOCKED ${COINS[coinId].label} SHORT: outside gold SHORT session (${utcHr}:00 UTC) -- v5.14 session filter`);
-              break;
-            }
-          }
+          // v5.45 (2026-07-10): GOLD session filter removed here too (gold deleted from COINS)
           // v5.1: Ranging market detector — all coins (was SP500/GOLD only, synced w/ maybeAutoTrade)
           {
             const closed = loadClosedTrades();
             const recentCoinTrades = closed.filter(t => {
-              const cId = { 'xyz:SP500':'sp500', 'xyz:GOLD':'gold', 'xyz:CL':'crude', CRUDE:'crude', CL:'crude', BTC:'bitcoin', HYPE:'hyperliquid' }[t.coin] || t.coin;
+              const cId = { 'xyz:SP500':'sp500', 'xyz:CL':'crude', CRUDE:'crude', CL:'crude', BTC:'bitcoin', 'xyz:XYZ100':'xyz100', XYZ100:'xyz100' }[t.coin] || t.coin;
               return cId === coinId;
             }).slice(0, 3);
             if (recentCoinTrades.length >= 3) {
@@ -3560,7 +3535,7 @@ async function checkDailySummary() {
 let lastScanTs = 0;
 let scanCount  = 0;
 const BOT_STARTED_AT = Date.now();
-const BOT_VERSION    = 'v5.44'; // keep in sync with the top-of-file changelog on each deploy (was stuck at v5.39 through v5.43 — made deploy verification via /api/status impossible)
+const BOT_VERSION    = 'v5.45'; // keep in sync with the top-of-file changelog on each deploy (was stuck at v5.39 through v5.43 — made deploy verification via /api/status impossible)
 
 async function scanAll(){
   const coins = Object.keys(COINS);
@@ -3709,7 +3684,7 @@ function startHealthServer() {
 
 async function main(){
   console.log(`DMS Signal Bot ${BOT_VERSION} started. Interval: ${INTERVAL_MS/1000}s`);
-  console.log(`Coins: BTC, HYPE, SPX, GOLD  |  Token: ...${TG_TOKEN.slice(-6)}  |  Chat: ${TG_CHATID}`);
+  console.log(`Coins: ${Object.values(COINS).map(c => c.label).join(', ')}  |  Token: ...${TG_TOKEN.slice(-6)}  |  Chat: ${TG_CHATID}`); // v5.45: generic (was stale hardcoded BTC, HYPE, SPX, GOLD)
 
   // v5.22: start health-page HTTP server BEFORE trading init so Railway sees
   // a listening port immediately (avoids deploy timeout / "no http response").
@@ -3737,7 +3712,7 @@ async function main(){
     console.log('Auto-trading DISABLED (set AUTO_TRADE=true and HL_PRIVATE_KEY to enable)');
     // v5.44 (2026-07-09): use BOT_VERSION (see above) + label the sender so alert-only boots
     // from secondary services are identifiable in Telegram.
-    await sendTelegram(`🤖 <b>DMS Signal Bot ${BOT_VERSION} started</b>\nScanning BTC . HYPE . SPX . GOLD every 2 minutes.\n🔔 Alert-only mode (no wallet key on this service)`);
+    await sendTelegram(`🤖 <b>DMS Signal Bot ${BOT_VERSION} started</b>\nScanning ${Object.values(COINS).map(c => c.label).join(' . ')} every 2 minutes.\n🔔 Alert-only mode (no wallet key on this service)`); // v5.45: generic coin list (stale hardcoded banner was the ghost-instance tell — keep it accurate)
   }
 
   await scanAll();
