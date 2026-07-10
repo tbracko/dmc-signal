@@ -93,11 +93,10 @@ function calcADX(c, p = 14) {
 //   (1W/1D) are exempt because they rarely whipsaw on the same time horizon.
 // enabled: master switch per coin. Currently only HYPE — expand to others as needed.
 const CHOP_FILTER = {
-  hyperliquid: { enabled: true,  adxThreshold: 20, lookbackBars: 30, minTFWeight: 3 }, // HYPE: 15m/1H/4H
   bitcoin:     { enabled: false, adxThreshold: 18, lookbackBars: 30, minTFWeight: 3 },
   sp500:       { enabled: false, adxThreshold: 18, lookbackBars: 30, minTFWeight: 3 },
-  gold:        { enabled: true,  adxThreshold: 18, lookbackBars: 30, minTFWeight: 3 },
   crude:       { enabled: true,  adxThreshold: 18, lookbackBars: 30, minTFWeight: 3 }, // v5.30: GOLD-style chop filter (24/7 trading, skip range-bound conditions)
+  xyz100:      { enabled: true,  adxThreshold: 18, lookbackBars: 30, minTFWeight: 3 }, // v5.45: NEW-ASSET conservative start (crude protocol). NOTE: SP500 runs chop OFF — revisit after 15–20 live RTs; disabling brings xyz100 fully onto the SP500 template.
 };
 
 // v5.16: Time-based exit for stalled positions — close at market if no TP1 reached
@@ -105,10 +104,9 @@ const CHOP_FILTER = {
 // range-bound entries (May 4 report: GOLD LONG held 48h, bled $5.61 at SL).
 const MAX_HOLD_HOURS = {
   bitcoin:     24,  // BTC is volatile; if no TP1 in 24h while underwater, exit
-  hyperliquid: 24,  // HYPE same
   sp500:       36,  // HIP-3 assets trend slower
-  gold:        36,  // HIP-3 assets trend slower
   crude:       36,  // v5.30: HIP-3 commodity, trends slower
+  xyz100:      36,  // v5.45: HIP-3 index, mirrors sp500
 };
 
 // v5.16: Funding rate exit signal — if cumulative funding paid on a position exceeds
@@ -151,10 +149,9 @@ function trendExhaustion48h(h4Candles) {
 // skipPct:    skip entry entirely when directional move exceeds this
 const EXHAUSTION_THRESHOLDS = {
   bitcoin:     { tightenPct: 3.0, skipPct: 5.0 },
-  hyperliquid: { tightenPct: 5.0, skipPct: 8.0 },
   sp500:       { tightenPct: 2.0, skipPct: 3.5 },
-  gold:        { tightenPct: 2.0, skipPct: 3.5 },
   crude:       { tightenPct: 3.0, skipPct: 5.0 }, // v5.30: looser than GOLD — crude's natural 48h moves (~68% ann vol) are larger; GOLD's 2.0/3.5 would over-skip
+  xyz100:      { tightenPct: 2.5, skipPct: 4.5 }, // v5.45: between sp500 (2.0/3.5) and crude — NDX runs ~1.3–1.5× SPX vol; SPX bands would over-skip
 };
 
 // v5.13: Fetch current predicted funding rate from Hyperliquid for HIP-3 (and standard) assets.
