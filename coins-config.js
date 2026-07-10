@@ -24,6 +24,18 @@
 //   At $2.87K equity:  BTC $8,600, SP500 $17,200, CRUDE $3,440 (notional caps)
 //   Risk per trade:    BTC/SP500 3% (~$86), CRUDE 0.6% (~$17)
 //
+// v5.45 (2026-07-10): NEW ASSET — XYZ100 (xyz:XYZ100, Nasdaq-100 perp on the xyz HIP-3 dex).
+//   Added after the new-asset study (counterfactual-xyz100-2026-07-10.md).
+//   ALSO in v5.45: GOLD and HYPE REMOVED entirely (were equityPct 0 / watch mode since
+//   v5.31 / v5.35 — neither earned re-enable in 6+ weeks; gold regain shadow scan also
+//   retired). Roster is now BTC / SP500 / CRUDE / XYZ100. Residual gold/HYPE fills in
+//   reports will classify as 'unknown' (same behavior as the v5.31 note). To resurrect
+//   an asset, restore its entry from git history + its signals.js filter entries.
+//   See the xyz100 entry comment below for rationale, sizing, and validation trigger.
+//   Companion edits: signals.js (CHOP_FILTER / MAX_HOLD_HOURS / EXHAUSTION_THRESHOLDS),
+//   bot.js (symToId/cId dictionaries), dms-v53.html (COINS, SYM_TO_COIN_ID, coinState,
+//   SYM maps, resolveAsset hlMap, coin dropdowns).
+//
 // Edit only this file when adjusting:
 //   - equityPct per-coin allocation
 //   - per-coin minRR / minStopPct / feeEst
@@ -163,10 +175,9 @@
 
 const COINS = {
   bitcoin:     { id:'bitcoin',     label:'BTC',    apiSym:'BTCUSDT',    asset:'BTC',        exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.010, equityPct: 3.00, isHIP3: false, minBreakBodyPct: 0.008, closeExitR: 1.0, hardSlMult: 1.3 }, // v5.43 (2026-07-09): 1.93→3.00 — re-normalized to 3% risk-per-trade after Jul-7 deposit reset equity to ~$2,868. 3.00 × minStop 1.0% = 3% design risk. Drops the v5.40 ×1.93 dollar-hold inflator (no longer meaningful at 5.3× equity). // v5.37: wick immunity — exit on 15m CLOSE through level SL, hard stop 1.3R
-  hyperliquid: { id:'hyperliquid', label:'HYPE',   apiSym:'HYPEUSDT',   asset:'HYPE',       exchange:'bybit',       minRR: 1.0, feeEst: 0.05, minStopPct: 0.005, equityPct: 0.00, isHIP3: false }, // v5.35 (2026-06-10): DISABLED — 90d bot-only PF 0.68, net ≈ −$20, no bot entries since May 16. Watch mode. Re-enable at 0.125 only after PF > 1.3 over ≥15 RTs.
   sp500:       { id:'sp500',       label:'S&P500', apiSym:'xyz:SP500',  asset:'xyz:SP500',  exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, equityPct: 6.00, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1, closeExitR: 0.5 }, // v5.43 (2026-07-09): 3.86→6.00 — re-normalized to 3% risk-per-trade after Jul-7 deposit (equity ~$2,868). 6.00 × minStop 0.5% = 3% design risk. Proven edge stays at full core weight. // v5.37: structure close-exit — 15m close >=0.5R against entry exits all
-  gold:        { id:'gold',        label:'GOLD',   apiSym:'xyz:GOLD',   asset:'xyz:GOLD',   exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 0.00, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 }, // v5.31: DISABLED (equityPct 0 = no auto-trade). Lost in every window; crude took the commodity slot. Still scanned/displayed (watch mode). Set equityPct back to 0.40 to re-enable.
   crude:       { id:'crude',       label:'CRUDE',  apiSym:'xyz:CL',     asset:'xyz:CL',     exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 2.40, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1, closeExitR: 0.5 }, // v5.44 (2026-07-10): 1.20→2.40 — CONVICTION BUMP (half-step toward core). Crude cleared validation: 90d 37 closed RTs, 59.5% win, PF 1.38, +$11.52, expectancy +$0.31/trade. 2.40 × minStop 0.5% = 1.2% risk (core is 3%); deliberately kept below core since PF/expectancy are real but thin. // closeExitR 0.5 (matches SP500): structure close-exit for the squeeze failure mode; losers are short counter-squeezes ~1.5%.
+  xyz100:      { id:'xyz100',      label:'XYZ100', apiSym:'xyz:XYZ100', asset:'xyz:XYZ100', exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, equityPct: 1.50, isHIP3: true,  breakDistFloorPct: 0.0008, minBreakCloses: 1 }, // v5.45 (2026-07-10): NEW ASSET — Nasdaq-100 perp (xyz HIP-3, $466M/24h — 2nd deepest on dex, 30× lev). Study counterfactual-xyz100-2026-07-10.md: raw Retest beat SP500 at EVERY TF on the identical window (15m PF 0.47 vs 0.33, 1H 0.39 vs 0.12, 4H 0.33 vs 0.22), 2.5× signal frequency. Config = SP500 index template. equityPct 1.50 = 0.75% risk (¼ core) — BELOW half-of-comparable because corr to SP500 is 0.89: this is concentration in the proven index edge, not diversification. NO closeExitR until it has its own counterfactual on live RTs. Validate at 15–20 closed RTs (crude protocol) before any bump toward 3.00.
 };
 
 // Daily loss limit as fraction of equity. Bot computes: equity × DAILY_LOSS_PCT.
