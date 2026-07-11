@@ -102,6 +102,8 @@ const CHOP_FILTER = {
 // v5.16: Time-based exit for stalled positions — close at market if no TP1 reached
 // within maxHoldHours AND position is in drawdown. Prevents death-by-funding on
 // range-bound entries (May 4 report: GOLD LONG held 48h, bled $5.61 at SL).
+// v5.46 (2026-07-11): now a GUIDELINE, not an exit — bot.js sends a HOLD-TIME ALERT
+// (Telegram suggestion to close manually) instead of auto-closing. Values unchanged.
 const MAX_HOLD_HOURS = {
   bitcoin:     24,  // BTC is volatile; if no TP1 in 24h while underwater, exit
   sp500:       36,  // HIP-3 assets trend slower
