@@ -5,6 +5,9 @@
 //   close (re-alerts each maxHold multiple while in drawdown pre-TP1). Rationale: only 2
 //   fires in 90d (one save, one undetermined) and Tomaž prefers manual control; SL/TP/BE/
 //   trail remain fully active. FUNDING-EXIT unchanged (still auto-closes on real bleed).
+//   ALSO v5.46: GHOST-SERVICE TELEGRAM MUTE — keyless / non-auto-trade boots no longer
+//   send ANY Telegram (fixes duplicated alerts + phantom SL notifications from the
+//   second Railway service). Opt back in per-service with ALLOW_ALERT_ONLY_TG=true.
 // v5.45 (2026-07-10): XYZ100 added; GOLD + HYPE removed. See coins-config.js.
 // Mirrors the DMS algorithm from index.html exactly -- same levels, same scoring, same signals
 // Now also executes trades on Hyperliquid with TP/SL/trailing stops
@@ -511,7 +514,20 @@ function markDedupFired(coinId, tf, type, level){
 }
 
 // -- TELEGRAM ------------------------------------------------------------------
+// v5.46 (2026-07-11): GHOST-SERVICE MUTE. Only the trading service (wallet key +
+// AUTO_TRADE) may send Telegram messages. Root cause of the "every alert arrives
+// twice" problem: the keyless accomplished-nourishment Railway service runs the same
+// code with the same TG_TOKEN, duplicating every alert — and it sends PHANTOM trade
+// notifications from its shadow activeTrades state (e.g. 2026-07-11 11:45 "SL HIT
+// LONG BTC −$10.29" for a position the real bot had already closed at 09:27; no such
+// fill exists on-chain). To intentionally run an alert-only service, set
+// ALLOW_ALERT_ONLY_TG=true in that service's env. Everything still logs to console.
+const TG_MUTED = !(HL_PRIVATE_KEY && AUTO_TRADE) && process.env.ALLOW_ALERT_ONLY_TG !== 'true';
 async function sendTelegram(msg){
+  if (TG_MUTED) {
+    console.log('TG muted (no wallet key / AUTO_TRADE off — ghost-service guard v5.46):', String(msg).slice(0, 120).replace(/\n/g, ' '));
+    return false;
+  }
   try{
     const r = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`,{
       method:'POST',
