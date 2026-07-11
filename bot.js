@@ -1,4 +1,11 @@
-// DMS Signal Bot v5.17 -- AUTO-TRADE edition (v5.17 = post-break confirmation, GOLD notional cap, 2026-05-06)
+// DMS Signal Bot v5.46 -- AUTO-TRADE edition
+//
+// v5.46 (2026-07-11): TIME-EXIT DEMOTED TO ALERT-ONLY. The v5.16 max-hold rule no longer
+//   auto-closes stalled positions — it sends a Telegram HOLD-TIME ALERT suggesting a manual
+//   close (re-alerts each maxHold multiple while in drawdown pre-TP1). Rationale: only 2
+//   fires in 90d (one save, one undetermined) and Tomaž prefers manual control; SL/TP/BE/
+//   trail remain fully active. FUNDING-EXIT unchanged (still auto-closes on real bleed).
+// v5.45 (2026-07-10): XYZ100 added; GOLD + HYPE removed. See coins-config.js.
 // Mirrors the DMS algorithm from index.html exactly -- same levels, same scoring, same signals
 // Now also executes trades on Hyperliquid with TP/SL/trailing stops
 // Node 18+ required (uses built-in fetch)
@@ -2144,22 +2151,34 @@ const HL = {
         continue;
       }
 
-      // v5.16: Time-based exit — close stalled positions that haven't reached TP1
-      // within maxHoldHours while in drawdown. Prevents death-by-funding.
+      // v5.46 (2026-07-11): TIME-EXIT is now ALERT-ONLY (was auto-close since v5.16).
+      // Tomaž's call after the Jul-10 BTC LONG was force-closed at 24.0h for −$6.92 while
+      // still inside its SL/TP range. 90d evidence: the rule fired only TWICE (May-18
+      // SP500 short: saved money, SL hit 5.3h later; Jul-10 BTC: undetermined) — too rare
+      // to defend auto-closing. The bot now SUGGESTS closing via Telegram and leaves the
+      // decision manual; the hard SL / TP ladder / BE / trail all remain active. Re-alerts
+      // at each additional maxHold multiple (e.g. BTC 24h/48h/72h) while still in drawdown
+      // pre-TP1. holdAlertCount is persisted in activeTrades so restarts don't re-spam.
+      // NOTE: the FUNDING-EXIT below still auto-closes (real measurable bleed, unchanged).
+      // NOTE: backtester/trade-simulator.js still models the old auto-close — sims now
+      // slightly overstate time-exit impact until it's re-synced.
       if (!trade.tp1Detected && trade.entryTs && trade.trailState === 'initial') {
         const holdMs = Date.now() - trade.entryTs;
         const maxMs = (MAX_HOLD_HOURS[coinId] || 24) * 3600000;
         const px = coinState[coinId]?.price;
-        if (holdMs >= maxMs && px > 0) {
+        const alertsSent = trade.holdAlertCount || 0;
+        if (holdMs >= maxMs * (alertsSent + 1) && px > 0) {
           const isLong = trade.side === 'LONG';
           const inDrawdown = isLong ? (px < trade.entry) : (px > trade.entry);
           if (inDrawdown) {
             const holdHrs = (holdMs / 3600000).toFixed(1);
             const pnlPct = ((isLong ? (px - trade.entry) : (trade.entry - px)) / trade.entry * 100).toFixed(2);
-            console.log(`HL TIME-EXIT: ${trade.asset} ${trade.side} — held ${holdHrs}h (max ${MAX_HOLD_HOURS[coinId] || 24}h), no TP1, drawdown ${pnlPct}% — closing at market (v5.16)`);
-            await sendTelegram(`⏰ <b>TIME-EXIT: ${trade.asset} ${trade.side}</b>\nHeld: ${holdHrs}h (max: ${MAX_HOLD_HOURS[coinId] || 24}h)\nNo TP1 reached, currently ${pnlPct}%\nClosing at market to limit bleed.`);
-            await this.closePosition(coinId);
-            continue;
+            const slDist = trade.initialSl ? Math.abs(px - trade.initialSl) / px * 100 : null;
+            const cumFunding = parseFloat(stillOpen.position?.cumFunding?.sinceOpen || '0');
+            trade.holdAlertCount = alertsSent + 1;
+            this.saveActiveTrades();
+            console.log(`HL HOLD-TIME ALERT: ${trade.asset} ${trade.side} — held ${holdHrs}h (max ${MAX_HOLD_HOURS[coinId] || 24}h), no TP1, drawdown ${pnlPct}% — suggesting manual review (v5.46, alert ${alertsSent + 1})`);
+            await sendTelegram(`⏰ <b>HOLD-TIME ALERT: ${trade.asset} ${trade.side}</b>\nHeld: ${holdHrs}h (guideline: ${MAX_HOLD_HOURS[coinId] || 24}h) · no TP1 yet\nP&L: ${pnlPct}% · funding paid: $${Math.abs(cumFunding).toFixed(2)}${slDist != null ? `\nSL is ${slDist.toFixed(2)}% away (still armed)` : ''}\n💡 Suggestion: stalled past its hold window — consider closing manually. Bot will NOT auto-close (v5.46); SL/TP stay active.`);
           }
         }
       }
@@ -3535,7 +3554,7 @@ async function checkDailySummary() {
 let lastScanTs = 0;
 let scanCount  = 0;
 const BOT_STARTED_AT = Date.now();
-const BOT_VERSION    = 'v5.45'; // keep in sync with the top-of-file changelog on each deploy (was stuck at v5.39 through v5.43 — made deploy verification via /api/status impossible)
+const BOT_VERSION    = 'v5.46'; // keep in sync with the top-of-file changelog on each deploy (was stuck at v5.39 through v5.43 — made deploy verification via /api/status impossible)
 
 async function scanAll(){
   const coins = Object.keys(COINS);
