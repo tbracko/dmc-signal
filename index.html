@@ -277,7 +277,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <body>
 
 <div class="topbar">
-  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v5.45</span></span>
+  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v5.47</span></span>
   <select id="coin-sel" onchange="switchCoin(this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:4px 8px;cursor:pointer;letter-spacing:.04em">
     <option value="bitcoin" data-sym="BTCUSDT" data-label="BTC/USD" selected>BTC/USD</option>
     <option value="sp500" data-sym="xyz:S&amp;P500" data-label="S&amp;P500">S&amp;P500</option>
@@ -514,6 +514,19 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   <div id="log-list"><div class="empty">No signals logged yet</div></div>
 </div>
 
+<!-- PAGE: SENTIMENT (v5.47) — news meter served by the Railway bot's /api/status -->
+<div class="page" id="page-sentiment">
+  <div class="sh">News Sentiment · shadow mode (informational — bot does not block on this yet)</div>
+  <div id="sent-config" style="display:none;padding:10px 16px">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#5d7a99;margin-bottom:6px">Enter your Railway bot URL once (e.g. https://your-app.up.railway.app):</div>
+    <div style="display:flex;gap:6px">
+      <input id="sent-url" type="text" placeholder="https://…up.railway.app" style="flex:1;font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:7px 10px">
+      <button onclick="saveSentUrl()" style="font-family:'IBM Plex Mono',monospace;font-size:10px;padding:7px 14px;border-radius:6px;border:1px solid rgba(0,229,255,.3);background:rgba(0,229,255,.06);color:#00e5ff;cursor:pointer">SAVE</button>
+    </div>
+  </div>
+  <div id="sent-body"><div class="empty">Loading sentiment…</div></div>
+</div>
+
 <!-- PAGE: TRADES -->
 <div class="page" id="page-trades">
   <div class="trades-bal" id="trades-bal">
@@ -587,11 +600,10 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   <button class="nb" onclick="nav('chart',this)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Chart
   </button>
-  <button class="nb" onclick="nav('levels',this)">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>Levels
-  </button>
-  <button class="nb" onclick="nav('log',this)">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>Log
+  <!-- v5.47: Levels + Log tabs replaced by the News sentiment meter (pages kept in DOM,
+       reachable via nav('levels'/'log') from console if ever needed) -->
+  <button class="nb" onclick="nav('sentiment',this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 3v2M5.2 5.2l1.4 1.4M3 12h2M18.8 5.2l-1.4 1.4M21 12h-2M8 21a4 4 0 1 1 8 0z"/><circle cx="12" cy="13" r="4"/></svg>News
   </button>
   <button class="nb" onclick="nav('trades',this)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="9"/></svg>Trades
@@ -910,6 +922,64 @@ function nav(id, btn){
   if(id==='chart'&&!tvLoaded){loadChart('240');tvLoaded=true;}
   if(id==='stats'){ setTimeout(renderStats, 50); setTimeout(()=>renderEdgePanel().catch(e=>console.warn('edge panel:',e)), 60); }
   if(id==='trades') renderTrades();
+  if(id==='sentiment') renderSentiment();
+}
+
+// ── NEWS SENTIMENT PAGE (v5.47) — reads the Railway bot's /api/status.sentiment ──
+// The bot computes the meter (sentiment.js); the app only displays it. CORS is open
+// on /api/status. Bot URL is stored once in localStorage('bot_api_url').
+function saveSentUrl(){
+  const v = (document.getElementById('sent-url').value || '').trim().replace(/\/+$/,'');
+  if(!v.startsWith('http')){ showToast('Enter a full URL (https://…)'); return; }
+  localStorage.setItem('bot_api_url', v);
+  renderSentiment();
+}
+let _sentTimer = null;
+async function renderSentiment(){
+  const cfgEl = document.getElementById('sent-config');
+  const bodyEl = document.getElementById('sent-body');
+  const base = (localStorage.getItem('bot_api_url') || '').replace(/\/+$/,'');
+  if(!base){ cfgEl.style.display='block'; bodyEl.innerHTML='<div class="empty">Set the bot URL above to load the meter</div>'; return; }
+  cfgEl.style.display='none';
+  try{
+    const r = await fetch(base + '/api/status', { signal: AbortSignal.timeout(10000) });
+    const st = await r.json();
+    const s = st.sentiment;
+    if(!s || !s.updatedAt){ bodyEl.innerHTML='<div class="empty">Bot is up ('+(st.version||'?')+') but no sentiment yet — first scan runs ~20s after boot</div>'; return; }
+    const col = s.regime==='RISK-OFF' ? '#e05555' : s.regime==='RISK-ON' ? '#22c55e' : '#7b8fa8';
+    const bar = (label, v) => {
+      const c = v>0 ? '#22c55e' : v<0 ? '#e05555' : '#3d5068';
+      const w = Math.min(50, Math.abs(v)/2);
+      return '<div style="display:flex;align-items:center;gap:8px;margin:5px 0;font-family:\'IBM Plex Mono\',monospace;font-size:11px">'+
+        '<span style="width:42px;color:#7b8fa8">'+label+'</span>'+
+        '<div style="flex:1;height:10px;background:#10151c;border-radius:5px;position:relative">'+
+          '<div style="position:absolute;top:0;bottom:0;'+(v>=0?'left:50%':'right:50%')+';width:'+w+'%;background:'+c+';border-radius:5px"></div>'+
+          '<div style="position:absolute;top:-2px;bottom:-2px;left:50%;width:1px;background:#1a2230"></div>'+
+        '</div>'+
+        '<span style="width:38px;text-align:right;color:'+c+'">'+(v>0?'+':'')+v+'</span></div>';
+    };
+    const b = s.bias || {};
+    bodyEl.innerHTML =
+      '<div style="padding:12px 16px">'+
+      '<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px">'+
+        '<span style="font-family:\'Sora\',sans-serif;font-size:22px;font-weight:700;color:'+col+'">'+s.regime+'</span>'+
+        '<span style="font-family:\'IBM Plex Mono\',monospace;font-size:12px;color:#7b8fa8">risk-off '+s.riskOff+'/100</span>'+
+        '<span style="font-family:\'IBM Plex Mono\',monospace;font-size:9px;padding:2px 7px;border-radius:4px;border:1px solid '+(s.gateOn?'rgba(224,85,85,.4)':'#1a2230')+';color:'+(s.gateOn?'#e05555':'#5d7a99')+'">'+(s.gateOn?'GATE ON':'SHADOW')+'</span>'+
+      '</div>'+
+      '<div style="height:10px;background:#10151c;border-radius:5px;margin:8px 0 14px;position:relative">'+
+        '<div style="height:100%;width:'+s.riskOff+'%;border-radius:5px;background:linear-gradient(90deg,#22c55e,#eab308 50%,#e05555)"></div>'+
+      '</div>'+
+      '<div style="font-size:9px;color:#3d5068;letter-spacing:.06em;font-family:\'IBM Plex Mono\',monospace;margin-bottom:2px">ASSET BIAS (− short-friendly · + long-friendly)</div>'+
+      bar('BTC', b.bitcoin??0) + bar('SPX', b.sp500??0) + bar('NDX', b.xyz100??0) + bar('CL', b.crude??0) +
+      '<div style="font-size:9px;color:#3d5068;letter-spacing:.06em;font-family:\'IBM Plex Mono\',monospace;margin:12px 0 4px">TOP DRIVERS ('+(s.headlines24h||0)+' headlines/24h)</div>'+
+      (s.topEvents||[]).map(e=>'<div style="font-size:11px;color:#c9d6e3;margin:4px 0;line-height:1.4">· '+e.title+' <span style="color:#5d7a99;font-size:9px">('+e.buckets.join(',')+' · '+e.ageH+'h)</span></div>').join('')+
+      '<div style="font-size:9px;color:#3d5068;margin-top:10px;font-family:\'IBM Plex Mono\',monospace">updated '+new Date(s.updatedAt).toLocaleTimeString()+' · bot '+(st.version||'?')+' · <span style="cursor:pointer;text-decoration:underline" onclick="localStorage.removeItem(\'bot_api_url\');renderSentiment()">change URL</span></div>'+
+      '</div>';
+  }catch(e){
+    bodyEl.innerHTML='<div class="empty">Could not reach bot ('+e.message+') — <span style="cursor:pointer;text-decoration:underline" onclick="localStorage.removeItem(\'bot_api_url\');renderSentiment()">change URL</span></div>';
+  }
+  if(_sentTimer) clearTimeout(_sentTimer);
+  _sentTimer = setTimeout(()=>{ if(document.getElementById('page-sentiment').classList.contains('active')) renderSentiment(); }, 5*60*1000);
 }
 
 // ── CHART (HL-native via lightweight-charts) ───────────────────────────────
