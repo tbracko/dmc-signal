@@ -1,4 +1,12 @@
-// DMS Signal Bot v5.46 -- AUTO-TRADE edition
+// DMS Signal Bot v5.47 -- AUTO-TRADE edition
+//
+// v5.47 (2026-07-13): NEWS SENTIMENT METER (sentiment.js, SHADOW MODE). Free news feeds
+//   (Google News topic RSS incl. a Trump feed + CNBC) scored into riskOff 0-100 and
+//   per-asset bias. War escalation => crude long-bias + index/BTC short-bias (the Iran
+//   war is the #1 mover of our pairs — event study in sentiment-layer-2026-07-13.md).
+//   Shadow mode: verdicts are logged on every entry record (sentimentShadowBlock) and
+//   surfaced in /api/status + Telegram regime-shift alerts, but NOTHING is blocked
+//   until SENTIMENT_GATE=on. Promotion bar: blocked entries PF < 0.7 over >= 10 blocks.
 //
 // v5.46 (2026-07-11): TIME-EXIT DEMOTED TO ALERT-ONLY. The v5.16 max-hold rule no longer
 //   auto-closes stalled positions — it sends a Telegram HOLD-TIME ALERT suggesting a manual
@@ -397,6 +405,7 @@ if(!TG_TOKEN || !TG_CHATID){
 // there now; this file only consumes them. Eliminates the v5.17 GOLD-cap drift bug where
 // daily-report.js had GOLD at $500 while bot.js had reduced it to $300.
 const { COINS, DAILY_LOSS_PCT, getMaxNotional } = require('./coins-config');
+const SENT = require('./sentiment'); // v5.47: news sentiment meter (shadow mode)
 
 const TFS = [
   { l:'1W', w:5 },
@@ -448,6 +457,9 @@ const regainPaperDedup = {};   // { coinId: { key: lastTs } } — one paper reco
 const entrySignalsMem = [];                  // newest last, capped
 let entrySignalsFsError = null;              // last fs append error message (null = healthy)
 function logEntrySignal(rec) {
+  // v5.47: stamp every entry record with the sentiment snapshot — lets the shadow
+  // validation join trades × sentiment later without a separate log.
+  try { if (!rec.sentiment) rec.sentiment = SENT.brief(); } catch (_) {}
   entrySignalsMem.push(rec);
   if (entrySignalsMem.length > 500) entrySignalsMem.shift();
   try {
@@ -1692,6 +1704,25 @@ const HL = {
       return null;
     }
 
+    // v5.47 (2026-07-13): SENTIMENT GATE — SHADOW MODE by default.
+    // sentiment.js scores news feeds into riskOff + per-asset bias (see the event
+    // study in sentiment-layer-2026-07-13.md). With SENTIMENT_GATE=off (default)
+    // a would-block verdict is only LOGGED (sentimentShadowBlock on the entry
+    // record) and the trade proceeds normally — validation first, gating later.
+    // Set SENTIMENT_GATE=on in Railway env to enforce after shadow validation
+    // (promotion bar: blocked entries PF < 0.7 over >= 10 shadow blocks).
+    let sentimentVerdict = null;
+    try { sentimentVerdict = SENT.gateVerdict(coinId, signal.sig); } catch (_) {}
+    if (sentimentVerdict?.block) {
+      if (SENT.GATE_ON) {
+        console.log(`HL SENTIMENT BLOCK ${asset} ${signal.sig}: ${sentimentVerdict.reason} (gate ON, v5.47)`);
+        logMissedSignal(coinId, signal.sig, confidence, 'sentiment-gate', { reason: sentimentVerdict.reason, riskOff: sentimentVerdict.riskOff, bias: sentimentVerdict.bias });
+        await sendTelegram(`🌡 <b>SENTIMENT BLOCK: ${asset} ${signal.sig}</b>\n${sentimentVerdict.reason}\nSignal skipped (gate ON).`);
+        return null;
+      }
+      console.log(`HL sentiment SHADOW-block ${asset} ${signal.sig}: ${sentimentVerdict.reason} — trade proceeds (gate off, v5.47)`);
+    }
+
     // v5.25: Dynamic maxNotional from equity × equityPct (coins-config.js).
     // v5.4 session-scaled override still works — it overrides the dynamic base if set.
     const equity = this.cachedEquity > 0 ? this.cachedEquity : 100;
@@ -2072,6 +2103,8 @@ const HL = {
         time: new Date().toISOString(),
         coinId, asset, side: sig,
         confidence,
+        sentimentShadowBlock: sentimentVerdict?.block || false,   // v5.47: gate would have blocked this entry (shadow validation key)
+        sentimentReason: sentimentVerdict?.reason || null,
         entry: actualEntry,
         sl: effectiveStopPrice,
         slDistPct: +slDistPct.toFixed(4),
@@ -3570,7 +3603,7 @@ async function checkDailySummary() {
 let lastScanTs = 0;
 let scanCount  = 0;
 const BOT_STARTED_AT = Date.now();
-const BOT_VERSION    = 'v5.46'; // keep in sync with the top-of-file changelog on each deploy (was stuck at v5.39 through v5.43 — made deploy verification via /api/status impossible)
+const BOT_VERSION    = 'v5.47'; // keep in sync with the top-of-file changelog on each deploy (was stuck at v5.39 through v5.43 — made deploy verification via /api/status impossible)
 
 async function scanAll(){
   const coins = Object.keys(COINS);
@@ -3639,6 +3672,7 @@ function startHealthServer() {
           cachedEquity: HL ? (HL.cachedEquity || 0) : 0,
           ddGovernor: HL ? { active: !!HL.ddGovernorActive, net7d: HL.ddGovernor7dNet } : null,        // v5.36
           sp500ShortWatch: HL ? { mult: HL.sp500ShortMult, stats: HL.sp500ShortStats } : null,         // v5.36
+          sentiment: (() => { try { return SENT.getState(); } catch (_) { return null; } })(),         // v5.47: news sentiment meter (shadow)
           entrySignals: (() => {                                                                       // v5.39: log health — memCount>0 with fileCount 0 ⇒ fs broken; both 0 across executed trades ⇒ stale deploy
             let fileCount = 0;
             try { if (fs.existsSync(ENTRY_SIGNALS_FILE)) fileCount = fs.readFileSync(ENTRY_SIGNALS_FILE, 'utf8').split('\n').filter(Boolean).length; } catch (_) {}
@@ -3749,6 +3783,11 @@ async function main(){
     // from secondary services are identifiable in Telegram.
     await sendTelegram(`🤖 <b>DMS Signal Bot ${BOT_VERSION} started</b>\nScanning ${Object.values(COINS).map(c => c.label).join(' . ')} every 2 minutes.\n🔔 Alert-only mode (no wallet key on this service)`); // v5.45: generic coin list (stale hardcoded banner was the ghost-instance tell — keep it accurate)
   }
+
+  // v5.47: start the news sentiment meter (shadow — informs, never blocks unless
+  // SENTIMENT_GATE=on). Regime-shift alerts route through sendTelegram, so the
+  // ghost-service mute (v5.46) automatically keeps duplicates out.
+  try { SENT.start((msg) => sendTelegram(msg)); } catch (e) { console.warn('sentiment start failed:', e.message); }
 
   await scanAll();
   setInterval(scanAll, INTERVAL_MS);
