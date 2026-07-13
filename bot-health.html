@@ -90,6 +90,14 @@
       </div>
     </div>
 
+    <!-- v5.47: news sentiment meter (from /api/status .sentiment; shadow mode) -->
+    <div class="panel" style="margin-bottom:16px">
+      <h2>News Sentiment (shadow)</h2>
+      <div class="big" id="sentMeter">—</div>
+      <div class="small" id="sentBias">—</div>
+      <div class="small" id="sentEvents" style="margin-top:6px">—</div>
+    </div>
+
     <div class="panel" style="margin-bottom:16px">
       <h2>Per-Coin Status (last 7 days)</h2>
       <table id="coinTable">
@@ -231,6 +239,25 @@ function render({ spot, perpDefault, perpXyz, fills, status, now }) {
   } else {
     botProcEl.innerHTML = '<span class="badge neu">OFFLINE / LOCAL</span>';
     botProcSubEl.textContent = 'No /api/status — page served from disk, not from bot';
+  }
+
+  // ---- Sentiment meter (v5.47) ----
+  const s = status && status.sentiment;
+  if (s && s.updatedAt) {
+    const cls = s.regime === 'RISK-OFF' ? 'bad' : s.regime === 'RISK-ON' ? 'good' : 'neu';
+    document.getElementById('sentMeter').innerHTML =
+      '<span class="badge ' + cls + '">' + s.regime + '</span> risk-off ' + s.riskOff + '/100' +
+      (s.gateOn ? ' <span class="badge bad">GATE ON</span>' : ' <span class="badge neu">shadow</span>');
+    const b = s.bias || {};
+    const f = (v) => (v > 0 ? '+' : '') + v;
+    document.getElementById('sentBias').textContent =
+      'bias — BTC ' + f(b.bitcoin ?? 0) + ' · SPX ' + f(b.sp500 ?? 0) + ' · NDX ' + f(b.xyz100 ?? 0) + ' · CL ' + f(b.crude ?? 0) +
+      ' · ' + (s.headlines24h || 0) + ' headlines/24h';
+    document.getElementById('sentEvents').innerHTML =
+      (s.topEvents || []).slice(0, 3).map(e => '· ' + e.title + ' <span style="color:#5d7a99">(' + e.buckets.join(',') + ', ' + e.ageH + 'h)</span>').join('<br>') || '—';
+  } else {
+    document.getElementById('sentMeter').innerHTML = '<span class="badge neu">no data</span>';
+    document.getElementById('sentBias').textContent = 'sentiment appears after the bot\'s first news scan (~20s post-boot)';
   }
 
   // ---- Last scan ----
