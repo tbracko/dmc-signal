@@ -973,6 +973,10 @@ async function renderSentiment(){
       bar('BTC', b.bitcoin??0) + bar('SPX', b.sp500??0) + bar('NDX', b.xyz100??0) + bar('CL', b.crude??0) +
       '<div style="font-size:9px;color:#3d5068;letter-spacing:.06em;font-family:\'IBM Plex Mono\',monospace;margin:12px 0 4px">TOP DRIVERS ('+(s.headlines24h||0)+' headlines/24h)</div>'+
       (s.topEvents||[]).map(e=>'<div style="font-size:11px;color:#c9d6e3;margin:4px 0;line-height:1.4">· '+e.title+' <span style="color:#5d7a99;font-size:9px">('+e.buckets.join(',')+' · '+e.ageH+'h)</span></div>').join('')+
+      (s.bucketCounts && Object.keys(s.bucketCounts).length ?
+        '<div style="font-size:9px;color:#3d5068;letter-spacing:.06em;font-family:\'IBM Plex Mono\',monospace;margin:12px 0 4px">SCORED STORY WEIGHT BY BUCKET (decayed)</div>'+
+        '<div style="font-family:\'IBM Plex Mono\',monospace;font-size:10px;color:#7b8fa8;line-height:1.7">'+
+        Object.entries(s.bucketCounts).sort((a,b)=>b[1]-a[1]).map(([k,v])=>k+' '+v).join(' · ')+'</div>' : '')+
       '<div style="font-size:9px;color:#3d5068;margin-top:10px;font-family:\'IBM Plex Mono\',monospace">updated '+new Date(s.updatedAt).toLocaleTimeString()+' · bot '+(st.version||'?')+' · <span style="cursor:pointer;text-decoration:underline" onclick="localStorage.removeItem(\'bot_api_url\');renderSentiment()">change URL</span></div>'+
       '</div>';
   }catch(e){
