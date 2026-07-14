@@ -254,7 +254,8 @@ function render({ spot, perpDefault, perpXyz, fills, status, now }) {
       'bias — BTC ' + f(b.bitcoin ?? 0) + ' · SPX ' + f(b.sp500 ?? 0) + ' · NDX ' + f(b.xyz100 ?? 0) + ' · CL ' + f(b.crude ?? 0) +
       ' · ' + (s.headlines24h || 0) + ' headlines/24h';
     document.getElementById('sentEvents').innerHTML =
-      (s.topEvents || []).slice(0, 3).map(e => '· ' + e.title + ' <span style="color:#5d7a99">(' + e.buckets.join(',') + ', ' + e.ageH + 'h)</span>').join('<br>') || '—';
+      ((s.topEvents || []).slice(0, 3).map(e => '· ' + e.title + ' <span style="color:#5d7a99">(' + e.buckets.join(',') + ', ' + e.ageH + 'h)</span>').join('<br>') || '—') +
+      (s.bucketCounts ? '<br><span style="color:#5d7a99">buckets: ' + Object.entries(s.bucketCounts).sort((a,b)=>b[1]-a[1]).map(([k,v])=>k+' '+v).join(' · ') + '</span>' : '');
   } else {
     document.getElementById('sentMeter').innerHTML = '<span class="badge neu">no data</span>';
     document.getElementById('sentBias').textContent = 'sentiment appears after the bot\'s first news scan (~20s post-boot)';
