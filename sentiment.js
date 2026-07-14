@@ -43,6 +43,12 @@ const FEEDS = [
   { id: 'tech',   url: GN('(nasdaq OR "tech stocks" OR semiconductor OR nvidia OR "S&P 500")') },
   { id: 'trump',  url: GN('trump (market OR tariff OR war OR iran OR fed OR china)') }, // tweet-driven headlines land here in ~minutes
   { id: 'cnbc',   url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114' },
+  // PRIMARY SOURCE: @realDonaldTrump Truth Social posts via Roll Call's archive RSS
+  // (truthsocial.com's own API is Cloudflare-walled; this mirror is free and current).
+  // kind:'truth' → classify on FULL post text (title is truncated), weight 2× (a
+  // market-relevant Trump post moves prices more than one news headline), display
+  // prefixed "TRUMP:". Non-market posts (endorsements etc.) match no bucket → ignored.
+  { id: 'truth',  url: 'https://trumpstruth.org/feed', kind: 'truth' },
 ];
 
 // ---- Event buckets ---------------------------------------------------------
@@ -54,9 +60,9 @@ const RE = {
   fedHawk:  /\b(rate hike|hawkish|hot(ter)? (cpi|inflation)|hotter[- ]than[- ]expected|(inflation|cpi|prices).{0,40}hotter|inflation (accelerat\w+|surges?|jumps?|sticky|stays high)|yields? (surge|spike|jump|climb)|strong (jobs|payrolls|hiring)|fed (holds?|pauses?).{0,20}(higher|longer)|hike odds)/i,
   fedDove:  /\b(rate cut|dovish|inflation (cools?|slows?|eases?|falls?|below)|soft landing|yields? (fall|drop|sink|slide|tumble)|weak (jobs|payrolls)|fed cut)/i,
   cryptoCtx:/\b(bitcoin|crypto|btc|ethereum|coinbase)\b/i,
-  techCtx:  /\b(chip|semiconductor|nvidia|broadcom|amd|intel|nasdaq|tech stocks?|ai (stocks?|rally|bubble|spending)|artificial intelligence)\b/i,
+  techCtx:  /\b(chip|semiconductor|nvidia|broadcom|amd|intel|nasdaq|tech (stocks?|shares|names)|ai (stocks?|rally|bubble|spending|favorites?|names|trade|darlings)|artificial intelligence|data ?centers?|megacaps?|big tech)\b/i,
   oilCtx:   /\b(oil|crude|opec|brent|wti|barrel|gasoline)\b/i,
-  neg:      /\b(crash\w*|plunge\w*|tumble\w*|sell-?off|rout|sink\w*|slide\w*|slump\w*|worst (day|week|month)|outflows?|liquidat\w+|hack(ed|s)?|exploit|sues?|crackdown|ban(s|ned)?|charges|collapse\w*|fear|panic|drops?|falls?|bear market|correction|wipes? out)/i,
+  neg:      /\b(crash\w*|plunge\w*|tumble\w*|sell-?off|rout|sink\w*|slide\w*|slump\w*|worst (day|week|month)|outflows?|liquidat\w+|hack(ed|s)?|exploit|sues?|crackdown|ban(s|ned)?|charges|collapse\w*|fear|panic|drops?|falls?|bear market|correction|wipes? out|(sharply|broadly) lower|\blower\b|\bdown\b|declines?|dips?|retreats?|skids?|drags?\b|below (a |its )?(key|support|critical))/i,
   pos:      /\b(rall(y|ies)\w*|surge\w*|soar\w*|jump\w*|record high|all-time high|inflows?|approv\w+|adopt\w+|climbs?|gains?|rebound\w*|best (day|week)|breakout|bullish)/i,
   oilBull:  /\b(supply (cut|disruption|shock|risk)|output cut|inventor(y|ies) draw|production (halt|cut|outage)|outage|embargo|sanctions on (iran|russia)|demand (rises?|surge))/i,
   oilBear:  /\b(output (increase|hike|boost)|production (increase|rise|boost)|inventor(y|ies) build|supply glut|oversuppl\w+|demand (falls?|weakens?|cut))/i,
@@ -116,16 +122,22 @@ function classify(title) {
 }
 
 // ---- RSS fetch/parse (zero-dep) --------------------------------------------
-function parseRss(xml) {
+const deent = (s) => s.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&#39;|&apos;|&#8217;/g, "'").replace(/&quot;|&#8220;|&#8221;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim();
+function parseRss(xml, wantDesc) {
   const out = [];
   const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
   for (const it of items) {
     const tm = it.match(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/);
     const dm = it.match(/<pubDate>([\s\S]*?)<\/pubDate>/);
     if (!tm) continue;
-    const title = tm[1].replace(/&amp;/g, '&').replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+    const title = deent(tm[1]);
     const ts = dm ? Date.parse(dm[1]) : Date.now();
-    if (title && Number.isFinite(ts)) out.push({ title, ts });
+    let desc = '';
+    if (wantDesc) {
+      const de = it.match(/<description>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/description>/);
+      if (de) desc = deent(de[1]).slice(0, 400);
+    }
+    if (title && Number.isFinite(ts)) out.push({ title, ts, desc });
   }
   return out;
 }
@@ -133,7 +145,8 @@ async function fetchFeed(feed) {
   try {
     const r = await fetch(feed.url, { headers: { 'User-Agent': 'Mozilla/5.0 (DMS-sentiment)' }, redirect: 'follow', signal: AbortSignal.timeout(15000) });
     if (!r.ok) return [];
-    return parseRss(await r.text());
+    const items = parseRss(await r.text(), feed.kind === 'truth');
+    return items.map(it => ({ ...it, kind: feed.kind || 'news' }));
   } catch (e) { console.warn(`sentiment: feed ${feed.id} failed: ${e.message}`); return []; }
 }
 
@@ -155,7 +168,7 @@ function recompute() {
   for (const [key, h] of state.headlines) {
     if (now - h.ts > WINDOW_MS) { state.headlines.delete(key); continue; }
     if (!h.buckets.length) continue;
-    const w = Math.pow(0.5, (now - h.ts) / 3600000 / HALF_LIFE_H);
+    const w = Math.pow(0.5, (now - h.ts) / 3600000 / HALF_LIFE_H) * (h.w0 || 1);
     let mag = 0;
     for (const b of h.buckets) {
       cnt[b] = (cnt[b] || 0) + w;
@@ -176,7 +189,8 @@ function recompute() {
     regime: 'NEUTRAL',
   };
   state.meter.regime = state.meter.riskOff >= RISKOFF_HI ? 'RISK-OFF' : state.meter.riskOff <= RISKOFF_LO ? 'RISK-ON' : 'NEUTRAL';
-  state.topEvents = contributors.sort((a, b) => b.mag - a.mag).slice(0, 5)
+  state.bucketCounts = Object.fromEntries(Object.entries(cnt).map(([b, v]) => [b, +v.toFixed(1)])); // decayed counts — proves a story category was scored even when not a top driver
+  state.topEvents = contributors.sort((a, b) => b.mag - a.mag).slice(0, 8)
     .map(c => ({ title: c.title.slice(0, 110), buckets: c.buckets, ageH: +((now - c.ts) / 3600000).toFixed(1) }));
   state.updatedAt = now;
 }
@@ -188,7 +202,24 @@ async function scan() {
     for (const it of items) {
       const key = norm(it.title);
       if (!key || state.headlines.has(key)) continue;
-      state.headlines.set(key, { title: it.title, ts: it.ts, buckets: classify(it.title) });
+      const isTruth = it.kind === 'truth';
+      // Truth posts: classify on the FULL post text (title is truncated at ~100 chars),
+      // 2× weight (primary source), display-prefixed so it's obvious in top drivers.
+      const text = isTruth ? (it.title + ' ' + (it.desc || '')) : it.title;
+      let buckets = classify(text);
+      if (isTruth && buckets.length) {
+        // CAMPAIGN-BOILERPLATE FILTER: endorsement/rally posts routinely contain
+        // "supports our Tariffs, Energy Dominance, lower gas prices..." — that's stump
+        // copy, not market news, and at 2× weight it would poison the meter on every
+        // endorsement. For campaign-flavored posts keep ONLY war buckets (a war threat
+        // inside a rally post is still a war threat); drop everything else.
+        const campaign = /\b(endorse\w*|endorsement|running (to represent|for|against)|vote for|approval rating|election|primary|maga|campaign|poll(s|ing)?\b)/i.test(text);
+        if (campaign) buckets = buckets.filter(b => b === 'warEsc' || b === 'warDeesc');
+      }
+      state.headlines.set(key, {
+        title: (isTruth ? 'TRUMP: ' : '') + it.title,
+        ts: it.ts, buckets, w0: isTruth ? 2 : 1,
+      });
       added++;
     }
   }
@@ -215,7 +246,8 @@ function brief() { // compact snapshot attached to every entry-signal log record
   return { riskOff: state.meter.riskOff, regime: state.meter.regime, bias: state.meter.bias, at: state.updatedAt };
 }
 function getState() {
-  return { ...state.meter, gateOn: GATE_ON, topEvents: state.topEvents, headlines24h: state.headlines.size,
+  return { ...state.meter, gateOn: GATE_ON, topEvents: state.topEvents, bucketCounts: state.bucketCounts || {},
+           headlines24h: state.headlines.size,
            scans: state.scanCount, updatedAt: state.updatedAt ? new Date(state.updatedAt).toISOString() : null };
 }
 // start(onShift): begin polling. onShift(msg, meter) fires on regime change —
