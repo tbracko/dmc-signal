@@ -1,4 +1,12 @@
-// DMS Signal Bot v5.47 -- AUTO-TRADE edition
+// DMS Signal Bot v5.48 -- AUTO-TRADE edition
+//
+// v5.48 (2026-07-14): PERSISTENT STATE DIR (DATA_DIR). All state files (.entry_signals.jsonl,
+//   .active_trades.json, .closed_trades.json, .manual_seen.json, .missed_signals.json,
+//   .dedup.json, .last_summary_date) now live on a Railway volume mounted at /data
+//   (auto-detected; DATA_DIR env overrides; falls back to __dirname locally). Root cause:
+//   Railway's container fs is ephemeral, so every redeploy/restart wiped the entry-signal
+//   log — sentiment shadow validation could never reach 10 blocks. Requires attaching a
+//   volume at /data in Railway; without it, behavior is unchanged (boot log warns).
 //
 // v5.47 (2026-07-13): NEWS SENTIMENT METER (sentiment.js, SHADOW MODE). Free news feeds
 //   (Google News topic RSS incl. a Trump feed + CNBC) scored into riskOff 0-100 and
@@ -317,7 +325,17 @@ const WANT_SHORT    = process.env.ALERT_SHORT   !== 'false';
 const WANT_ATLEVEL  = process.env.ALERT_ATLEVEL === 'true';
 const MIN_RR        = parseFloat(process.env.MIN_RR || '1.0');
 const INTERVAL_MS   = parseInt(process.env.INTERVAL_MS || '120000', 10);
-const DEDUP_FILE    = path.join(__dirname, '.dedup.json');
+
+// v5.48 (2026-07-14): PERSISTENT STATE DIR. Railway's container filesystem is ephemeral —
+// every redeploy AND restart wiped .entry_signals.jsonl etc., so shadow-validation data
+// never accumulated (misdiagnosed twice as a logEntrySignal paste regression). All state
+// files now live in DATA_DIR: auto-uses a Railway volume mounted at /data if present,
+// else DATA_DIR env var, else __dirname (local runs unchanged). Repo files (.env, static
+// dashboard routes) intentionally stay in __dirname.
+const DATA_DIR = process.env.DATA_DIR || (fs.existsSync('/data') ? '/data' : __dirname);
+console.log('DATA_DIR:', DATA_DIR, DATA_DIR === __dirname ? '(ephemeral — attach a Railway volume at /data to persist logs)' : '(persistent)');
+
+const DEDUP_FILE    = path.join(DATA_DIR, '.dedup.json');
 
 // -- AUTO-TRADE CONFIG --------------------------------------------------------
 const HL_PRIVATE_KEY  = process.env.HL_PRIVATE_KEY;   // Agent wallet private key
@@ -430,11 +448,11 @@ const HL_API  = 'https://api.hyperliquid.xyz';
 
 // -- STATE --------------------------------------------------------------------
 const coinState = {};  // coinId -> { price, htfDir, results: { tf: dmsResult } }
-const ACTIVE_TRADES_FILE = path.join(__dirname, '.active_trades.json');
-const CLOSED_TRADES_FILE = path.join(__dirname, '.closed_trades.json');
-const MANUAL_SEEN_FILE   = path.join(__dirname, '.manual_seen.json');  // v5.7: persist manual-position detection across restarts
-const MISSED_SIGNALS_FILE = path.join(__dirname, '.missed_signals.json');  // v5.10: diagnostic log of filtered signals
-const ENTRY_SIGNALS_FILE = path.join(__dirname, '.entry_signals.jsonl');   // v5.34: per-executed-signal metadata (JSONL, append-only)
+const ACTIVE_TRADES_FILE = path.join(DATA_DIR, '.active_trades.json');
+const CLOSED_TRADES_FILE = path.join(DATA_DIR, '.closed_trades.json');
+const MANUAL_SEEN_FILE   = path.join(DATA_DIR, '.manual_seen.json');  // v5.7: persist manual-position detection across restarts
+const MISSED_SIGNALS_FILE = path.join(DATA_DIR, '.missed_signals.json');  // v5.10: diagnostic log of filtered signals
+const ENTRY_SIGNALS_FILE = path.join(DATA_DIR, '.entry_signals.jsonl');   // v5.34: per-executed-signal metadata (JSONL, append-only); v5.48: on DATA_DIR volume
 
 // v5.43 (2026-07-04): assets that run the REGAIN pattern in SHADOW mode — paper-log
 // only, never auto-traded. To promote a regain variant to live, it must clear paper
@@ -3513,7 +3531,7 @@ async function scanCoin(coinId){
 
 // -- DAILY SUMMARY ------------------------------------------------------------
 const SUMMARY_HOUR = parseInt(process.env.SUMMARY_HOUR || '6', 10); // UTC hour to send daily summary
-const SUMMARY_FILE = path.join(__dirname, '.last_summary_date');
+const SUMMARY_FILE = path.join(DATA_DIR, '.last_summary_date');
 let lastSummaryDate = (() => { try { return fs.readFileSync(SUMMARY_FILE, 'utf8').trim(); } catch { return ''; } })();
 
 async function sendDailySummary() {
@@ -3603,7 +3621,7 @@ async function checkDailySummary() {
 let lastScanTs = 0;
 let scanCount  = 0;
 const BOT_STARTED_AT = Date.now();
-const BOT_VERSION    = 'v5.47'; // keep in sync with the top-of-file changelog on each deploy (was stuck at v5.39 through v5.43 — made deploy verification via /api/status impossible)
+const BOT_VERSION    = 'v5.48'; // keep in sync with the top-of-file changelog on each deploy (was stuck at v5.39 through v5.43 — made deploy verification via /api/status impossible)
 
 async function scanAll(){
   const coins = Object.keys(COINS);
