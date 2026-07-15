@@ -7,6 +7,11 @@
 //   Railway's container fs is ephemeral, so every redeploy/restart wiped the entry-signal
 //   log — sentiment shadow validation could never reach 10 blocks. Requires attaching a
 //   volume at /data in Railway; without it, behavior is unchanged (boot log warns).
+//   ALSO v5.48 (2026-07-15): SENTIMENT METER CALIBRATION (sentiment.js — no bot.js code
+//   change). Meter pinned at RISK-OFF ~96 while BTC was +3.3%/24h. Fixes: (1) 'relief'
+//   bucket — "stocks rally" headlines now LOWER riskOff (panic finally has a mirror);
+//   (2) TAPE BLEND — 24h returns of our own assets shift riskOff up to ∓25 and each
+//   asset's bias up to ±25. /api/status .sentiment exposes newsRiskOff + tape.
 //
 // v5.47 (2026-07-13): NEWS SENTIMENT METER (sentiment.js, SHADOW MODE). Free news feeds
 //   (Google News topic RSS incl. a Trump feed + CNBC) scored into riskOff 0-100 and
