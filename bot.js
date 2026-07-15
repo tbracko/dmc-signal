@@ -2946,6 +2946,34 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults, entryCandles
     }
   }
 
+  // v5.49: Same-direction re-entry cooldown. After a position on this coin closes, do
+  // not open a NEW position in the SAME direction until cooldownMin minutes have passed.
+  // Opposite-direction (reversal) signals are exempt. Guards the 2026-07-14 crude case:
+  // bot re-entered a long 19 min after banking one, ~1.2% higher near the top, and it
+  // had to be manually rescued from the SL. 90d scan: this pattern fired exactly once,
+  // and normal same-asset spacing was >1h — so it blocks that failure mode and nothing
+  // else. Set cooldownMin: 0 in coins-config.js to disable per asset.
+  {
+    const cooldownMin = COINS[coinId]?.cooldownMin || 0;
+    if (cooldownMin > 0) {
+      const closed = loadClosedTrades();
+      const lastSameCoin = closed.find(t => {
+        const cId = { 'xyz:SP500':'sp500', 'xyz:CL':'crude', CRUDE:'crude', CL:'crude', BTC:'bitcoin', 'xyz:XYZ100':'xyz100', XYZ100:'xyz100' }[t.coin] || t.coin;
+        return cId === coinId;
+      });
+      if (lastSameCoin && lastSameCoin.side === d.sig) {
+        const minsSince = (Date.now() - new Date(lastSameCoin.ts).getTime()) / 60000;
+        if (minsSince < cooldownMin) {
+          const wait = Math.ceil(cooldownMin - minsSince);
+          console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: cooldown — ${minsSince.toFixed(0)}m since last ${d.sig} close < ${cooldownMin}m (v5.49 re-entry cooldown)`);
+          logMissedSignal(coinId, d.sig, conf, 'reentry-cooldown', { minsSinceLastClose: Math.round(minsSince), cooldownMin, lastCloseTs: lastSameCoin.ts, filter: 'v5.49 same-direction re-entry cooldown' });
+          await sendTelegram(`⏳ <b>COOLDOWN: ${sym} ${d.sig}</b>\nJust closed a ${d.sig} ${minsSince.toFixed(0)}m ago — waiting ${wait}m more before re-entering same direction (v5.49).`);
+          return;
+        }
+      }
+    }
+  }
+
   // v5.12: ADX chop filter — skip entries when the entry-TF ADX is below threshold,
   // indicating a range-bound / choppy market. This is the primary defense against the
   // HYPE whipsaw pattern (Apr 20-24: 4 SL hits in 6 days in a $40.50-$42.80 range).
