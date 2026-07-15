@@ -1,4 +1,9 @@
-// DMS — sentiment.js  (v5.47, 2026-07-13)
+// DMS — sentiment.js  (v5.47 2026-07-13; calibrated v5.48 2026-07-15)
+//
+// v5.48 calibration: 'relief' bucket (panic's mirror — "stocks rally" lowers riskOff,
+// POS tested before NEG so "rally despite fears" isn't misread) + TAPE BLEND (24h
+// returns of our own assets shift riskOff up to ∓25 / per-asset bias up to ±25;
+// tape older than 2h is discarded → news-only). getState exposes newsRiskOff + tape.
 //
 // NEWS/SENTIMENT METER — shared module, required by bot.js.
 //
@@ -84,6 +89,7 @@ const IMPACT = {
   oilBear:   { crude: -5 },
   tariff:    { riskOff: +5, sp500: -4, xyz100: -4 },
   panic:     { riskOff: +6, sp500: -4, xyz100: -4, bitcoin: -3 },
+  relief:    { riskOff: -6, sp500: +4, xyz100: +4, bitcoin: +3 }, // v5.48: mirror of panic
 };
 
 const HALF_LIFE_H = 6;      // headline weight halves every 6h
@@ -117,7 +123,13 @@ function classify(title) {
     else if (RE.neg.test(title)) buckets.push('oilBear');
   }
   if (RE.tariff.test(title)) buckets.push('tariff');
-  if (buckets.length === 0 && RE.panicCtx.test(title) && RE.neg.test(title)) buckets.push('panic');
+  if (buckets.length === 0 && RE.panicCtx.test(title)) {
+    // v5.48: relief is panic's mirror. Test POS first — financial headlines phrase
+    // recoveries as "stocks rally despite fears / shakes off war fears", where the
+    // fear-word is the thing being overcome, not the story.
+    if (RE.pos.test(title)) buckets.push('relief');
+    else if (RE.neg.test(title)) buckets.push('panic');
+  }
   return buckets.slice(0, 2); // max 2 buckets per headline
 }
 
@@ -154,8 +166,37 @@ async function fetchFeed(feed) {
 const state = {
   headlines: new Map(),  // key: normalized title -> { title, ts, buckets }
   meter: { riskOff: 50, bias: { bitcoin: 0, sp500: 0, xyz100: 0, crude: 0 }, regime: 'NEUTRAL' },
+  tape: null,            // v5.48: { bitcoin, sp500, xyz100, crude } 24h returns in %
+  newsRiskOff: 50,       // v5.48: pre-tape (news-only) riskOff, kept for transparency
   topEvents: [], updatedAt: 0, scanCount: 0, lastError: null,
 };
+
+// ---- v5.48: TAPE component ---------------------------------------------------
+// CALIBRATION FIX (2026-07-15): during the ongoing Iran war the news meter pinned
+// at RISK-OFF ~96 while BTC was +3.3%/24h and NDX +1.5% — headlines measure what
+// journalists write, not what money does. The tape (24h returns of our own assets
+// from HL candles) now adjusts the meter: riskOff shifts up to ∓25 points on the
+// average risk-asset return, and each asset's bias shifts up to ±25 on its own
+// return. News still leads; the tape keeps it honest.
+const TAPE_ASSETS = { bitcoin: 'BTC', sp500: 'xyz:SP500', xyz100: 'xyz:XYZ100', crude: 'xyz:CL' };
+async function fetchTape() {
+  const out = {};
+  await Promise.all(Object.entries(TAPE_ASSETS).map(async ([id, coin]) => {
+    try {
+      const r = await fetch('https://api.hyperliquid.xyz/info', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'candleSnapshot', req: { coin, interval: '1h', startTime: Date.now() - 26 * 3600000, endTime: Date.now() } }),
+        signal: AbortSignal.timeout(10000),
+      });
+      const c = await r.json();
+      if (Array.isArray(c) && c.length > 20) {
+        const base = c[Math.max(0, c.length - 25)]; // exactly 24 bars back, not "whatever 26h returned"
+        out[id] = +(((+c[c.length - 1].c) - (+base.c)) / (+base.c) * 100).toFixed(2);
+      }
+    } catch (_) { /* tape is best-effort; meter falls back to news-only */ }
+  }));
+  return Object.keys(out).length ? out : null;
+}
 // strip trailing " - Source" (Google News appends the outlet) so syndicated copies dedupe
 const norm = (t) => t.replace(/\s+-\s+[^-]{2,45}$/, '').toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').slice(0, 90);
 
@@ -183,11 +224,24 @@ function recompute() {
     for (const k of Object.keys(imp)) sums[k] += imp[k] * eff;
   }
   const squash = (x) => Math.round(100 * Math.tanh(x / 60));
-  state.meter = {
-    riskOff: Math.max(0, Math.min(100, Math.round(50 + 50 * Math.tanh(sums.riskOff / 60)))),
-    bias: { bitcoin: squash(sums.bitcoin), sp500: squash(sums.sp500), xyz100: squash(sums.xyz100), crude: squash(sums.crude) },
-    regime: 'NEUTRAL',
-  };
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  state.newsRiskOff = clamp(Math.round(50 + 50 * Math.tanh(sums.riskOff / 60)), 0, 100);
+  const bias = { bitcoin: squash(sums.bitcoin), sp500: squash(sums.sp500), xyz100: squash(sums.xyz100), crude: squash(sums.crude) };
+  let riskOff = state.newsRiskOff;
+  // v5.48: blend the tape — average risk-asset 24h return moves riskOff up to ∓25;
+  // each asset's own return moves its bias up to ±25.
+  if (state.tape) {
+    const t = state.tape;
+    const rets = ['bitcoin', 'sp500', 'xyz100'].map(k => t[k]).filter(Number.isFinite);
+    if (rets.length) {
+      const avg = rets.reduce((s, v) => s + v, 0) / rets.length;
+      riskOff = clamp(riskOff - Math.round(25 * Math.tanh(avg / 2)), 0, 100);
+    }
+    for (const k of Object.keys(bias)) {
+      if (Number.isFinite(t[k])) bias[k] = clamp(bias[k] + Math.round(25 * Math.tanh(t[k] / 2)), -100, 100);
+    }
+  }
+  state.meter = { riskOff, bias, regime: 'NEUTRAL' };
   state.meter.regime = state.meter.riskOff >= RISKOFF_HI ? 'RISK-OFF' : state.meter.riskOff <= RISKOFF_LO ? 'RISK-ON' : 'NEUTRAL';
   state.bucketCounts = Object.fromEntries(Object.entries(cnt).map(([b, v]) => [b, +v.toFixed(1)])); // decayed counts — proves a story category was scored even when not a top driver
   state.topEvents = contributors.sort((a, b) => b.mag - a.mag).slice(0, 8)
@@ -196,7 +250,9 @@ function recompute() {
 }
 
 async function scan() {
-  const results = await Promise.all(FEEDS.map(fetchFeed));
+  const [tape, ...results] = await Promise.all([fetchTape(), ...FEEDS.map(fetchFeed)]);
+  if (tape) { state.tape = tape; state.tapeAt = Date.now(); }
+  else if (state.tapeAt && Date.now() - state.tapeAt > 2 * 3600000) state.tape = null; // stale >2h → fall back to news-only rather than trade on old returns
   let added = 0;
   for (const items of results) {
     for (const it of items) {
@@ -247,6 +303,7 @@ function brief() { // compact snapshot attached to every entry-signal log record
 }
 function getState() {
   return { ...state.meter, gateOn: GATE_ON, topEvents: state.topEvents, bucketCounts: state.bucketCounts || {},
+           newsRiskOff: state.newsRiskOff, tape: state.tape,                       // v5.48
            headlines24h: state.headlines.size,
            scans: state.scanCount, updatedAt: state.updatedAt ? new Date(state.updatedAt).toISOString() : null };
 }
@@ -258,13 +315,17 @@ function start(onShift) {
     try {
       await scan();
       const m = state.meter;
+      // Alert on regime change, throttled to one Telegram per 2h. NOTE: when
+      // throttled we deliberately do NOT update _lastRegime — if the new regime
+      // persists, the alert fires as soon as the throttle expires (a change that
+      // flaps back within the window correctly produces no alert at all).
       if (m.regime !== _lastRegime && Date.now() - _lastShiftTg > 2 * 3600000) {
         _lastShiftTg = Date.now();
         const top = state.topEvents[0]?.title || 'n/a';
         if (onShift) onShift(
           `🌡 <b>SENTIMENT SHIFT: ${_lastRegime} → ${m.regime}</b>\nrisk-off ${m.riskOff}/100 · BTC ${m.bias.bitcoin} · SPX ${m.bias.sp500} · NDX ${m.bias.xyz100} · CL ${m.bias.crude}\nTop driver: ${top}\n${GATE_ON ? '⛔ gate ACTIVE' : '👁 shadow mode — informational only'}`, m);
         _lastRegime = m.regime;
-      } else if (m.regime !== _lastRegime) { _lastRegime = m.regime; }
+      }
       state.lastError = null;
     } catch (e) { state.lastError = e.message; console.warn('sentiment scan error:', e.message); }
   };
