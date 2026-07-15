@@ -971,6 +971,8 @@ async function renderSentiment(){
       '</div>'+
       '<div style="font-size:9px;color:#3d5068;letter-spacing:.06em;font-family:\'IBM Plex Mono\',monospace;margin-bottom:2px">ASSET BIAS (− short-friendly · + long-friendly)</div>'+
       bar('BTC', b.bitcoin??0) + bar('SPX', b.sp500??0) + bar('NDX', b.xyz100??0) + bar('CL', b.crude??0) +
+      (s.tape ? (function(){ const tp=s.tape, tf2=v=>Number.isFinite(v)?(v>0?'+':'')+v.toFixed(1)+'%':'—';
+        return '<div style="font-family:\'IBM Plex Mono\',monospace;font-size:10px;color:#7b8fa8;margin:8px 0 0">24h tape: BTC '+tf2(tp.bitcoin)+' · SPX '+tf2(tp.sp500)+' · NDX '+tf2(tp.xyz100)+' · CL '+tf2(tp.crude)+' <span style="color:#3d5068">(news '+(s.newsRiskOff??'—')+' → blended '+s.riskOff+')</span></div>'; })() : '')+
       '<div style="font-size:9px;color:#3d5068;letter-spacing:.06em;font-family:\'IBM Plex Mono\',monospace;margin:12px 0 4px">TOP DRIVERS ('+(s.headlines24h||0)+' headlines/24h)</div>'+
       (s.topEvents||[]).map(e=>'<div style="font-size:11px;color:#c9d6e3;margin:4px 0;line-height:1.4">· '+e.title+' <span style="color:#5d7a99;font-size:9px">('+e.buckets.join(',')+' · '+e.ageH+'h)</span></div>').join('')+
       (s.bucketCounts && Object.keys(s.bucketCounts).length ?
