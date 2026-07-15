@@ -250,9 +250,12 @@ function render({ spot, perpDefault, perpXyz, fills, status, now }) {
       (s.gateOn ? ' <span class="badge bad">GATE ON</span>' : ' <span class="badge neu">shadow</span>');
     const b = s.bias || {};
     const f = (v) => (v > 0 ? '+' : '') + v;
+    const tp = s.tape || {};
+    const tf2 = (v) => Number.isFinite(v) ? (v > 0 ? '+' : '') + v.toFixed(1) + '%' : '—';
     document.getElementById('sentBias').textContent =
       'bias — BTC ' + f(b.bitcoin ?? 0) + ' · SPX ' + f(b.sp500 ?? 0) + ' · NDX ' + f(b.xyz100 ?? 0) + ' · CL ' + f(b.crude ?? 0) +
-      ' · ' + (s.headlines24h || 0) + ' headlines/24h';
+      ' · ' + (s.headlines24h || 0) + ' headlines/24h' +
+      (s.tape ? ' | 24h tape: BTC ' + tf2(tp.bitcoin) + ' SPX ' + tf2(tp.sp500) + ' NDX ' + tf2(tp.xyz100) + ' CL ' + tf2(tp.crude) + ' (news ' + (s.newsRiskOff ?? '—') + ' → blended ' + s.riskOff + ')' : '');
     document.getElementById('sentEvents').innerHTML =
       ((s.topEvents || []).slice(0, 3).map(e => '· ' + e.title + ' <span style="color:#5d7a99">(' + e.buckets.join(',') + ', ' + e.ageH + 'h)</span>').join('<br>') || '—') +
       (s.bucketCounts ? '<br><span style="color:#5d7a99">buckets: ' + Object.entries(s.bucketCounts).sort((a,b)=>b[1]-a[1]).map(([k,v])=>k+' '+v).join(' · ') + '</span>' : '');
