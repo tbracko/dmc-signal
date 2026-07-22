@@ -1,4 +1,12 @@
-// DMS Signal Bot v5.48 -- AUTO-TRADE edition
+// DMS Signal Bot v5.49 -- AUTO-TRADE edition
+// v5.49 (2026-07-22): LIVE ENTRY-LOG FIX. tp1Price/tp2Price were const-scoped inside the
+//   if(target) block but read by logEntrySignal() below it — every live entry threw a
+//   ReferenceError (swallowed by the outer catch), so /api/entry-signals only ever held
+//   paper:true regain records. Hoisted to `let` above the block. NOT a paste regression;
+//   re-pasting reproduced it. Symptom confirmation: spurious "TRADE FAILED" Telegrams fired
+//   right after trades actually opened. Verify: after a live entry, newest entry-signals
+//   record has paper:false and non-null tp1/tp2.
+//
 //
 // v5.48 (2026-07-14): PERSISTENT STATE DIR (DATA_DIR). All state files (.entry_signals.jsonl,
 //   .active_trades.json, .closed_trades.json, .manual_seen.json, .missed_signals.json,
@@ -2055,10 +2063,15 @@ const HL = {
       // TP1: 34% at 1.0R, TP2: 33% at 1.8R, TP3: remaining 33% trails via trailStops()
       // v5.2: HIP-3 assets use limit trigger (isMarket:false) for TP to avoid taker fees
       // SL remains isMarket:true for guaranteed fills — TP can afford to miss occasionally
+      // v5.49: hoisted out of the if(target) block — logEntrySignal below reads these,
+      // and const-scoping them inside the block made every live entry throw a
+      // ReferenceError (swallowed by outer catch), so live records were never written
+      // while the crude regain shadow log kept filling. That was the "silent logger".
+      let tp1Price = null, tp2Price = null;
       if (target) {
         const riskDist = Math.abs(currentPrice - effectiveStopPrice);
-        const tp1Price = isBuy ? currentPrice + riskDist * 1.0 : currentPrice - riskDist * 1.0;  // 1R
-        const tp2Price = isBuy ? currentPrice + riskDist * 1.8 : currentPrice - riskDist * 1.8;  // 1.8R
+        tp1Price = isBuy ? currentPrice + riskDist * 1.0 : currentPrice - riskDist * 1.0;  // 1R
+        tp2Price = isBuy ? currentPrice + riskDist * 1.8 : currentPrice - riskDist * 1.8;  // 1.8R
         // TP3 = remaining 33% handled by trailStops() — no order placed
 
         const tp1Size = parseFloat((size * 0.34).toFixed(szDec));
@@ -3654,7 +3667,7 @@ async function checkDailySummary() {
 let lastScanTs = 0;
 let scanCount  = 0;
 const BOT_STARTED_AT = Date.now();
-const BOT_VERSION    = 'v5.48'; // keep in sync with the top-of-file changelog on each deploy (was stuck at v5.39 through v5.43 — made deploy verification via /api/status impossible)
+const BOT_VERSION    = 'v5.49'; // keep in sync with the top-of-file changelog on each deploy (was stuck at v5.39 through v5.43 — made deploy verification via /api/status impossible)
 
 async function scanAll(){
   const coins = Object.keys(COINS);
