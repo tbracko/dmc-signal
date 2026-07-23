@@ -437,6 +437,7 @@ if(!TG_TOKEN || !TG_CHATID){
 // daily-report.js had GOLD at $500 while bot.js had reduced it to $300.
 const { COINS, DAILY_LOSS_PCT, getMaxNotional } = require('./coins-config');
 const SENT = require('./sentiment'); // v5.47: news sentiment meter (shadow mode)
+const PB = require('./playbook');    // v5.51: playbook engine (TBL/DBL candle setups) — detection only; execution below
 
 const TFS = [
   { l:'1W', w:5 },
@@ -466,6 +467,8 @@ const CLOSED_TRADES_FILE = path.join(DATA_DIR, '.closed_trades.json');
 const MANUAL_SEEN_FILE   = path.join(DATA_DIR, '.manual_seen.json');  // v5.7: persist manual-position detection across restarts
 const MISSED_SIGNALS_FILE = path.join(DATA_DIR, '.missed_signals.json');  // v5.10: diagnostic log of filtered signals
 const ENTRY_SIGNALS_FILE = path.join(DATA_DIR, '.entry_signals.jsonl');   // v5.34: per-executed-signal metadata (JSONL, append-only); v5.48: on DATA_DIR volume
+const PLAYBOOK_STATE_FILE  = path.join(DATA_DIR, '.playbook_state.json');   // v5.51: open records, bar dedupe, rolling bench window per setup
+const PLAYBOOK_TRADES_FILE = path.join(DATA_DIR, '.playbook_trades.jsonl'); // v5.51: closed playbook trades (append-only, R-audited)
 
 // v5.43 (2026-07-04): assets that run the REGAIN pattern in SHADOW mode — paper-log
 // only, never auto-traded. To promote a regain variant to live, it must clear paper
@@ -1349,6 +1352,24 @@ const HL = {
         const capBase = getMaxNotional(coinCfg, this.cachedEquity > 0 ? this.cachedEquity : 100);
         const isSameAsPrev = prev && prev.side === (szi > 0 ? 'LONG' : 'SHORT') && prev.trailState;
         const isNewPosition = !isSameAsPrev;
+
+        // v5.51: PLAYBOOK-open reconciliation. A fresh playbook bracket can appear
+        // on-exchange before its in-memory registration (sync interleaving during
+        // the entry await) or after a restart. Without this, the manual-inherited
+        // classifier below would mis-tag it (playbook notional can exceed the
+        // retest cap × MANUAL_NOTIONAL_MULT — e.g. XYZ100 at ~6× equity vs cap 1.5×).
+        let _pbRec = null;
+        try { _pbRec = pbLoadState().open[coinId]; } catch (_) {}
+        if (isNewPosition && _pbRec && _pbRec.side === (szi > 0 ? 'LONG' : 'SHORT')) {
+          this.activeTrades[coinId] = {
+            asset: pos.coin, side: _pbRec.side, size: Math.abs(szi), entry: entry,
+            sl: trig.sl || _pbRec.sl, tp: trig.tp || _pbRec.tp, initialSl: _pbRec.sl,
+            bestPrice: entry, openTs: _pbRec.ts, trailState: 'playbook',
+            source: 'playbook', pbTag: _pbRec.tag,
+          };
+          continue;
+        }
+
         const isManualInherited = isNewPosition && capBase > 0 && notional > capBase * MANUAL_NOTIONAL_MULT;
         const seenKey = `${coinId}:${szi.toFixed(8)}:${entry.toFixed(4)}`;
         const alreadyAlerted = !!this.manualInheritedSeen[seenKey];
@@ -2223,6 +2244,8 @@ const HL = {
 
       // v5.7: Skip manual-ignored positions — they have one-time protective SL/TP only, no trailing
       if (trade.source === 'manual-ignored' || trade.trailState === 'manual') continue;
+      // v5.51: Skip playbook positions — flat bracket lives on-exchange; no ladder/BE/trail/close-exit.
+      if (trade.source === 'playbook') continue;
 
       // v5.0 FIX #2: Verify position still exists on-exchange
       const stillOpen = livePositions.find(p =>
@@ -3205,6 +3228,12 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults, entryCandles
       logMissedSignal(coinId, d.sig, conf, 'manual-position-active', { existingSide: existing.side, source: existing.source, filter: 'hands off manual position' });
       return;
     }
+    // v5.51: Never stack on / reverse a PLAYBOOK position — separate engine, bracket on exchange.
+    if (existing.source === 'playbook') {
+      console.log(`HL auto-trade SKIP ${sym}: playbook position active (${existing.side}) — hands off`);
+      logMissedSignal(coinId, d.sig, conf, 'playbook-position-active', { existingSide: existing.side, filter: 'hands off playbook position' });
+      return;
+    }
     if (existing.side === d.sig) {
       // Same direction -- SKIP (max 1 position per coin to limit exposure)
       console.log(`HL auto-trade SKIP ${sym}: already in ${existing.side} (no stacking)`);
@@ -3262,6 +3291,212 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults, entryCandles
 }
 
 // ==============================================================================
+// ##  PLAYBOOK ENGINE (v5.51, 2026-07-23)                                    ##
+// ==============================================================================
+// Second entry engine — data-mined candle setups (see playbook.js header for
+// provenance + stats). Runs per scan on CLOSED 1H bars only. Fully separate
+// from the retest path: flat bracket (full-size SL 1×ATR + TP on exchange),
+// no ladder / BE / trail / close-exit — trailStops() and maybeAutoTrade()
+// both treat source:'playbook' as hands-off. Railway-only (not in dashboard).
+
+let _pbState = null;
+function pbLoadState() {
+  if (_pbState) return _pbState;
+  try { _pbState = JSON.parse(fs.readFileSync(PLAYBOOK_STATE_FILE, 'utf8')); }
+  catch (_) { _pbState = { seenBar: {}, open: {}, recent: {}, benched: {} }; }
+  _pbState.seenBar = _pbState.seenBar || {}; _pbState.open = _pbState.open || {};
+  _pbState.recent = _pbState.recent || {}; _pbState.benched = _pbState.benched || {};
+  return _pbState;
+}
+function pbSaveState() {
+  try {
+    const tmp = PLAYBOOK_STATE_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(_pbState)); fs.renameSync(tmp, PLAYBOOK_STATE_FILE);
+  } catch (e) { console.warn('PLAYBOOK state save failed:', e.message); }
+}
+
+// Net PnL (closedPnl − fees) for one coin since a timestamp — userFillsByTime
+// main + xyz, DEDUP BY TID (v5.35 rule).
+async function pbNetSince(coin, sinceMs) {
+  const addr = (HL.masterAddress || HL.address || '').toLowerCase();
+  const reqs = [
+    fetch(HL_API + '/info', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'userFillsByTime', user: addr, startTime: sinceMs }) }),
+  ];
+  const seen = new Set(); let net = 0;
+  for (const p of reqs) {
+    try {
+      const r = await p; if (!r.ok) continue;
+      const fills = await r.json(); if (!Array.isArray(fills)) continue;
+      for (const f of fills) {
+        if (f.coin !== coin || seen.has(f.tid)) continue;
+        seen.add(f.tid);
+        net += parseFloat(f.closedPnl || '0') - parseFloat(f.fee || '0');
+      }
+    } catch (_) {}
+  }
+  return net;
+}
+
+// Reconcile: any playbook open-record whose position is gone → audit R from real
+// fills, append to trades log, roll the bench window, maybe bench the setup.
+async function pbReconcile() {
+  const st = pbLoadState();
+  for (const [coinId, rec] of Object.entries(st.open)) {
+    const at = HL.activeTrades[coinId];
+    if (at && at.source === 'playbook') continue;          // still open
+    if (Date.now() - rec.ts < 3 * 60000) continue;         // grace: let sync settle
+    delete st.open[coinId];
+    let netUsd = null, R = null;
+    try {
+      netUsd = await pbNetSince(rec.asset, rec.ts - 60000);
+      R = rec.riskUsd > 0 ? +(netUsd / rec.riskUsd).toFixed(2) : null;
+    } catch (_) {}
+    const key = `${coinId}:${rec.tag}`;
+    const row = { ...rec, closedTs: Date.now(), netUsd, R };
+    try { fs.appendFileSync(PLAYBOOK_TRADES_FILE, JSON.stringify(row) + '\n'); } catch (_) {}
+    if (R != null) {
+      (st.recent[key] = st.recent[key] || []).push(R);
+      if (st.recent[key].length > PB.PB_PARAMS.benchWindow) st.recent[key].shift();
+      const sumR = st.recent[key].reduce((s, x) => s + x, 0);
+      console.log(`PLAYBOOK closed ${key} ${rec.side} net $${netUsd?.toFixed(2)} = ${R}R | rolling ${st.recent[key].length}: ${sumR.toFixed(1)}R`);
+      if (st.recent[key].length >= 10 && sumR <= PB.PB_PARAMS.benchMinSumR && !st.benched[key]) {
+        st.benched[key] = Date.now();
+        await sendTelegram(`🪑 <b>PLAYBOOK BENCHED: ${key}</b>\nRolling ${st.recent[key].length} trades: ${sumR.toFixed(1)}R ≤ ${PB.PB_PARAMS.benchMinSumR}R.\nSetup disabled — re-enable by clearing .playbook_state.json benched key after review.`);
+      } else {
+        await sendTelegram(`📗 <b>PLAYBOOK closed: ${rec.asset} ${rec.tag}</b>\nNet ${netUsd >= 0 ? '+' : ''}$${netUsd?.toFixed(2)} (${R >= 0 ? '+' : ''}${R}R)\nRolling: ${sumR.toFixed(1)}R over ${st.recent[key].length}`);
+      }
+    }
+    pbSaveState();
+  }
+}
+
+async function maybePlaybookTrade(coinId, h1C, price) {
+  if (process.env.PLAYBOOK === 'off') return;
+  if (!HL.enabled || !HL.wallet) return;
+  if (!PB.PB_COINS[coinId] || !h1C || h1C.length < 130) return;
+  const st = pbLoadState();
+  await pbReconcile();
+
+  // CLOSED bars only — getCandles returns the forming bar last (the retest
+  // engine's forming-bar bug must not be repeated here; backtest = closed bars).
+  const now = Date.now();
+  const closed = h1C.filter(k => k.t + 3600000 <= now);
+  if (closed.length < 121) return;
+  const sigs = PB.detectPlaybook(coinId, closed);
+  if (!sigs.length) return;
+
+  for (const sig of sigs) {
+    const key = `${coinId}:${sig.tag}`;
+    if (st.benched[key]) continue;
+    if (st.seenBar[key] === sig.barT) continue;                              // one shot per bar
+    if (st.seenBar[key] && sig.barT - st.seenBar[key] < PB.PB_PARAMS.cooldownBars * 3600000) continue;
+    st.seenBar[key] = sig.barT; pbSaveState();
+
+    // ---- guards (mirror the retest engine's global protections) ----
+    if (HL.activeTrades[coinId]) { console.log(`PLAYBOOK skip ${key}: position already open on ${coinId}`); continue; }
+    if (st.open[coinId]) { console.log(`PLAYBOOK skip ${key}: prior trade not yet reconciled`); continue; }
+    const MAX_POSITIONS = parseInt(process.env.MAX_POSITIONS || '4');
+    if (Object.keys(HL.activeTrades).length >= MAX_POSITIONS) { console.log(`PLAYBOOK skip ${key}: max positions`); continue; }
+    // Shared daily trade budget with the retest engine (global runaway guard)
+    const _today = new Date().toDateString();
+    if (_today !== HL.lastTradeDay) { HL.tradesToday = 0; HL.lastTradeDay = _today; }
+    if (HL.tradesToday >= MAX_TRADES_DAY) { console.log(`PLAYBOOK skip ${key}: daily trade limit`); continue; }
+    const equity = HL.cachedEquity > 0 ? HL.cachedEquity : 0;
+    if (!(equity > 0)) continue;
+
+    let riskPct = PB.PB_PARAMS.riskPct;
+    // Reset stale daily P&L before gating on it (mirrors executeTrade)
+    const _pnlDay = new Date().toDateString();
+    if (_pnlDay !== HL.dailyPnlDate) { HL.dailyPnl = 0; HL.dailyPnlDate = _pnlDay; }
+    const dll = HL.DAILY_LOSS_LIMIT != null ? HL.DAILY_LOSS_LIMIT : -(equity * DAILY_LOSS_PCT);
+    if (HL.dailyPnl <= dll) riskPct *= HL.DAILY_LOSS_REDUCE;                 // same halving as retest
+    if (HL.ddGovernorActive) riskPct *= DD_GOVERNOR_REDUCE;
+
+    const coin = COINS[coinId], asset = coin.asset;
+    const riskUsd = equity * riskPct / 100;
+    const slDist = Math.abs(sig.entry - sig.sl);
+    if (!(slDist > 0)) continue;
+
+    // Entry-drift guard: the backtest entered AT the signal bar's close. If price
+    // has already run > 0.35×ATR past it, actual risk-to-SL inflates beyond the
+    // sized 2% and the edge decays — skip rather than chase.
+    if (Math.abs(price - sig.entry) > 0.35 * sig.atr) {
+      console.log(`PLAYBOOK skip ${key}: price drifted ${(Math.abs(price - sig.entry) / sig.atr).toFixed(2)}×ATR from signal close`);
+      continue;
+    }
+
+    let size = riskUsd / slDist;
+    const capNotional = equity * PB.PB_PARAMS.notionalCapMult;
+    if (size * price > capNotional) size = capNotional / price;
+    const szDec = HL.szDecimals[asset] || 3;
+    size = parseFloat(size.toFixed(szDec));
+    if (size < Math.pow(10, -szDec)) { console.log(`PLAYBOOK skip ${key}: size too small`); continue; }
+    if (size * price > capNotional * 1.1) { console.error(`PLAYBOOK HARD BLOCK ${key}: notional > 1.1× cap`); continue; }
+
+    // Combined-notional cap (same 8× rule as the retest engine, v5.3) — uses the
+    // ACTUAL new notional, not a worst-case estimate.
+    let totalOpenNotional = 0;
+    for (const [cId, t] of Object.entries(HL.activeTrades)) {
+      const px = coinState[cId]?.price || t.entry || 0;
+      totalOpenNotional += Math.abs(t.size * px);
+    }
+    if (totalOpenNotional + size * price > equity * 8) {
+      console.log(`PLAYBOOK skip ${key}: exposure cap (open $${totalOpenNotional.toFixed(0)} + new $${(size * price).toFixed(0)} > 8× equity)`);
+      continue;
+    }
+
+    // ---- entry (HIP-3: GTC limit through spread; else IOC), then bracket ----
+    const isBuy = sig.dir === 'LONG';
+    let entryPx, entryType;
+    if (coin.isHIP3) { entryPx = isBuy ? price * 1.0005 : price * 0.9995; entryType = { limit: { tif: 'Gtc' } }; }
+    else { entryPx = isBuy ? price * 1.01 : price * 0.99; entryType = { limit: { tif: 'Ioc' } }; }
+    console.log(`PLAYBOOK FIRE ${key} ${sig.dir} entry~${price} SL ${sig.sl.toFixed(4)} TP ${sig.tp.toFixed(4)} size ${size} risk $${riskUsd.toFixed(2)} (${riskPct}%)`);
+    try {
+      const entryRes = await HL.placeOrder(asset, isBuy, size, entryPx, entryType);
+      if (!entryRes || entryRes.status === 'err') { console.error('PLAYBOOK entry failed', entryRes && entryRes.response); continue; }
+
+      // Register state FIRST (before SL/TP placement): syncPositions' playbook-restore
+      // keys off st.open, so an interleaved sync can no longer mis-tag this position
+      // as manual-inherited, and a restart mid-entry recovers cleanly.
+      st.open[coinId] = { coinId, asset, tag: sig.tag, side: sig.dir, entry: price, sl: sig.sl, tp: sig.tp, size, riskUsd, ts: Date.now(), barT: sig.barT };
+      pbSaveState();
+
+      if (coin.isHIP3 && entryRes.resting && !entryRes.filled) {
+        await new Promise(r => setTimeout(r, 5000));
+        await HL.syncPositions();
+        const pos = HL.activeTrades[coinId];
+        if (!pos || !(pos.size > 0)) {
+          try { await HL.cancelOrder(asset, entryRes.oid); } catch (_) {}
+          delete st.open[coinId]; pbSaveState();          // rollback — no fill, no record
+          console.warn(`PLAYBOOK ${key}: GTC not filled, cancelled`);
+          continue;
+        }
+      }
+
+      HL.activeTrades[coinId] = {
+        asset, side: sig.dir, size, entry: price, sl: sig.sl, tp: sig.tp,
+        initialSl: sig.sl, bestPrice: price, openTs: Date.now(),
+        trailState: 'playbook', source: 'playbook', pbTag: sig.tag,
+      };
+      HL.saveActiveTrades();
+
+      const slRes = await HL.placeOrder(asset, !isBuy, size, isBuy ? sig.sl * 0.98 : sig.sl * 1.02,
+        { trigger: { isMarket: true, triggerPx: sig.sl, tpsl: 'sl' } }, true);
+      if (!slRes || slRes.status === 'err') await sendTelegram(`⚠️ <b>PLAYBOOK SL FAILED ${asset}</b> — place manually! (SL ${sig.sl.toFixed(4)})`);
+      const tpRes = await HL.placeOrder(asset, !isBuy, size, isBuy ? sig.tp * 1.02 : sig.tp * 0.98,
+        { trigger: { isMarket: !coin.isHIP3, triggerPx: sig.tp, tpsl: 'tp' } }, true);
+      if (!tpRes || tpRes.status === 'err') console.warn(`PLAYBOOK ${key}: TP placement failed`);
+      HL.tradesToday++;                                    // count against the shared daily budget
+      logEntrySignal({ ts: Date.now(), time: new Date().toISOString(), coinId, asset, side: sig.dir, source: 'playbook', tag: sig.tag, entry: price, sl: sig.sl, target: sig.tp, atr: sig.atr, riskUsd, paper: false });
+      await sendTelegram(`📕 <b>PLAYBOOK ${sig.tag}: ${sig.dir} ${asset}</b>\nEntry ~$${price} | SL $${sig.sl.toFixed(4)} (1×ATR) | TP $${sig.tp.toFixed(4)}\nSize ${size} (~$${(size * price).toFixed(0)}) | Risk $${riskUsd.toFixed(2)} (${riskPct}%)\n<i>Bracket order — no ladder/trail. v5.51</i>`);
+    } catch (e) {
+      console.error(`PLAYBOOK ${key} execution error:`, e.message);
+    }
+  }
+}
+
+// ==============================================================================
 // ##  PER-COIN SCAN                                                         ##
 // ==============================================================================
 
@@ -3284,6 +3519,13 @@ async function scanCoin(coinId){
     if (m15C && m15C.length >= 2) {
       const k = m15C[m15C.length - 2];
       coinState[coinId].last15m = { t: k.t, c: k.c };
+    }
+
+    // v5.51: PLAYBOOK engine — second entry engine on closed 1H bars.
+    // Must never break the retest scan: fully fenced.
+    if (h1C && price > 0) {
+      try { await maybePlaybookTrade(coinId, h1C, price); }
+      catch (e) { console.warn('PLAYBOOK error', coinId, e.message); }
     }
 
     // v5.0 FIX #1: Reset htfDir before computation so stale values don't persist
@@ -3667,7 +3909,7 @@ async function checkDailySummary() {
 let lastScanTs = 0;
 let scanCount  = 0;
 const BOT_STARTED_AT = Date.now();
-const BOT_VERSION    = 'v5.49'; // keep in sync with the top-of-file changelog on each deploy (was stuck at v5.39 through v5.43 — made deploy verification via /api/status impossible)
+const BOT_VERSION    = 'v5.51'; // v5.51 (2026-07-23): PLAYBOOK engine — TBL (crude+xyz100) + DBL (crude) at PLAYBOOK_RISK_PCT (2%), closed-1H-bar detection, flat bracket SL 1×ATR / TP 2-4×ATR, auto-bench at −8R/20, kill via PLAYBOOK=off. See playbook.js + trade-playbook-2026-07-23.md.
 
 async function scanAll(){
   const coins = Object.keys(COINS);
@@ -3834,7 +4076,8 @@ async function main(){
       console.log(`Equity: $${_eq.toFixed(2)} | Caps: ${_caps} | Daily loss limit: $${HL.DAILY_LOSS_LIMIT?.toFixed(2) || 'N/A'}`);
       // Backfill any closed trades missed during downtime
       await syncFillHistory();
-      await sendTelegram(`🤖 <b>DMS Signal Bot ${BOT_VERSION} started</b>\n✅ Auto-trading ENABLED\nEquity: $${_eq.toFixed(2)}\nCaps: ${_caps}\nDaily loss limit: $${HL.DAILY_LOSS_LIMIT?.toFixed(2) || 'N/A'}\nRisk: ${RISK_PCT}% | Min conf: ${MIN_CONFIDENCE}%`);
+      const _pbInfo = process.env.PLAYBOOK === 'off' ? 'OFF' : Object.entries(PB.PB_COINS).map(([c, s]) => `${COINS[c]?.label || c}:${Object.keys(s).join('+')}`).join(' ') + ` @${PB.PB_PARAMS.riskPct}%`;
+      await sendTelegram(`🤖 <b>DMS Signal Bot ${BOT_VERSION} started</b>\n✅ Auto-trading ENABLED\nEquity: $${_eq.toFixed(2)}\nCaps: ${_caps}\nDaily loss limit: $${HL.DAILY_LOSS_LIMIT?.toFixed(2) || 'N/A'}\nRisk: ${RISK_PCT}% | Min conf: ${MIN_CONFIDENCE}%\nPlaybook: ${_pbInfo}`);
     } else {
       console.warn('Auto-trading init FAILED -- running in alert-only mode');
       // v5.44 (2026-07-09): use BOT_VERSION — the stale hardcoded "v5.17" banner caused a
