@@ -3979,6 +3979,39 @@ function startHealthServer() {
           ddGovernor: HL ? { active: !!HL.ddGovernorActive, net7d: HL.ddGovernor7dNet } : null,        // v5.36
           sp500ShortWatch: HL ? { mult: HL.sp500ShortMult, stats: HL.sp500ShortStats } : null,         // v5.36
           sentiment: (() => { try { return SENT.getState(); } catch (_) { return null; } })(),         // v5.47: news sentiment meter (shadow)
+          playbook: (() => {                                                                           // v5.51: per-setup performance (health page + dashboard visuals)
+            try {
+              const st = pbLoadState();
+              let closedRows = [];
+              try {
+                if (fs.existsSync(PLAYBOOK_TRADES_FILE)) closedRows = fs.readFileSync(PLAYBOOK_TRADES_FILE, 'utf8')
+                  .split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch (_) { return null; } }).filter(Boolean);
+              } catch (_) {}
+              const setups = {};
+              for (const [cid, conf] of Object.entries(PB.PB_COINS)) {
+                for (const tag of Object.keys(conf)) {
+                  const key = `${cid}:${tag}`;
+                  const audited = closedRows.filter(r => r.coinId === cid && r.tag === tag && typeof r.R === 'number');
+                  const wins = audited.filter(r => r.R > 0).length;
+                  const recent = st.recent[key] || [];
+                  setups[key] = {
+                    coin: cid, label: COINS[cid]?.label || cid, tag,
+                    enabled: process.env.PLAYBOOK !== 'off' && !st.benched[key],
+                    benchedAt: st.benched[key] ? new Date(st.benched[key]).toISOString() : null,
+                    closed: audited.length, wins,
+                    winPct: audited.length ? Math.round(100 * wins / audited.length) : null,
+                    sumR: +audited.reduce((s, r) => s + r.R, 0).toFixed(2),
+                    netUsd: +audited.reduce((s, r) => s + (r.netUsd || 0), 0).toFixed(2),
+                    rollingR: +recent.reduce((s, x) => s + x, 0).toFixed(2),
+                    rollingN: recent.length, benchAt: PB.PB_PARAMS.benchMinSumR,
+                    open: (st.open[cid] && st.open[cid].tag === tag) ? { side: st.open[cid].side, entry: st.open[cid].entry, sl: st.open[cid].sl, tp: st.open[cid].tp, ts: new Date(st.open[cid].ts).toISOString() } : null,
+                    last5: audited.slice(-5).map(r => ({ t: new Date(r.closedTs).toISOString(), R: r.R, netUsd: r.netUsd != null ? +r.netUsd.toFixed(2) : null })),
+                  };
+                }
+              }
+              return { riskPct: PB.PB_PARAMS.riskPct, killSwitch: process.env.PLAYBOOK === 'off', setups };
+            } catch (e) { return { error: e.message }; }
+          })(),
           entrySignals: (() => {                                                                       // v5.39: log health — memCount>0 with fileCount 0 ⇒ fs broken; both 0 across executed trades ⇒ stale deploy
             let fileCount = 0;
             try { if (fs.existsSync(ENTRY_SIGNALS_FILE)) fileCount = fs.readFileSync(ENTRY_SIGNALS_FILE, 'utf8').split('\n').filter(Boolean).length; } catch (_) {}
