@@ -98,6 +98,28 @@
       <div class="small" id="sentEvents" style="margin-top:6px">—</div>
     </div>
 
+    <!-- v5.51: playbook engine — per-setup performance (from /api/status .playbook) -->
+    <div class="panel" style="margin-bottom:16px">
+      <h2>Playbook Setups (v5.51 — TBL/DBL)</h2>
+      <div class="small" id="pbMeta" style="margin-bottom:8px">—</div>
+      <table id="pbTable">
+        <thead>
+          <tr>
+            <th>Setup</th>
+            <th>Status</th>
+            <th>Open now</th>
+            <th class="num">Closed</th>
+            <th class="num">Win%</th>
+            <th class="num">ΣR</th>
+            <th class="num">Net $</th>
+            <th class="num">Rolling (bench @−8R)</th>
+            <th>Last 5 (R)</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
     <div class="panel" style="margin-bottom:16px">
       <h2>Per-Coin Status (last 7 days)</h2>
       <table id="coinTable">
@@ -262,6 +284,41 @@ function render({ spot, perpDefault, perpXyz, fills, status, now }) {
   } else {
     document.getElementById('sentMeter').innerHTML = '<span class="badge neu">no data</span>';
     document.getElementById('sentBias').textContent = 'sentiment appears after the bot\'s first news scan (~20s post-boot)';
+  }
+
+  // ---- Playbook setups (v5.51) ----
+  const pb = status && status.playbook;
+  const pbMeta = document.getElementById('pbMeta');
+  const pbBody = document.querySelector('#pbTable tbody');
+  pbBody.innerHTML = '';
+  if (pb && pb.setups) {
+    pbMeta.textContent = 'risk ' + pb.riskPct + '%/trade · SL 1×ATR · TP 2×ATR (TBL) / 4×ATR (DBL)' +
+      (pb.killSwitch ? ' · KILL SWITCH ON (PLAYBOOK=off)' : '');
+    const rChip = (r) => '<span class="badge ' + (r > 0 ? 'good' : r < 0 ? 'bad' : 'neu') + '" style="margin-right:3px">' + (r > 0 ? '+' : '') + r + '</span>';
+    for (const [key, s] of Object.entries(pb.setups)) {
+      const statusBadge = pb.killSwitch ? '<span class="badge neu">OFF</span>'
+        : s.benchedAt ? '<span class="badge bad">BENCHED</span>'
+        : '<span class="badge good">LIVE</span>';
+      const rollCls = s.rollingR > 0 ? 'pnl-pos' : s.rollingR < 0 ? 'pnl-neg' : 'dim';
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td><b>' + s.label + ' ' + s.tag + '</b></td>' +
+        '<td>' + statusBadge + '</td>' +
+        '<td>' + (s.open
+          ? '<span class="badge bot">' + s.open.side + ' @' + s.open.entry + '</span>'
+          : '<span class="dim">flat</span>') + '</td>' +
+        '<td class="num">' + s.closed + '</td>' +
+        '<td class="num">' + (s.winPct != null ? s.winPct + '%' : '—') + '</td>' +
+        '<td class="num ' + (s.sumR > 0 ? 'pnl-pos' : s.sumR < 0 ? 'pnl-neg' : 'dim') + '">' + (s.sumR > 0 ? '+' : '') + s.sumR + '</td>' +
+        '<td class="num">' + fmtPnl(s.netUsd) + '</td>' +
+        '<td class="num ' + rollCls + '">' + (s.rollingR > 0 ? '+' : '') + s.rollingR + 'R / ' + s.rollingN + '</td>' +
+        '<td>' + (s.last5 && s.last5.length ? s.last5.map(x => rChip(x.R)).join('') : '<span class="dim">no closes yet</span>') + '</td>';
+      pbBody.appendChild(tr);
+    }
+  } else {
+    pbMeta.innerHTML = status && status.ok
+      ? '<span class="badge warn">bot running pre-v5.51 — no playbook data</span>'
+      : '<span class="badge neu">needs /api/status (open this page from the bot URL)</span>';
   }
 
   // ---- Last scan ----
