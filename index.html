@@ -514,9 +514,9 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   <div id="log-list"><div class="empty">No signals logged yet</div></div>
 </div>
 
-<!-- PAGE: SENTIMENT (v5.47) — news meter served by the Railway bot's /api/status -->
+<!-- PAGE: SENTIMENT (v5.47) — news meter + PLAYBOOK performance (v5.51), both served by the Railway bot's /api/status -->
 <div class="page" id="page-sentiment">
-  <div class="sh">News Sentiment · shadow mode (informational — bot does not block on this yet)</div>
+  <div class="sh">Playbook Engine &amp; News Sentiment · from Railway bot</div>
   <div id="sent-config" style="display:none;padding:10px 16px">
     <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#5d7a99;margin-bottom:6px">Enter your Railway bot URL once (e.g. https://your-app.up.railway.app):</div>
     <div style="display:flex;gap:6px">
@@ -935,6 +935,37 @@ function saveSentUrl(){
   renderSentiment();
 }
 let _sentTimer = null;
+// v5.51: playbook per-setup performance card — rendered from /api/status.playbook
+// on the same page (reuses the sentiment page's bot-URL plumbing).
+function renderPlaybookBlock(st){
+  const pb = st && st.playbook;
+  if(!pb) return '<div style="padding:10px 16px;font-family:\'IBM Plex Mono\',monospace;font-size:10px;color:#5d7a99">Playbook: bot pre-v5.51 — no data</div>';
+  if(!pb.setups) return '<div style="padding:10px 16px;font-family:\'IBM Plex Mono\',monospace;font-size:10px;color:#e05555">Playbook: '+(pb.error||'no setups')+'</div>';
+  const mono = "font-family:'IBM Plex Mono',monospace";
+  const chip = r => '<span style="display:inline-block;margin:0 2px;padding:1px 6px;border-radius:4px;font-size:9px;'+mono+';background:'+(r>0?'rgba(34,197,94,.12)':r<0?'rgba(224,85,85,.12)':'#10151c')+';color:'+(r>0?'#22c55e':r<0?'#e05555':'#5d7a99')+'">'+(r>0?'+':'')+r+'</span>';
+  let rows='';
+  for(const s of Object.values(pb.setups)){
+    const status = pb.killSwitch ? ['OFF','#5d7a99'] : s.benchedAt ? ['BENCHED','#e05555'] : ['LIVE','#22c55e'];
+    const rc = s.rollingR>0?'#22c55e':s.rollingR<0?'#e05555':'#5d7a99';
+    const nc = s.netUsd>0?'#22c55e':s.netUsd<0?'#e05555':'#5d7a99';
+    rows +=
+      '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #131a24;'+mono+';font-size:11px">'+
+        '<span style="width:96px;color:#c9d6e3;font-weight:600">'+s.label+' '+s.tag+'</span>'+
+        '<span style="width:62px;color:'+status[1]+';font-size:9px;letter-spacing:.06em">'+status[0]+'</span>'+
+        '<span style="width:110px;color:'+(s.open?'#00e5ff':'#3d5068')+'">'+(s.open ? s.open.side+' @'+s.open.entry : 'flat')+'</span>'+
+        '<span style="width:56px;text-align:right;color:#7b8fa8">'+s.closed+' cl.</span>'+
+        '<span style="width:46px;text-align:right;color:#7b8fa8">'+(s.winPct!=null?s.winPct+'%':'—')+'</span>'+
+        '<span style="width:62px;text-align:right;color:'+(s.sumR>0?'#22c55e':s.sumR<0?'#e05555':'#5d7a99')+'">'+(s.sumR>0?'+':'')+s.sumR+'R</span>'+
+        '<span style="width:70px;text-align:right;color:'+nc+'">'+(s.netUsd>0?'+':'')+'$'+Math.abs(s.netUsd).toFixed(2)+'</span>'+
+        '<span style="width:96px;text-align:right;color:'+rc+'" title="rolling window vs bench at '+s.benchAt+'R">'+(s.rollingR>0?'+':'')+s.rollingR+'R/'+s.rollingN+'</span>'+
+        '<span style="flex:1;text-align:right">'+((s.last5&&s.last5.length)?s.last5.map(x=>chip(x.R)).join(''):'<span style="color:#3d5068;font-size:9px">no closes yet</span>')+'</span>'+
+      '</div>';
+  }
+  return '<div style="padding:12px 16px 4px">'+
+    '<div style="font-size:9px;color:#3d5068;letter-spacing:.06em;'+mono+';margin-bottom:2px">PLAYBOOK SETUPS · risk '+pb.riskPct+'%/trade · SL 1×ATR · TP 2×ATR (TBL) / 4×ATR (DBL) · auto-bench at −8R/20'+(pb.killSwitch?' · <span style="color:#e05555">KILL SWITCH ON</span>':'')+'</div>'+
+    rows+
+    '<div style="height:10px"></div></div>';
+}
 async function renderSentiment(){
   const cfgEl = document.getElementById('sent-config');
   const bodyEl = document.getElementById('sent-body');
@@ -944,8 +975,9 @@ async function renderSentiment(){
   try{
     const r = await fetch(base + '/api/status', { signal: AbortSignal.timeout(10000) });
     const st = await r.json();
+    const pbHtml = renderPlaybookBlock(st);   // v5.51: playbook card renders even when sentiment is still warming up
     const s = st.sentiment;
-    if(!s || !s.updatedAt){ bodyEl.innerHTML='<div class="empty">Bot is up ('+(st.version||'?')+') but no sentiment yet — first scan runs ~20s after boot</div>'; return; }
+    if(!s || !s.updatedAt){ bodyEl.innerHTML=pbHtml+'<div class="empty">Bot is up ('+(st.version||'?')+') but no sentiment yet — first scan runs ~20s after boot</div>'; return; }
     const col = s.regime==='RISK-OFF' ? '#e05555' : s.regime==='RISK-ON' ? '#22c55e' : '#7b8fa8';
     const bar = (label, v) => {
       const c = v>0 ? '#22c55e' : v<0 ? '#e05555' : '#3d5068';
@@ -960,6 +992,7 @@ async function renderSentiment(){
     };
     const b = s.bias || {};
     bodyEl.innerHTML =
+      pbHtml +
       '<div style="padding:12px 16px">'+
       '<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px">'+
         '<span style="font-family:\'Sora\',sans-serif;font-size:22px;font-weight:700;color:'+col+'">'+s.regime+'</span>'+
