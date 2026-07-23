@@ -774,7 +774,14 @@ function detectRetest(c, levelPrice, atrVal, coinMinStopPct, opts){
   const breakDist  = Math.max(atrVal * 0.3, levelPrice * breakDistFloorPct);  // how far beyond = a "break"
   const retestTol  = Math.max(atrVal * 0.4, levelPrice * 0.002);   // how close = "touched the level"
   const closeBuf   = atrVal * 0.1;                                 // wick-through tolerance on closes
-  const minBodyATR = 0.5;                                           // conviction threshold
+  // v5.51 (2026-07-23): conviction threshold overridable via opts (or MIN_BODY_ATR
+  // env for offline sweeps). Default 0.5 = unchanged live behavior. NOTE the
+  // typeof-process guard: this file is ALSO loaded by dms-v53.html in the browser
+  // (UMD, v5.22) where `process` does not exist — a bare process.env reference
+  // would take the whole dashboard down.
+  const _envBody = (typeof process !== 'undefined' && process.env && process.env.MIN_BODY_ATR)
+                   ? parseFloat(process.env.MIN_BODY_ATR) : null;
+  const minBodyATR = (opts.minBodyATR != null) ? opts.minBodyATR : (_envBody || 0.5);
   const LOOKBACK   = Math.min(25, n - 1);
   const RETEST_WIN = 5;   // retest must be within last N bars before current
 
