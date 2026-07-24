@@ -3975,6 +3975,13 @@ function startHealthServer() {
           scanCount,
           autoTradeEnabled: !!(HL && HL.enabled),
           activePositions: HL && HL.activeTrades ? Object.keys(HL.activeTrades).length : 0,
+          positions: HL && HL.activeTrades ? Object.entries(HL.activeTrades).map(([cid, t]) => ({   // v5.51: per-position strategy ownership for dashboard tags
+            coinId: cid, asset: t.asset, side: t.side,
+            source: t.source === 'playbook' ? 'playbook'
+              : (t.source === 'manual-ignored' || t.source === 'manual-managed' || t.trailState === 'manual') ? 'manual'
+              : 'retest',
+            pbTag: t.pbTag || null, entry: t.entry, size: t.size,
+          })) : [],
           cachedEquity: HL ? (HL.cachedEquity || 0) : 0,
           ddGovernor: HL ? { active: !!HL.ddGovernorActive, net7d: HL.ddGovernor7dNet } : null,        // v5.36
           sp500ShortWatch: HL ? { mult: HL.sp500ShortMult, stats: HL.sp500ShortStats } : null,         // v5.36
