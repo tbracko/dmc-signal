@@ -277,7 +277,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <body>
 
 <div class="topbar">
-  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v5.47</span></span>
+  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v5.51</span></span>
   <select id="coin-sel" onchange="switchCoin(this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:4px 8px;cursor:pointer;letter-spacing:.04em">
     <option value="bitcoin" data-sym="BTCUSDT" data-label="BTC/USD" selected>BTC/USD</option>
     <option value="sp500" data-sym="xyz:S&amp;P500" data-label="S&amp;P500">S&amp;P500</option>
@@ -441,7 +441,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 </div>
 
 <!-- PAGE: SIGNAL -->
-<div class="page active" id="page-signal">
+<div class="page" id="page-signal">
   <div class="hero wait" id="hero">
     <div class="hero-glow"></div>
     <div class="hero-top">
@@ -514,9 +514,9 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   <div id="log-list"><div class="empty">No signals logged yet</div></div>
 </div>
 
-<!-- PAGE: SENTIMENT (v5.47) — news meter + PLAYBOOK performance (v5.51), both served by the Railway bot's /api/status -->
+<!-- PAGE: SENTIMENT (v5.47) — news meter served by the Railway bot's /api/status (playbook card moved to TRADES tab in v5.51) -->
 <div class="page" id="page-sentiment">
-  <div class="sh">Playbook Engine &amp; News Sentiment · from Railway bot</div>
+  <div class="sh">News Sentiment · shadow mode (informational — bot does not block on this yet)</div>
   <div id="sent-config" style="display:none;padding:10px 16px">
     <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#5d7a99;margin-bottom:6px">Enter your Railway bot URL once (e.g. https://your-app.up.railway.app):</div>
     <div style="display:flex;gap:6px">
@@ -528,7 +528,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 </div>
 
 <!-- PAGE: TRADES -->
-<div class="page" id="page-trades">
+<div class="page active" id="page-trades">
   <div class="trades-bal" id="trades-bal">
     <div class="trades-bal-main">
       <div class="trades-bal-val" id="tr-equity">$—</div>
@@ -546,6 +546,13 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 
   <div class="sh">Active Positions</div>
   <div id="positions-list"><div class="empty">No open positions</div></div>
+
+  <!-- v5.51: playbook engine per-setup performance (from Railway bot /api/status.playbook) -->
+  <div class="sh" style="display:flex;justify-content:space-between;align-items:center">
+    <span>Playbook Engine</span>
+    <span style="font-size:9px;color:#3d5068;letter-spacing:.06em">RAILWAY BOT</span>
+  </div>
+  <div id="pb-card"><div class="empty">Loading playbook…</div></div>
 
   <div class="sh" style="display:flex;justify-content:space-between;align-items:center">
     <span>Open Manual Trade</span>
@@ -594,22 +601,22 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <button class="fab" id="fab" onclick="manualRefresh()">↻</button>
 
 <nav class="bnav">
-  <button class="nb active" onclick="nav('signal',this)">
+  <!-- v5.51: TRADES is the default/first tab (money view + playbook engine status);
+       Signal second. Levels + Log pages still in DOM via nav('levels'/'log') from console. -->
+  <button class="nb active" onclick="nav('trades',this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="9"/></svg>Trades
+  </button>
+  <button class="nb" onclick="nav('signal',this)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Signal
   </button>
   <button class="nb" onclick="nav('chart',this)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Chart
   </button>
-  <!-- v5.47: Levels + Log tabs replaced by the News sentiment meter (pages kept in DOM,
-       reachable via nav('levels'/'log') from console if ever needed) -->
-  <button class="nb" onclick="nav('sentiment',this)">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 3v2M5.2 5.2l1.4 1.4M3 12h2M18.8 5.2l-1.4 1.4M21 12h-2M8 21a4 4 0 1 1 8 0z"/><circle cx="12" cy="13" r="4"/></svg>News
-  </button>
-  <button class="nb" onclick="nav('trades',this)">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="9"/></svg>Trades
-  </button>
   <button class="nb" onclick="nav('stats',this)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>Stats
+  </button>
+  <button class="nb" onclick="nav('sentiment',this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 3v2M5.2 5.2l1.4 1.4M3 12h2M18.8 5.2l-1.4 1.4M21 12h-2M8 21a4 4 0 1 1 8 0z"/><circle cx="12" cy="13" r="4"/></svg>News
   </button>
 </nav>
 
@@ -935,13 +942,13 @@ function saveSentUrl(){
   renderSentiment();
 }
 let _sentTimer = null;
-// v5.51: playbook per-setup performance card — rendered from /api/status.playbook
-// on the same page (reuses the sentiment page's bot-URL plumbing).
+// v5.51: playbook per-setup performance card — lives on the TRADES tab (mobile-first
+// two-line rows). Reuses localStorage('bot_api_url') set on the News tab.
 function renderPlaybookBlock(st){
   const pb = st && st.playbook;
-  if(!pb) return '<div style="padding:10px 16px;font-family:\'IBM Plex Mono\',monospace;font-size:10px;color:#5d7a99">Playbook: bot pre-v5.51 — no data</div>';
-  if(!pb.setups) return '<div style="padding:10px 16px;font-family:\'IBM Plex Mono\',monospace;font-size:10px;color:#e05555">Playbook: '+(pb.error||'no setups')+'</div>';
   const mono = "font-family:'IBM Plex Mono',monospace";
+  if(!pb) return '<div class="empty">Bot pre-v5.51 — no playbook data</div>';
+  if(!pb.setups) return '<div class="empty" style="color:#e05555">Playbook: '+(pb.error||'no setups')+'</div>';
   const chip = r => '<span style="display:inline-block;margin:0 2px;padding:1px 6px;border-radius:4px;font-size:9px;'+mono+';background:'+(r>0?'rgba(34,197,94,.12)':r<0?'rgba(224,85,85,.12)':'#10151c')+';color:'+(r>0?'#22c55e':r<0?'#e05555':'#5d7a99')+'">'+(r>0?'+':'')+r+'</span>';
   let rows='';
   for(const s of Object.values(pb.setups)){
@@ -949,22 +956,69 @@ function renderPlaybookBlock(st){
     const rc = s.rollingR>0?'#22c55e':s.rollingR<0?'#e05555':'#5d7a99';
     const nc = s.netUsd>0?'#22c55e':s.netUsd<0?'#e05555':'#5d7a99';
     rows +=
-      '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #131a24;'+mono+';font-size:11px">'+
-        '<span style="width:96px;color:#c9d6e3;font-weight:600">'+s.label+' '+s.tag+'</span>'+
-        '<span style="width:62px;color:'+status[1]+';font-size:9px;letter-spacing:.06em">'+status[0]+'</span>'+
-        '<span style="width:110px;color:'+(s.open?'#00e5ff':'#3d5068')+'">'+(s.open ? s.open.side+' @'+s.open.entry : 'flat')+'</span>'+
-        '<span style="width:56px;text-align:right;color:#7b8fa8">'+s.closed+' cl.</span>'+
-        '<span style="width:46px;text-align:right;color:#7b8fa8">'+(s.winPct!=null?s.winPct+'%':'—')+'</span>'+
-        '<span style="width:62px;text-align:right;color:'+(s.sumR>0?'#22c55e':s.sumR<0?'#e05555':'#5d7a99')+'">'+(s.sumR>0?'+':'')+s.sumR+'R</span>'+
-        '<span style="width:70px;text-align:right;color:'+nc+'">'+(s.netUsd>0?'+':'')+'$'+Math.abs(s.netUsd).toFixed(2)+'</span>'+
-        '<span style="width:96px;text-align:right;color:'+rc+'" title="rolling window vs bench at '+s.benchAt+'R">'+(s.rollingR>0?'+':'')+s.rollingR+'R/'+s.rollingN+'</span>'+
-        '<span style="flex:1;text-align:right">'+((s.last5&&s.last5.length)?s.last5.map(x=>chip(x.R)).join(''):'<span style="color:#3d5068;font-size:9px">no closes yet</span>')+'</span>'+
+      '<div style="padding:9px 0;border-bottom:1px solid #131a24;'+mono+'">'+
+        // line 1: name · status · open position · net$
+        '<div style="display:flex;align-items:center;gap:8px;font-size:12px">'+
+          '<span style="color:#c9d6e3;font-weight:600">'+s.label+' '+s.tag+'</span>'+
+          '<span style="font-size:8px;letter-spacing:.08em;padding:1px 6px;border-radius:3px;border:1px solid '+status[1]+'33;color:'+status[1]+'">'+status[0]+'</span>'+
+          '<span style="flex:1;color:'+(s.open?'#00e5ff':'#3d5068')+';font-size:10px">'+(s.open ? s.open.side+' @'+s.open.entry : 'flat')+'</span>'+
+          '<span style="color:'+nc+';font-weight:600;font-size:12px">'+(s.netUsd>0?'+':'')+'$'+Math.abs(s.netUsd).toFixed(2)+'</span>'+
+        '</div>'+
+        // line 2: closed · win% · ΣR · rolling-vs-bench · last-5 chips
+        '<div style="display:flex;align-items:center;gap:10px;margin-top:4px;font-size:10px;color:#7b8fa8;flex-wrap:wrap">'+
+          '<span>'+s.closed+' closed</span>'+
+          '<span>win '+(s.winPct!=null?s.winPct+'%':'—')+'</span>'+
+          '<span style="color:'+(s.sumR>0?'#22c55e':s.sumR<0?'#e05555':'#5d7a99')+'">Σ '+(s.sumR>0?'+':'')+s.sumR+'R</span>'+
+          '<span style="color:'+rc+'" title="rolling last-'+s.rollingN+' vs bench at '+s.benchAt+'R">roll '+(s.rollingR>0?'+':'')+s.rollingR+'R/'+s.rollingN+'</span>'+
+          '<span style="flex:1;text-align:right;min-width:90px">'+((s.last5&&s.last5.length)?s.last5.map(x=>chip(x.R)).join(''):'<span style="color:#3d5068;font-size:9px">no closes</span>')+'</span>'+
+        '</div>'+
       '</div>';
   }
-  return '<div style="padding:12px 16px 4px">'+
-    '<div style="font-size:9px;color:#3d5068;letter-spacing:.06em;'+mono+';margin-bottom:2px">PLAYBOOK SETUPS · risk '+pb.riskPct+'%/trade · SL 1×ATR · TP 2×ATR (TBL) / 4×ATR (DBL) · auto-bench at −8R/20'+(pb.killSwitch?' · <span style="color:#e05555">KILL SWITCH ON</span>':'')+'</div>'+
+  return '<div style="padding:8px 16px 4px">'+
+    '<div style="font-size:8px;color:#3d5068;letter-spacing:.06em;'+mono+';margin-bottom:2px">risk '+pb.riskPct+'%/trade · SL 1×ATR · TP 2×ATR (TBL) / 4×ATR (DBL) · bench −8R/20'+(pb.killSwitch?' · <span style="color:#e05555">KILL SWITCH ON</span>':'')+' · <span style="color:#3d5068">low win% is normal — R multiples carry the edge</span></div>'+
     rows+
-    '<div style="height:10px"></div></div>';
+    '<div style="height:6px"></div></div>';
+}
+// v5.51: shared cached bot-status fetch (15s TTL) — used by the playbook card AND
+// the position strategy tags so one Trades render costs at most one status call.
+let _botStatusCache = { t: 0, st: null };
+async function getBotStatus(){
+  const base = (localStorage.getItem('bot_api_url') || '').replace(/\/+$/,'');
+  if(!base) return null;
+  if(Date.now() - _botStatusCache.t < 15000) return _botStatusCache.st;
+  try{
+    const r = await fetch(base + '/api/status', { signal: AbortSignal.timeout(8000) });
+    const st = await r.json();
+    _botStatusCache = { t: Date.now(), st };
+    return st;
+  }catch(e){ _botStatusCache = { t: Date.now(), st: null }; return null; }
+}
+// Strategy ownership badge for a position (asset + side), from /api/status.positions.
+function strategyTag(coin, side, bst){
+  if(!bst || !Array.isArray(bst.positions)) return '';
+  const p = bst.positions.find(x => x.asset === coin && x.side === side);
+  const mk = (txt, col) => '<span style="font-size:8px;letter-spacing:.06em;padding:1px 6px;border-radius:3px;border:1px solid '+col+'33;color:'+col+';font-family:\'IBM Plex Mono\',monospace;margin-left:6px;vertical-align:middle">'+txt+'</span>';
+  if(!p) return mk('?', '#5d7a99');
+  if(p.source === 'playbook') return mk('PLAYBOOK'+(p.pbTag ? '·'+p.pbTag : ''), '#00e5ff');
+  if(p.source === 'manual')   return mk('MANUAL', '#ff9800');
+  return mk('RETEST', '#58a6ff');
+}
+let _pbCardTimer = null;
+async function renderPlaybookCard(){
+  const el = document.getElementById('pb-card');
+  if(!el) return;
+  const base = (localStorage.getItem('bot_api_url') || '').replace(/\/+$/,'');
+  if(!base){ el.innerHTML='<div class="empty">Set the bot URL on the News tab to load playbook status</div>'; return; }
+  try{
+    const st = await getBotStatus();
+    if(!st) throw new Error('unreachable');
+    el.innerHTML = renderPlaybookBlock(st) +
+      '<div style="font-size:8px;color:#3d5068;padding:0 16px 8px;font-family:\'IBM Plex Mono\',monospace">bot '+(st.version||'?')+' · updated '+new Date().toLocaleTimeString()+'</div>';
+  }catch(e){
+    el.innerHTML='<div class="empty">Bot unreachable ('+e.message+')</div>';
+  }
+  if(_pbCardTimer) clearTimeout(_pbCardTimer);
+  _pbCardTimer = setTimeout(()=>{ if(document.getElementById('page-trades').classList.contains('active')) renderPlaybookCard(); }, 2*60*1000);
 }
 async function renderSentiment(){
   const cfgEl = document.getElementById('sent-config');
@@ -975,9 +1029,8 @@ async function renderSentiment(){
   try{
     const r = await fetch(base + '/api/status', { signal: AbortSignal.timeout(10000) });
     const st = await r.json();
-    const pbHtml = renderPlaybookBlock(st);   // v5.51: playbook card renders even when sentiment is still warming up
     const s = st.sentiment;
-    if(!s || !s.updatedAt){ bodyEl.innerHTML=pbHtml+'<div class="empty">Bot is up ('+(st.version||'?')+') but no sentiment yet — first scan runs ~20s after boot</div>'; return; }
+    if(!s || !s.updatedAt){ bodyEl.innerHTML='<div class="empty">Bot is up ('+(st.version||'?')+') but no sentiment yet — first scan runs ~20s after boot</div>'; return; }
     const col = s.regime==='RISK-OFF' ? '#e05555' : s.regime==='RISK-ON' ? '#22c55e' : '#7b8fa8';
     const bar = (label, v) => {
       const c = v>0 ? '#22c55e' : v<0 ? '#e05555' : '#3d5068';
@@ -992,7 +1045,6 @@ async function renderSentiment(){
     };
     const b = s.bias || {};
     bodyEl.innerHTML =
-      pbHtml +
       '<div style="padding:12px 16px">'+
       '<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px">'+
         '<span style="font-family:\'Sora\',sans-serif;font-size:22px;font-weight:700;color:'+col+'">'+s.regime+'</span>'+
@@ -4886,8 +4938,13 @@ async function hlFetchAccountState(){
 
 // Render the trades page
 async function renderTrades(){
+  // v5.51: playbook card refreshes alongside the trades view (non-blocking)
+  renderPlaybookCard().catch(e=>console.warn('playbook card:',e));
+  // v5.51: bot status for strategy tags — fetched in parallel with HL data (cached 15s)
+  const bstPromise = getBotStatus().catch(()=>null);
   // Fetch account state and positions in parallel
   const [acct, positions] = await Promise.all([hlFetchAccountState(), hlFetchPositions()]);
+  const bst = await bstPromise;
 
   // Balance card
   document.getElementById('tr-equity').textContent = '$' + acct.equity.toFixed(2);
@@ -4931,7 +4988,7 @@ async function renderTrades(){
 
       return `<div class="pos-card ${side.toLowerCase()}">
         <div class="pos-head">
-          <span class="pos-coin">${coin}</span>
+          <span class="pos-coin">${coin}${strategyTag(coin, side, bst)}</span>
           <span class="pos-side ${side}">${side} ${leverage}x</span>
           <span class="pos-pnl ${upnl>=0?'green':'red'}">${upnl>=0?'+':''}$${upnl.toFixed(2)} (${upnlPct}%)</span>
         </div>
@@ -5225,6 +5282,10 @@ window.addEventListener('DOMContentLoaded',()=>{
       setTimeout(() => runCoin(c).catch(e=>console.warn('periodic '+c,e)), 1000 * i);
     });
   }, 2 * 60 * 1000);
+
+  // v5.51: TRADES is now the default tab — render it on boot (non-blocking; retries
+  // fine on the 2-min cycle if HL isn't reachable yet)
+  setTimeout(()=>{ renderTrades().catch(e=>console.warn('boot renderTrades:',e)); }, 800);
 
   // Initialize Hyperliquid auto-trading (non-blocking)
   if(localStorage.getItem('hl_wallet_key')){
