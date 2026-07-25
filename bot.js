@@ -2882,6 +2882,20 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults, entryCandles
   const majorSig = wL > wS ? 'LONG' : wS > wL ? 'SHORT' : null;
   const sym = COINS[coinId].label;
 
+  // v5.52 (2026-07-25): LONG-ONLY assets — block SHORT auto-entries entirely.
+  // SP500 shorts are the book's single biggest drag (90d: 10 RTs / 30% win / PF 0.23 / −$153;
+  // ungated retest core −6.1R/7 over 65d), while SP500 longs are breakeven-to-positive over the
+  // same window. Shorts were never quality-gated (longs face regime+session caps since v5.4), so
+  // this closes the asymmetry. Applies to any coin with longOnly:true in coins-config.js — currently
+  // SP500 only (XYZ100 kept two-sided per Tomaž, Jul-25). Blocked shorts are logged to
+  // .missed_signals.json so the rule can be counterfactual-audited monthly; if a quarter of blocked
+  // shorts start winning, revisit. See entry-strategy-review-2026-07-23.md.
+  if (d.sig === 'SHORT' && COINS[coinId].longOnly) {
+    console.log(`HL auto-trade BLOCKED ${sym} SHORT: longOnly asset — index short-side blocked (v5.52)`);
+    logMissedSignal(coinId, d.sig, conf, 'long-only-block', { htfDir: s.htfDir || 'UNCLEAR', storyDir: s.storyDir || 'UNCLEAR', conf, filter: 'v5.52 longOnly — SP500 shorts blocked' });
+    return;
+  }
+
   // v4.9 Phase 3: Hard-block counter-trend auto-trades
   // If HTF direction clearly opposes the signal, do NOT auto-trade at all
   // This prevents the exact scenarios from the DMS review: LONG signals firing
@@ -3769,6 +3783,15 @@ async function scanCoin(coinId){
         // Auto-trade with high conviction override (skip if already in position)
         // v5.0.1 FIX: Apply session filter + ranging detector here too (was bypassing maybeAutoTrade)
         if(HL.enabled && HL.wallet && bestStop && !HL.activeTrades[coinId]){
+          // v5.52 (2026-07-25): LONG-ONLY assets — block SHORT entries in the MULTI-TF path too.
+          // This path calls executeTrade directly and BYPASSES maybeAutoTrade, so the longOnly
+          // gate must be repeated here (same class as the v5.0.1 session/ranging fixes below).
+          // SP500 only. Logged to .missed_signals.json for the monthly blocked-shorts audit.
+          if (sig === 'SHORT' && COINS[coinId].longOnly) {
+            console.log(`HL MULTI-TF BLOCKED ${COINS[coinId].label} SHORT: longOnly asset — index short-side blocked (v5.52)`);
+            logMissedSignal(coinId, sig, 80, 'long-only-block', { path: 'multi-tf', filter: 'v5.52 longOnly — SP500 shorts blocked' });
+            break;
+          }
           // v5.4: SP500 session-scaled sizing (replaces outside-US hard block in MULTI-TF path too).
           // MULTI-TF confluence passes confidence=80 to executeTrade, so STRONG UP tier applies
           // whenever regime is UP (2+ TFs agreeing already implies high conviction).
@@ -3909,7 +3932,7 @@ async function checkDailySummary() {
 let lastScanTs = 0;
 let scanCount  = 0;
 const BOT_STARTED_AT = Date.now();
-const BOT_VERSION    = 'v5.51'; // v5.51 (2026-07-23): PLAYBOOK engine — TBL (crude+xyz100) + DBL (crude) at PLAYBOOK_RISK_PCT (2%), closed-1H-bar detection, flat bracket SL 1×ATR / TP 2-4×ATR, auto-bench at −8R/20, kill via PLAYBOOK=off. See playbook.js + trade-playbook-2026-07-23.md.
+const BOT_VERSION    = 'v5.52'; // v5.52 (2026-07-25): SP500 LONG-ONLY — block SHORT auto-entries on longOnly assets (SP500) in maybeAutoTrade; shorts logged to .missed_signals.json for monthly audit. Retest short-side was the book's biggest drag (SP500 shorts 90d PF 0.23 / −$153). XYZ100 kept two-sided. See coins-config.js longOnly + entry-strategy-review-2026-07-23.md. // v5.51 (2026-07-23): PLAYBOOK engine — TBL (crude+xyz100) + DBL (crude) at PLAYBOOK_RISK_PCT (2%), closed-1H-bar detection, flat bracket SL 1×ATR / TP 2-4×ATR, auto-bench at −8R/20, kill via PLAYBOOK=off. See playbook.js + trade-playbook-2026-07-23.md.
 
 async function scanAll(){
   const coins = Object.keys(COINS);
