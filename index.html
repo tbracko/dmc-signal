@@ -277,7 +277,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 <body>
 
 <div class="topbar">
-  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v5.51</span></span>
+  <span class="brand">DMS ⚡ <span style="font-size:9px;opacity:0.5">v5.52</span></span>
   <select id="coin-sel" onchange="switchCoin(this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#10151c;color:#c9d6e3;border:1px solid #1a2230;border-radius:6px;padding:4px 8px;cursor:pointer;letter-spacing:.04em">
     <option value="bitcoin" data-sym="BTCUSDT" data-label="BTC/USD" selected>BTC/USD</option>
     <option value="sp500" data-sym="xyz:S&amp;P500" data-label="S&amp;P500">S&amp;P500</option>
@@ -635,7 +635,7 @@ const TFS=[{l:'1W',iv:'W',w:5},{l:'1D',iv:'D',w:4},{l:'4H',iv:'240',w:3},{l:'1H'
 //   were misclassified as manual-inherited and their SL/TP weren't surfaced in the UI.
 const COINS = {
   bitcoin:     { id:'bitcoin',     label:'BTC/USD',  sym:'BINANCE:BTCUSDT', shortLabel:'BTC',  apiSym:'BTCUSDT',  exchange:'binance',     minRR: 1.0, feeEst: 0.05, minStopPct: 0.007, equityPct: 3.00, maxNotional: 200, isHIP3: false },  // v5.43 (2026-07-09): 1.93→3.00 — re-normalized to 3% risk-per-trade after Jul-7 deposit (equity ~$2,868); drops v5.40 ×1.93 inflator — synced w/ coins-config.js
-  sp500:       { id:'sp500',       label:'S&P500',   sym:'OANDA:SPX500USD', shortLabel:'SPX',  apiSym:'xyz:SP500', exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, equityPct: 6.00, maxNotional: 500, isHIP3: true },  // v5.43 (2026-07-09): 3.86→6.00 — re-normalized to 3% risk-per-trade after Jul-7 deposit (equity ~$2,868); 6.00 × 0.5% = 3% — synced w/ coins-config.js
+  sp500:       { id:'sp500',       label:'S&P500',   sym:'OANDA:SPX500USD', shortLabel:'SPX',  apiSym:'xyz:SP500', exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, equityPct: 6.00, maxNotional: 500, isHIP3: true, longOnly: true },  // v5.52 (2026-07-25): longOnly TRUE — block SHORT auto-entries (SP500 shorts 90d PF 0.23 / −$153, biggest book drag). Mirrors coins-config.js; XYZ100 kept two-sided. // v5.43 (2026-07-09): 3.86→6.00 — re-normalized to 3% risk-per-trade after Jul-7 deposit (equity ~$2,868); 6.00 × 0.5% = 3% — synced w/ coins-config.js
   crude:       { id:'crude',       label:'CRUDE/USD',sym:'OANDA:WTICOUSD',  shortLabel:'CRUDE',apiSym:'xyz:CL',   exchange:'hyperliquid', minRR: 1.2, feeEst: 0.12, minStopPct: 0.005, equityPct: 2.40, maxNotional: 200, isHIP3: true },  // v5.44 (2026-07-10): 1.20→2.40 — CONVICTION BUMP (half-step toward core) after validation: 90d 37 RTs, PF 1.38, +$11.52. 2.40 × minStop 0.5% = 1.2% risk — synced w/ coins-config.js
   xyz100:      { id:'xyz100',      label:'XYZ100',   sym:'OANDA:NAS100USD', shortLabel:'NDX',  apiSym:'xyz:XYZ100', exchange:'hyperliquid', minRR: 1.2, feeEst: 0.10, minStopPct: 0.005, equityPct: 1.50, maxNotional: 200, isHIP3: true },  // v5.45 (2026-07-10): NEW ASSET — Nasdaq-100 perp. Raw retest beat SP500 at every TF (counterfactual-xyz100-2026-07-10.md). 1.50 × 0.5% = 0.75% risk (¼ core — corr 0.89 to SP500). Validate at 15–20 RTs — synced w/ coins-config.js
 };
@@ -3100,7 +3100,13 @@ function processTF(i, candles, dCandles, coinId, lowerCandles){
         const COUNTER_CONF_MIN = 40;
         const counterTrendBlock = counterTrend && conf < COUNTER_CONF_MIN;
 
-        if(counterTrendBlock){
+        // v5.52 (2026-07-25): LONG-ONLY assets — block SHORT auto-entries (SP500). Mirrors
+        // bot.js maybeAutoTrade. SP500 shorts are the biggest book drag (90d PF 0.23 / −$153);
+        // longs unaffected. XYZ100 kept two-sided. Single-executor rule still applies — the
+        // Railway bot is the live executor; this keeps the dashboard's fallback path in sync.
+        if(d.sig === 'SHORT' && COINS[coinId].longOnly){
+          console.log(`HL auto-trade BLOCKED ${sym} SHORT: longOnly asset — index short-side blocked (v5.52)`);
+        } else if(counterTrendBlock){
           console.log(`HL auto-trade BLOCKED ${sym} ${d.sig}: counter-trend (HTF ${htfDir}), conf ${conf}% < ${COUNTER_CONF_MIN}% (v5.11 retest gate)`);
         } else if(storyConflicts && htfDir === 'UNCLEAR'){
           // Scenario A: HTF unclear but story says opposite — block
