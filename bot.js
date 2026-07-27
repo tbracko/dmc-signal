@@ -3374,7 +3374,9 @@ async function pbReconcile() {
       if (st.recent[key].length > PB.PB_PARAMS.benchWindow) st.recent[key].shift();
       const sumR = st.recent[key].reduce((s, x) => s + x, 0);
       console.log(`PLAYBOOK closed ${key} ${rec.side} net $${netUsd?.toFixed(2)} = ${R}R | rolling ${st.recent[key].length}: ${sumR.toFixed(1)}R`);
-      if (st.recent[key].length >= 10 && sumR <= PB.PB_PARAMS.benchMinSumR && !st.benched[key]) {
+      // v5.54: min trades for auto-bench 10 → 6. The DBL live start (0/4 for −5.95R)
+      // showed min-10 lets a broken setup bleed ~6 more trades before the bench CAN fire.
+      if (st.recent[key].length >= 6 && sumR <= PB.PB_PARAMS.benchMinSumR && !st.benched[key]) {
         st.benched[key] = Date.now();
         await sendTelegram(`🪑 <b>PLAYBOOK BENCHED: ${key}</b>\nRolling ${st.recent[key].length} trades: ${sumR.toFixed(1)}R ≤ ${PB.PB_PARAMS.benchMinSumR}R.\nSetup disabled — re-enable by clearing .playbook_state.json benched key after review.`);
       } else {
@@ -3932,7 +3934,7 @@ async function checkDailySummary() {
 let lastScanTs = 0;
 let scanCount  = 0;
 const BOT_STARTED_AT = Date.now();
-const BOT_VERSION    = 'v5.53'; // v5.53 (2026-07-27): CRUDE TRIM — retest equityPct 2.40→1.20 (0.6% risk) in coins-config.js; reverses the v5.44 conviction bump after 90d PF decayed to ~0.99 breakeven (crude-edge-decay 2026-07-21). PLAYBOOK crude legs unaffected (flat PLAYBOOK_RISK_PCT). No logic change. // v5.52 (2026-07-25): SP500 LONG-ONLY — block SHORT auto-entries on longOnly assets (SP500) in maybeAutoTrade; shorts logged to .missed_signals.json for monthly audit. Retest short-side was the book's biggest drag (SP500 shorts 90d PF 0.23 / −$153). XYZ100 kept two-sided. See coins-config.js longOnly + entry-strategy-review-2026-07-23.md. // v5.51 (2026-07-23): PLAYBOOK engine — TBL (crude+xyz100) + DBL (crude) at PLAYBOOK_RISK_PCT (2%), closed-1H-bar detection, flat bracket SL 1×ATR / TP 2-4×ATR, auto-bench at −8R/20, kill via PLAYBOOK=off. See playbook.js + trade-playbook-2026-07-23.md.
+const BOT_VERSION    = 'v5.54'; // v5.54 (2026-07-27): PLAYBOOK HARDENING after live audit — DBL config-disabled (0/4 start, avg −1.49R vs −1.0R design: weekend/reopen stop slippage is structural, worst −2.26R at Sun CME reopen; crude regime flipped down and DBL buys falling knives); CME-closed guard blocks NEW playbook entries Fri 20:45→Sun 22:15 UTC; auto-bench min trades 10→6. TBL untouched (+0.99R avg live, on-script). See playbook.js PB_COINS comment. // v5.53 (2026-07-27): CRUDE TRIM — retest equityPct 2.40→1.20 (0.6% risk) in coins-config.js; reverses the v5.44 conviction bump after 90d PF decayed to ~0.99 breakeven (crude-edge-decay 2026-07-21). PLAYBOOK crude legs unaffected (flat PLAYBOOK_RISK_PCT). No logic change. // v5.52 (2026-07-25): SP500 LONG-ONLY — block SHORT auto-entries on longOnly assets (SP500) in maybeAutoTrade; shorts logged to .missed_signals.json for monthly audit. Retest short-side was the book's biggest drag (SP500 shorts 90d PF 0.23 / −$153). XYZ100 kept two-sided. See coins-config.js longOnly + entry-strategy-review-2026-07-23.md. // v5.51 (2026-07-23): PLAYBOOK engine — TBL (crude+xyz100) + DBL (crude) at PLAYBOOK_RISK_PCT (2%), closed-1H-bar detection, flat bracket SL 1×ATR / TP 2-4×ATR, auto-bench at −8R/20, kill via PLAYBOOK=off. See playbook.js + trade-playbook-2026-07-23.md.
 
 async function scanAll(){
   const coins = Object.keys(COINS);
@@ -4026,8 +4028,8 @@ function startHealthServer() {
                   const recent = st.recent[key] || [];
                   setups[key] = {
                     coin: cid, label: COINS[cid]?.label || cid, tag,
-                    enabled: process.env.PLAYBOOK !== 'off' && !st.benched[key],
-                    benchedAt: st.benched[key] ? new Date(st.benched[key]).toISOString() : null,
+                    enabled: process.env.PLAYBOOK !== 'off' && !st.benched[key] && !(conf[tag] && conf[tag].disabled),
+                    benchedAt: st.benched[key] ? new Date(st.benched[key]).toISOString() : (conf[tag] && conf[tag].disabled ? 'config-disabled (v5.54)' : null),
                     closed: audited.length, wins,
                     winPct: audited.length ? Math.round(100 * wins / audited.length) : null,
                     sumR: +audited.reduce((s, r) => s + r.R, 0).toFixed(2),
