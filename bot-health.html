@@ -172,7 +172,7 @@ const ADDR = '0x1a41f3Fd141B77aF3A0Ee9dE847328805Cf40C86';
 const COIN_CFG = {
   'BTC':        { label:'BTC',    equityPct:3.00, isHIP3:false }, // v5.43: 3% risk (3.00 × minStop 1.0%)
   'xyz:SP500':  { label:'S&P500', equityPct:6.00, isHIP3:true  }, // v5.43: 3% risk (6.00 × minStop 0.5%)
-  'xyz:CL':     { label:'CRUDE',  equityPct:2.40, isHIP3:true  }, // v5.44: 1.2% risk (conviction bump 1.20→2.40 after 90d validation, PF 1.38)
+  'xyz:CL':     { label:'CRUDE',  equityPct:1.20, isHIP3:true  }, // v5.53 (2026-07-27): 2.40→1.20 trim (0.6% risk) — reverses v5.44 bump after 90d PF decayed to ~0.99
   'xyz:XYZ100': { label:'XYZ100', equityPct:1.50, isHIP3:true  }, // v5.45: NEW — 0.75% risk (¼ core; corr 0.89 to SP500), validate at 15–20 RTs
 };
 const MANUAL_MULT = 1.05;
