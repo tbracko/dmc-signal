@@ -37,11 +37,34 @@ const PB_PARAMS = {
   notionalCapMult: 6,  // hard cap: notional ≤ 6× equity
 };
 
-// Per-asset enabled setups. tp = target multiple of ATR.
+// Per-asset enabled setups. tp = target multiple of ATR. disabled:true keeps the
+// setup visible in /api/status + health card but blocks new entries.
 const PB_COINS = {
-  crude:  { TBL: { tp: 2 }, DBL: { tp: 4 } },
+  // v5.54 (2026-07-27): DBL DISABLED after 0/4 live start at avg −1.49R vs −1.0R design.
+  // The streak itself is inside variance (~30% at 25-29% win), but the excess loss is
+  // STRUCTURAL: every loss slipped through the 1×ATR stop (worst −2.26R, filled 0.9%
+  // beyond trigger at the Sunday CME reopen). Weekend/thin-book slippage was never in
+  // the backtest, and crude's regime flipped down (93→84) — DBL is a falling-knife
+  // buyer by construction. Re-enable only after a slippage-aware re-validation
+  // (model SL fills at trigger −0.3×ATR on weekend bars) shows the edge survives.
+  crude:  { TBL: { tp: 2 }, DBL: { tp: 4, disabled: true } },
   xyz100: { TBL: { tp: 2 } },
 };
+
+// v5.54: CME-closed guard. xyz perps trade 24/7 but the underlying (CL futures, index
+// futures) is closed Fri ~21:00 UTC → Sun 22:00 UTC. The xyz book goes thin and the
+// Sunday reopen gaps through resting stops (measured live: −2.26R on a 1R stop,
+// 2026-07-26 22:00). No NEW playbook entries in that window; positions opened before
+// it keep their brackets. This is NOT the rejected retest session-time filter (that
+// was time-of-day performance gating) — it is underlying-market-closed microstructure.
+function cmeClosed(ts) {
+  const d = new Date(ts);
+  const day = d.getUTCDay(), h = d.getUTCHours(), m = d.getUTCMinutes();
+  if (day === 6) return true;                                   // Saturday
+  if (day === 5 && (h > 20 || (h === 20 && m >= 45))) return true;  // Fri from 20:45
+  if (day === 0 && (h < 22 || (h === 22 && m < 15))) return true;   // Sun until 22:15
+  return false;
+}
 
 function wilderATR(c, p = 14) {
   const atr = [c[0].h - c[0].l];
@@ -70,6 +93,8 @@ function detectPlaybook(coinId, c) {
   const e20 = emaArr(closes, 20), e50 = emaArr(closes, 50);
   const i = n - 1, k = c[i], A = atr[i];
   if (!(A > 0)) return [];
+  // v5.54: no NEW entries while the underlying market is closed (weekend gap risk)
+  if (cmeClosed(k.t + 3600000)) return [];
   let hi = -Infinity;
   for (let j = i - P.lookback; j < i; j++) if (c[j].h > hi) hi = c[j].h;
   const body = (k.c - k.o) / A;
@@ -78,13 +103,13 @@ function detectPlaybook(coinId, c) {
   const mom4 = (k.c - c[i - 4].c) / A;
   const lw = (Math.min(k.o, k.c) - k.l) / A;
   const out = [];
-  if (conf.TBL && k.c > hi && body >= P.minBody && loc >= P.minLoc && e20[i] > e50[i] && k.c > e20[i]) {
+  if (conf.TBL && !conf.TBL.disabled && k.c > hi && body >= P.minBody && loc >= P.minLoc && e20[i] > e50[i] && k.c > e20[i]) {
     out.push({ tag: 'TBL', dir: 'LONG', entry: k.c, sl: k.c - P.slMult * A, tp: k.c + conf.TBL.tp * A, atr: A, barT: k.t });
   }
-  if (conf.DBL && mom4 <= P.dipMom4 && lw >= P.dipWick) {
+  if (conf.DBL && !conf.DBL.disabled && mom4 <= P.dipMom4 && lw >= P.dipWick) {
     out.push({ tag: 'DBL', dir: 'LONG', entry: k.c, sl: k.c - P.slMult * A, tp: k.c + conf.DBL.tp * A, atr: A, barT: k.t });
   }
   return out;
 }
 
-module.exports = { PB_PARAMS, PB_COINS, detectPlaybook };
+module.exports = { PB_PARAMS, PB_COINS, detectPlaybook, cmeClosed };
