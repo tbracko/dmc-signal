@@ -383,7 +383,12 @@ const TRAIL_TP3_MULT  = parseFloat(process.env.TRAIL_TP3_MULT || '2.0');
 //   BE@1.25 beat BE@1.0 in BOTH halves of the window and per-asset (SP500 +$24, BTC +$19).
 // Between 1.0R and 1.25R the remaining tranche keeps the ORIGINAL SL; worst case after
 // TP1 is −0.32R net (0.34R banked − 0.66×1R) — the sample shows runners pay for it.
-const BE_TRIGGER_R    = parseFloat(process.env.BE_TRIGGER_R || '1.25');
+// v5.55 (2026-08-03): REVERTED 1.25 → 1.0. Weekly re-validation (counterfactual-exit-structure.js,
+// 40 NEW RTs since 2026-06-10 baseline) flipped: on the fresh slice BE@1.0 +$15.21 vs BE@1.25 −$23.45
+// (n=29), and BE@1.0 also wins the full 90d ALL sample (+$5.43 vs −$2.60). Edge lives in CL (+$129 vs
+// +$103); BE@1.25's only win was BTC (n=10, +$9) — too thin to keep the wider setting. See
+// revalidation-2026-08-03.md. Reverses the v5.36 bump below.
+const BE_TRIGGER_R    = parseFloat(process.env.BE_TRIGGER_R || '1.0');
 // v5.36 (2026-06-10): CLOID TAGGING — every bot order carries a client order ID with a
 // "DMS\0" prefix (0x444d5300 + 6-byte timestamp + 6-byte random = 16 bytes). Fills inherit
 // the cloid, so bot-vs-manual classification becomes EXACT instead of the notional×1.05
@@ -3934,7 +3939,7 @@ async function checkDailySummary() {
 let lastScanTs = 0;
 let scanCount  = 0;
 const BOT_STARTED_AT = Date.now();
-const BOT_VERSION    = 'v5.54'; // v5.54 (2026-07-27): PLAYBOOK HARDENING after live audit — DBL config-disabled (0/4 start, avg −1.49R vs −1.0R design: weekend/reopen stop slippage is structural, worst −2.26R at Sun CME reopen; crude regime flipped down and DBL buys falling knives); CME-closed guard blocks NEW playbook entries Fri 20:45→Sun 22:15 UTC; auto-bench min trades 10→6. TBL untouched (+0.99R avg live, on-script). See playbook.js PB_COINS comment. // v5.53 (2026-07-27): CRUDE TRIM — retest equityPct 2.40→1.20 (0.6% risk) in coins-config.js; reverses the v5.44 conviction bump after 90d PF decayed to ~0.99 breakeven (crude-edge-decay 2026-07-21). PLAYBOOK crude legs unaffected (flat PLAYBOOK_RISK_PCT). No logic change. // v5.52 (2026-07-25): SP500 LONG-ONLY — block SHORT auto-entries on longOnly assets (SP500) in maybeAutoTrade; shorts logged to .missed_signals.json for monthly audit. Retest short-side was the book's biggest drag (SP500 shorts 90d PF 0.23 / −$153). XYZ100 kept two-sided. See coins-config.js longOnly + entry-strategy-review-2026-07-23.md. // v5.51 (2026-07-23): PLAYBOOK engine — TBL (crude+xyz100) + DBL (crude) at PLAYBOOK_RISK_PCT (2%), closed-1H-bar detection, flat bracket SL 1×ATR / TP 2-4×ATR, auto-bench at −8R/20, kill via PLAYBOOK=off. See playbook.js + trade-playbook-2026-07-23.md.
+const BOT_VERSION    = 'v5.55'; // v5.55 (2026-08-03): BE_TRIGGER_R reverted 1.25 → 1.0 after weekly re-validation (40 new RTs; BE@1.0 +$15.21 vs BE@1.25 −$23.45 on fresh slice, and wins full 90d sample). Reverses the v5.36 bump. See revalidation-2026-08-03.md. // v5.54 (2026-07-27): PLAYBOOK HARDENING after live audit — DBL config-disabled (0/4 start, avg −1.49R vs −1.0R design: weekend/reopen stop slippage is structural, worst −2.26R at Sun CME reopen; crude regime flipped down and DBL buys falling knives); CME-closed guard blocks NEW playbook entries Fri 20:45→Sun 22:15 UTC; auto-bench min trades 10→6. TBL untouched (+0.99R avg live, on-script). See playbook.js PB_COINS comment. // v5.53 (2026-07-27): CRUDE TRIM — retest equityPct 2.40→1.20 (0.6% risk) in coins-config.js; reverses the v5.44 conviction bump after 90d PF decayed to ~0.99 breakeven (crude-edge-decay 2026-07-21). PLAYBOOK crude legs unaffected (flat PLAYBOOK_RISK_PCT). No logic change. // v5.52 (2026-07-25): SP500 LONG-ONLY — block SHORT auto-entries on longOnly assets (SP500) in maybeAutoTrade; shorts logged to .missed_signals.json for monthly audit. Retest short-side was the book's biggest drag (SP500 shorts 90d PF 0.23 / −$153). XYZ100 kept two-sided. See coins-config.js longOnly + entry-strategy-review-2026-07-23.md. // v5.51 (2026-07-23): PLAYBOOK engine — TBL (crude+xyz100) + DBL (crude) at PLAYBOOK_RISK_PCT (2%), closed-1H-bar detection, flat bracket SL 1×ATR / TP 2-4×ATR, auto-bench at −8R/20, kill via PLAYBOOK=off. See playbook.js + trade-playbook-2026-07-23.md.
 
 async function scanAll(){
   const coins = Object.keys(COINS);
