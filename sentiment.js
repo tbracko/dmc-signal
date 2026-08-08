@@ -100,6 +100,23 @@ const RISKOFF_HI  = parseFloat(process.env.SENTIMENT_RISKOFF_HI || '65');
 const RISKOFF_LO  = parseFloat(process.env.SENTIMENT_RISKOFF_LO || '35');
 const BIAS_BLOCK  = parseFloat(process.env.SENTIMENT_BIAS_BLOCK || '40');
 
+// v5.57 (2026-08-08): RELATIVE-STRESS RECALIBRATION — shadow-only, additive, reversible.
+// Problem (measured Jul-Aug over 131 logged signals): riskOff pinned high — avg 89,
+// min 55, max 100 — so it never discriminated (RISK-OFF rubber-stamped everything).
+// Root cause: newsRiskOff = 50 + 50·tanh(Σbuckets/60). In the persistent Iran-war +
+// tariff + fed regime, 4-5 buckets sit near BUCKET_CAP simultaneously so Σ ≫ 60 at
+// all times → tanh saturates ≈1 → meter stuck ~92-96; the ±25 tape nudge can't unpin it.
+// Fix: keep the absolute score as rawRiskOff, but the OPERATIVE riskOff becomes stress
+// RELATIVE to a rolling baseline (EWMA of rawRiskOff). When war is the constant backdrop,
+// baseline≈current → meter sits ~50 (neutral) and only reads high when stress ACCELERATES
+// past its own norm — which is the predictive signal, not the always-red absolute level.
+// SHADOW-safe: GATE_ON is still off by default, and brief()/getState() log BOTH raw and
+// relative so we can validate the recalibrated series in shadow (≥10 blocks, PF<0.7)
+// before ever gating. Disable with SENTIMENT_REL=off to fall back to the raw meter.
+const SENTIMENT_REL  = process.env.SENTIMENT_REL !== 'off';           // default ON (shadow)
+const REL_HALFLIFE_D = parseFloat(process.env.SENTIMENT_REL_HALFLIFE_D || '5');   // baseline memory (days)
+const REL_GAIN       = parseFloat(process.env.SENTIMENT_REL_GAIN || '2.5');       // deviation → points
+
 // ---- Headline classification ----------------------------------------------
 function classify(title) {
   const buckets = [];
@@ -168,6 +185,8 @@ const state = {
   meter: { riskOff: 50, bias: { bitcoin: 0, sp500: 0, xyz100: 0, crude: 0 }, regime: 'NEUTRAL' },
   tape: null,            // v5.48: { bitcoin, sp500, xyz100, crude } 24h returns in %
   newsRiskOff: 50,       // v5.48: pre-tape (news-only) riskOff, kept for transparency
+  rawRiskOff: 50,        // v5.57: absolute post-tape score (pre relative-stress transform)
+  riskOffEwma: null,     // v5.57: rolling baseline of rawRiskOff (EWMA, ~REL_HALFLIFE_D days)
   topEvents: [], updatedAt: 0, scanCount: 0, lastError: null,
 };
 
@@ -241,7 +260,22 @@ function recompute() {
       if (Number.isFinite(t[k])) bias[k] = clamp(bias[k] + Math.round(25 * Math.tanh(t[k] / 2)), -100, 100);
     }
   }
-  state.meter = { riskOff, bias, regime: 'NEUTRAL' };
+  // v5.57: `riskOff` so far is the absolute post-tape score — keep it as rawRiskOff.
+  state.rawRiskOff = riskOff;
+  // Roll the baseline (time-aware EWMA so scan-interval jitter doesn't matter).
+  const prevT = state.updatedAt || now;
+  const dtMs = Math.max(0, now - prevT);
+  const alpha = state.riskOffEwma == null ? 1
+    : 1 - Math.pow(0.5, dtMs / (REL_HALFLIFE_D * 86400000));
+  state.riskOffEwma = state.riskOffEwma == null ? riskOff
+    : state.riskOffEwma + alpha * (riskOff - state.riskOffEwma);
+  // Operative riskOff = deviation from baseline, recentered on 50. Shadow-only.
+  const relRiskOff = clamp(Math.round(50 + REL_GAIN * (riskOff - state.riskOffEwma)), 0, 100);
+  const opRiskOff = SENTIMENT_REL ? relRiskOff : riskOff;
+
+  state.meter = { riskOff: opRiskOff, bias, regime: 'NEUTRAL' };
+  state.meter.raw = riskOff;                          // absolute (old meter), for transparency
+  state.meter.baseline = Math.round(state.riskOffEwma);
   state.meter.regime = state.meter.riskOff >= RISKOFF_HI ? 'RISK-OFF' : state.meter.riskOff <= RISKOFF_LO ? 'RISK-ON' : 'NEUTRAL';
   state.bucketCounts = Object.fromEntries(Object.entries(cnt).map(([b, v]) => [b, +v.toFixed(1)])); // decayed counts — proves a story category was scored even when not a top driver
   state.topEvents = contributors.sort((a, b) => b.mag - a.mag).slice(0, 8)
@@ -299,7 +333,12 @@ function gateVerdict(coinId, side) {
   return { block, reason, gateOn: GATE_ON, riskOff: m.riskOff, bias, regime: m.regime };
 }
 function brief() { // compact snapshot attached to every entry-signal log record
-  return { riskOff: state.meter.riskOff, regime: state.meter.regime, bias: state.meter.bias, at: state.updatedAt };
+  // v5.57: log BOTH the operative (relative) riskOff and the raw/baseline so the
+  // recalibration can be validated in shadow against the old absolute series.
+  return {
+    riskOff: state.meter.riskOff, regime: state.meter.regime, bias: state.meter.bias, at: state.updatedAt,
+    raw: state.rawRiskOff, baseline: state.meter.baseline, rel: SENTIMENT_REL,
+  };
 }
 function getState() {
   return { ...state.meter, gateOn: GATE_ON, topEvents: state.topEvents, bucketCounts: state.bucketCounts || {},
