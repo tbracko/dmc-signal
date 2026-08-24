@@ -2891,13 +2891,14 @@ async function maybeAutoTrade(coinId, tfIdx, dmsResult, allResults, entryCandles
   // SP500 shorts are the book's single biggest drag (90d: 10 RTs / 30% win / PF 0.23 / −$153;
   // ungated retest core −6.1R/7 over 65d), while SP500 longs are breakeven-to-positive over the
   // same window. Shorts were never quality-gated (longs face regime+session caps since v5.4), so
-  // this closes the asymmetry. Applies to any coin with longOnly:true in coins-config.js — currently
-  // SP500 only (XYZ100 kept two-sided per Tomaž, Jul-25). Blocked shorts are logged to
+  // this closes the asymmetry. Applies to any coin with longOnly:true in coins-config.js — as of
+  // v5.57 (2026-08-24) that is BTC/SP500/CRUDE/XYZ100 (all four; extended from SP500-only after the
+  // 60d entry-cloid-paired review showed retest shorts −$185 book-wide). Blocked shorts are logged to
   // .missed_signals.json so the rule can be counterfactual-audited monthly; if a quarter of blocked
   // shorts start winning, revisit. See entry-strategy-review-2026-07-23.md.
   if (d.sig === 'SHORT' && COINS[coinId].longOnly) {
-    console.log(`HL auto-trade BLOCKED ${sym} SHORT: longOnly asset — index short-side blocked (v5.52)`);
-    logMissedSignal(coinId, d.sig, conf, 'long-only-block', { htfDir: s.htfDir || 'UNCLEAR', storyDir: s.storyDir || 'UNCLEAR', conf, filter: 'v5.52 longOnly — SP500 shorts blocked' });
+    console.log(`HL auto-trade BLOCKED ${sym} SHORT: longOnly asset — short-side blocked (v5.57)`);
+    logMissedSignal(coinId, d.sig, conf, 'long-only-block', { htfDir: s.htfDir || 'UNCLEAR', storyDir: s.storyDir || 'UNCLEAR', conf, filter: 'v5.57 longOnly — short auto-entry blocked' });
     return;
   }
 
@@ -3800,10 +3801,10 @@ async function scanCoin(coinId){
           // v5.52 (2026-07-25): LONG-ONLY assets — block SHORT entries in the MULTI-TF path too.
           // This path calls executeTrade directly and BYPASSES maybeAutoTrade, so the longOnly
           // gate must be repeated here (same class as the v5.0.1 session/ranging fixes below).
-          // SP500 only. Logged to .missed_signals.json for the monthly blocked-shorts audit.
+          // BTC/SP500/CRUDE/XYZ100 (v5.57). Logged to .missed_signals.json for the monthly blocked-shorts audit.
           if (sig === 'SHORT' && COINS[coinId].longOnly) {
-            console.log(`HL MULTI-TF BLOCKED ${COINS[coinId].label} SHORT: longOnly asset — index short-side blocked (v5.52)`);
-            logMissedSignal(coinId, sig, 80, 'long-only-block', { path: 'multi-tf', filter: 'v5.52 longOnly — SP500 shorts blocked' });
+            console.log(`HL MULTI-TF BLOCKED ${COINS[coinId].label} SHORT: longOnly asset — short-side blocked (v5.57)`);
+            logMissedSignal(coinId, sig, 80, 'long-only-block', { path: 'multi-tf', filter: 'v5.57 longOnly — short auto-entry blocked' });
             break;
           }
           // v5.4: SP500 session-scaled sizing (replaces outside-US hard block in MULTI-TF path too).
